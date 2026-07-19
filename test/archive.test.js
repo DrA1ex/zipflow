@@ -60,3 +60,21 @@ test('rejects case-colliding entries before they can overwrite each other', asyn
     /duplicate or case-colliding paths/,
   );
 });
+
+test('extracts ordinary dotfiles instead of treating them as hidden metadata', async () => {
+  const root = await tempDir('zipflow-archive-dotfiles-');
+  const archive = path.join(root, 'dotfiles.zip');
+  await createZip(archive, {
+    '.DS_Store': 'not ignored by Zipflow itself',
+    '.config/tool.json': '{"enabled":true}',
+    '.github/workflows/test.yml': 'name: test\n',
+  });
+
+  const extracted = await extractArchive(archive, path.join(root, 'out-dotfiles'));
+
+  assert.deepEqual(extracted.entries.map((item) => item.relativePath), [
+    '.DS_Store',
+    '.config/tool.json',
+    '.github/workflows/test.yml',
+  ]);
+});

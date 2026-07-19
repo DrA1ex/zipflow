@@ -24,21 +24,25 @@ test('version 1 workflows load with deployment and archive-message defaults', as
       projectLabels: ['Node.js'],
       archive: { mode: 'overlay' },
       deletion: { scope: 'tracked-only' },
-      exclude: ['node_modules/**'],
+      exclude: ['node_modules/**', '.env', '.env.*', '.venv/**', '.DS_Store'],
       checks: [],
       policy: { id: 'practical', label: 'Practical' },
       git: { checkpoint: 'ask', resultCommit: 'ask', messageStrategy: 'generated' },
     });
 
     const loaded = await loadWorkflow(projectPath);
-    assert.equal(loaded.version, 4);
+    assert.equal(loaded.version, 6);
     assert.equal(loaded.deploy.policy, 'disabled');
     assert.equal(loaded.git.messageStrategy, 'generated');
     assert.ok(loaded.exclude.includes('.commit_message'));
+    assert.equal(loaded.exclude.includes('.env'), true);
+    assert.equal(loaded.exclude.includes('.env.*'), true);
+    assert.equal(loaded.exclude.includes('.venv/**'), true);
+    assert.equal(loaded.exclude.includes('.DS_Store'), true);
     assert.equal(loaded.archive.allowGitIgnoredIncomingFiles, 'no');
 
     const saved = await saveWorkflow(loaded);
-    assert.equal(saved.version, 4);
+    assert.equal(saved.version, 6);
   } finally {
     delete process.env.ZIPFLOW_HOME;
   }

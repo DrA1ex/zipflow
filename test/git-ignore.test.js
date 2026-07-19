@@ -10,8 +10,8 @@ import {
 import { discoverProject } from '../src/project/detect.js';
 import { tempDir, writeFiles } from '../test-support/helpers.js';
 
-test('recommended gitignore is idempotent', async () => {
-  const root = await tempDir('zipflow-ignore-idempotent-');
+test('recommended gitignore is created only when the file is missing', async () => {
+  const root = await tempDir('zipflow-ignore-create-');
   await writeFiles(root, { 'package.json': '{}\n' });
   const project = await discoverProject(root);
 
@@ -20,16 +20,39 @@ test('recommended gitignore is idempotent', async () => {
   const second = await addRecommendedGitignore(project);
   const after = await readFile(path.join(root, '.gitignore'), 'utf8');
 
+  assert.equal(first.created, true);
   assert.equal(first.changed, true);
+  assert.equal(second.created, false);
   assert.equal(second.changed, false);
+  assert.equal(second.existing, true);
   assert.equal(after, before);
+  assert.match(after, /node_modules\//);
 });
 
-test('existing user negation rules remain effective after recommendations are added', async () => {
-  const root = await tempDir('zipflow-ignore-negation-');
+test('an existing gitignore is preserved byte-for-byte', async () => {
+  const root = await tempDir('zipflow-ignore-existing-');
+  const original = '# User-owned rules\r\n!important.log\r\ncustom-cache/\r\n';
   await writeFiles(root, {
     'package.json': '{}\n',
-    '.gitignore': '!important.log\n',
+    '.gitignore': original,
+  });
+  const project = await discoverProject(root);
+
+  const result = await addRecommendedGitignore(project);
+  const after = await readFile(path.join(root, '.gitignore'), 'utf8');
+
+  assert.equal(result.created, false);
+  assert.equal(result.changed, false);
+  assert.equal(result.existing, true);
+  assert.equal(after, original);
+});
+
+test('the matcher uses existing user rules without Zipflow modifying them', async () => {
+  const root = await tempDir('zipflow-ignore-matcher-');
+  const original = '*.log\n!important.log\n';
+  await writeFiles(root, {
+    'package.json': '{}\n',
+    '.gitignore': original,
   });
   const project = await discoverProject(root);
 
@@ -39,7 +62,7 @@ test('existing user negation rules remain effective after recommendations are ad
 
   assert.equal(matcher('debug.log'), true);
   assert.equal(matcher('important.log'), false);
-  assert.ok(text.indexOf('*.log') < text.indexOf('!important.log'));
+  assert.equal(text, original);
 });
 
 test('recommended groups include every detected technology without duplicate base groups', async () => {

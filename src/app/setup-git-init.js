@@ -68,7 +68,7 @@ async function activateInit(controller, itemId) {
   controller.state.project = await discoverProject(controller.state.project.root);
   controller.state.draft.projectPath = controller.state.project.root;
   controller.message('Git repository initialized', [controller.state.project.root], 'success');
-  showGitignoreStep(controller);
+  return showGitignoreStep(controller);
 }
 
 async function showGitignoreStep(controller) {
@@ -76,18 +76,33 @@ async function showGitignoreStep(controller) {
   const existsAlready = await exists(target);
   const patternCount = recommendedGitignoreGroups(controller.state.project)
     .reduce((total, group) => total + group.patterns.length, 0);
+  if (existsAlready) {
+    controller.showMenu('setup-gitignore', [
+      {
+        id: 'gitignore-existing',
+        label: 'Use the existing .gitignore unchanged',
+        description: 'Zipflow never rewrites or appends to an existing .gitignore.',
+      },
+      {
+        id: 'gitignore-view',
+        label: 'Review recommended groups only',
+        description: 'Show suggestions in Activity without changing the existing file.',
+      },
+    ], 'Existing .gitignore found');
+    return;
+  }
   controller.showMenu('setup-gitignore', [
     {
       id: 'gitignore-add',
-      label: existsAlready ? 'Add recommended rules to .gitignore' : 'Create a recommended .gitignore',
-      description: `${patternCount} base and project-specific rules for caches, metadata, IDE files, build output, and local settings. Existing rules stay untouched.`,
+      label: 'Create a recommended .gitignore',
+      description: `${patternCount} base and project-specific rules for caches, metadata, IDE files, build output, and local settings.`,
     },
     {
       id: 'gitignore-view',
       label: 'Review recommended groups',
       description: 'Show the categories in Activity before deciding.',
     },
-    { id: 'gitignore-skip', label: 'Leave .gitignore unchanged' },
+    { id: 'gitignore-skip', label: 'Continue without creating .gitignore' },
   ], 'Protect local and generated files');
 }
 
@@ -98,12 +113,14 @@ async function activateGitignore(controller, itemId) {
   }
   if (itemId === 'gitignore-add') {
     const result = await addRecommendedGitignore(controller.state.project);
-    controller.message(result.changed ? '.gitignore updated' : '.gitignore already covers the recommendations', [
-      result.changed ? `${result.addedCount} rules added without replacing existing content.` : 'No new rules were needed.',
+    controller.message(result.created ? '.gitignore created' : 'Existing .gitignore kept unchanged', [
+      result.created
+        ? `${result.addedCount} recommended rules were written to the new file.`
+        : 'The file appeared before creation completed, so Zipflow left it untouched.',
     ], 'success');
     return showInitialCommitStep(controller);
   }
-  if (itemId === 'gitignore-skip') return showInitialCommitStep(controller);
+  if (itemId === 'gitignore-existing' || itemId === 'gitignore-skip') return showInitialCommitStep(controller);
 }
 
 function showInitialCommitStep(controller) {

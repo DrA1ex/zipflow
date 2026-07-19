@@ -1,8 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import path from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { createInitialState } from '../src/app/state.js';
 import { ZipflowController } from '../src/app/controller.js';
 import { activateSetup, beginSetup } from '../src/app/setup-flow.js';
+import { discoverProject } from '../src/project/detect.js';
+import { tempDir, writeFiles } from '../test-support/helpers.js';
 
 function projectFixture() {
   return {
@@ -83,4 +87,29 @@ test('projects without Git are offered initialization before workflow checks', a
   assert.equal(state.screen, 'setup-checks');
   assert.equal(state.draft.git.checkpoint, 'never');
   assert.equal(state.draft.git.resultCommit, 'never');
+});
+
+
+test('Git initialization never offers to rewrite an existing gitignore', async () => {
+  const root = await tempDir('zipflow-setup-existing-ignore-');
+  const original = '# Keep exactly this file\ncustom-cache/\n';
+  await writeFiles(root, {
+    'package.json': '{"name":"fixture"}\n',
+    '.gitignore': original,
+  });
+  const state = createInitialState();
+  state.project = await discoverProject(root);
+  const controller = new ZipflowController(state);
+
+  await beginSetup(controller, { fresh: true });
+  await activateSetup(controller, 'use-project');
+  await activateSetup(controller, 'git-init');
+
+  assert.equal(state.screen, 'setup-gitignore');
+  assert.equal(state.menuItems.some((item) => item.id === 'gitignore-add'), false);
+  assert.equal(state.menuItems[0].id, 'gitignore-existing');
+
+  await activateSetup(controller, 'gitignore-existing');
+  assert.equal(await readFile(path.join(root, '.gitignore'), 'utf8'), original);
+  assert.equal(state.screen, 'setup-initial-commit');
 });

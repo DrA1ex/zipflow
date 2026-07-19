@@ -30,7 +30,8 @@ Owns the interactive state machine.
 - `run-postcheck.js` owns checks, result commits, deployment, and successful completion.
 - `run-rollback.js` owns run details and exact rollback.
 - `run-lifecycle.js` owns cancellation, failure reporting, locks, and temporary cleanup.
-- `settings-panel.js` owns the global two-pane settings interaction and guarded text editors for tokens, paths, retention, and size limits.
+- `settings-panel.js` owns global settings navigation, modal editor state, validation, persistence, and model refreshes.
+- `settings-options.js` declares stable left-pane sections, dependent right-pane controls, and reusable field metadata for modal editors.
 - `llm-progress.js` maps streaming model events into a transient Activity view.
 - `archive-policy.js` applies the global source-ZIP disposition after a run is kept.
 - `export-flow.js` owns the interactive Create ZIP workflow.
@@ -86,7 +87,7 @@ Validates and extracts ZIP archives into an isolated temporary directory. It rej
 
 Compares extracted files with the local project, classifies changes, applies exclusions, calculates snapshot deletions, and intersects the result with Git status to identify real conflicts.
 
-Incoming paths matched by `.gitignore` and every `.zipflow/` path are skipped unconditionally. Snapshot deletion also preserves ignored files.
+Incoming paths matched by `.gitignore` and every `.zipflow/` path are skipped unconditionally. Snapshot deletion also preserves ignored files. Dot-prefixed names receive no special treatment: they are planned, applied, deleted, and exported like any other path unless protected explicitly or ignored by Git.
 
 Tracked-only snapshot mode reports untracked missing files as `preserved`. Managed-history mode reports paths not previously created or updated by Zipflow as `preserved`. This makes each non-deletion explicit in Activity and reports.
 
@@ -125,7 +126,7 @@ The setup wizard follows this order:
 ```text
 project
   -> optional git init
-  -> optional recommended .gitignore
+  -> create a recommended .gitignore only when none exists
   -> optional first commit
   -> checks
   -> conflict policy
@@ -139,7 +140,7 @@ project
   -> review and atomic workflow replacement
 ```
 
-Dependent settings are omitted when their parent feature is disabled. Menu rerenders preserve selection by item identifier rather than resetting to the first item.
+The left settings list is stable. Dependent controls are omitted from the right pane when their parent feature is disabled, and input-like values open in a modal without replacing the settings screen. Rerenders preserve selection by item identifier rather than resetting to the first item.
 
 ## Run lifecycle
 
@@ -182,6 +183,8 @@ The following rules are enforced below the UI layer:
 - case-colliding paths are rejected before extraction can overwrite data;
 - archive control files and the complete `.zipflow/` tree are not applied to the project;
 - files matched by `.gitignore` are not created, updated, or deleted;
+- an existing `.gitignore` is never rewritten or extended;
+- dotfiles and dot-directories are synchronized normally unless protected, ignored, or part of the permanent safety set (`.env`, `.env.*`, `.venv/**`, `.DS_Store`);
 - protected and untracked ignored paths are removed from result-commit staging;
 - local LLM failures are recorded but cannot block planning or application;
 - API tokens are used only in request headers and are not copied into Activity or run reports;

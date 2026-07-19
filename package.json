@@ -1,6 +1,6 @@
 {
   "name": "zipflow",
-  "version": "0.5.0",
+  "version": "0.5.2",
   "description": "Interactive terminal workflow for safely applying source archives",
   "type": "module",
   "bin": {

@@ -37,7 +37,7 @@ zipflow
 
 Zipflow determines the current project root, scans its project files, and prepares a recommended workflow.
 
-If the directory is not a Git repository, Zipflow first offers to initialize it. After `git init`, it can create or extend a project-aware `.gitignore` and then add the existing non-ignored files to a first commit. Continuing without Git remains possible.
+If the directory is not a Git repository, Zipflow first offers to initialize it. After `git init`, it can create a project-aware `.gitignore` only when the file does not already exist, and then add the existing non-ignored files to a first commit. An existing `.gitignore` is always preserved byte-for-byte. Continuing without Git remains possible.
 
 The wizard explains the purpose of each stage and lets you review:
 
@@ -50,6 +50,8 @@ The wizard explains the purpose of each stage and lets you review:
 - optional deployment after successful checks.
 
 Recommended choices are already selected. The wizard saves the workflow only after the final confirmation. Starting setup again never removes the current workflow before its replacement is successfully saved.
+
+Dotfiles and dot-directories are ordinary project paths. Zipflow synchronizes paths such as `.github/`, `.config/`, and other dot-prefixed files unless the project's existing `.gitignore` excludes them. A small permanent safety set remains enabled for every workflow: `.env`, `.env.*`, `.venv/**`, and `.DS_Store`. Protected `.git/`, `.zipflow/`, and supported archive control files are also never applied.
 
 ## Checks and custom commands
 
@@ -181,7 +183,7 @@ Deployment stdout, stderr, exit code, and duration are saved in the run report. 
 
 ## Global settings
 
-Press `Ctrl+B` to open a two-pane settings panel. These settings are global and apply to every project.
+Press `Ctrl+B` to open a two-pane settings panel. These settings are global and apply to every project. The left pane remains stable; dependent controls appear in the right pane under their parent setting instead of adding new rows on the left. Text, secret, path, and numeric values are edited in compact modal dialogs over the settings panel.
 
 Current settings include:
 
@@ -192,7 +194,7 @@ Current settings include:
 - a model fetched from the selected server's model list;
 - the language used for generated summaries and commit messages;
 - the post-run source ZIP policy: leave in place, move to archive storage, or delete;
-- archive directory, retention period, and maximum managed archive size when move mode is enabled;
+- archive directory, retention period in days, and maximum managed archive size when move mode is enabled;
 - a guarded action to reset the current project's managed-file history.
 
 Settings are saved immediately in:
@@ -210,7 +212,7 @@ Global settings control what happens to the uploaded source archive after an upd
 - **Move to archive storage** — move it to `~/zipflow-archive` by default;
 - **Delete source ZIP** — remove it after completion.
 
-Move mode creates its directory when selected or first used. The default retention is 30 days and the default maximum size is 1 GB. Cleanup removes the oldest entries first, but it only touches archives recorded in Zipflow's own archive index. Unrelated files in the same directory are never deleted. Cancelled runs, failures before application, and rollbacks before a run is kept do not consume the source archive.
+Move mode creates its directory when selected or first used. Its directory, retention, and size controls appear in the same right-hand pane as the move policy. Retention accepts whole days; maximum size accepts B, KB, MB, GB, KiB, MiB, or GiB. The default retention is 30 days and the default maximum size is 1 GB. Cleanup removes the oldest entries first, but it only touches archives recorded in Zipflow's own archive index. Unrelated files in the same directory are never deleted. Cancelled runs, failures before application, and rollbacks before a run is kept do not consume the source archive.
 
 ## Supported project detection
 

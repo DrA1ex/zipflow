@@ -19,6 +19,8 @@ test('ZIP export modes distinguish tracked, ignored, selected, and all files', a
   await initGit(root);
   await writeFiles(root, {
     'notes.txt': 'untracked\n',
+    '.env.example': 'SAFE=1\n',
+    '.github/workflows/test.yml': 'name: test\n',
     'ignored/cache.txt': 'ignored\n',
     'debug.log': 'ignored\n',
     '.zipflow/private.txt': 'protected\n',
@@ -26,13 +28,15 @@ test('ZIP export modes distinguish tracked, ignored, selected, and all files', a
   const project = await discoverProject(root);
 
   assert.deepEqual(await collectExportPaths({ project, mode: 'tracked' }), ['.gitignore', 'package.json', 'src/index.js']);
-  assert.deepEqual(await collectExportPaths({ project, mode: 'nonignored' }), ['.gitignore', 'notes.txt', 'package.json', 'src/index.js']);
+  assert.deepEqual(await collectExportPaths({ project, mode: 'nonignored' }), ['.env.example', '.github/workflows/test.yml', '.gitignore', 'notes.txt', 'package.json', 'src/index.js']);
   assert.deepEqual(await collectExportPaths({ project, mode: 'interactive', selectedRoots: ['src'] }), ['src/index.js']);
-  assert.deepEqual(await collectExportPaths({ project, mode: 'all' }), ['.gitignore', 'debug.log', 'ignored/cache.txt', 'notes.txt', 'package.json', 'src/index.js']);
+  assert.deepEqual(await collectExportPaths({ project, mode: 'all' }), ['.env.example', '.github/workflows/test.yml', '.gitignore', 'debug.log', 'ignored/cache.txt', 'notes.txt', 'package.json', 'src/index.js']);
 
   const topLevel = await listExportTopLevel(root);
   assert.equal(topLevel.some((entry) => entry.name === '.git'), false);
   assert.equal(topLevel.some((entry) => entry.name === '.zipflow'), false);
+  assert.equal(topLevel.some((entry) => entry.name === '.env.example'), true);
+  assert.equal(topLevel.some((entry) => entry.name === '.github'), true);
 });
 
 test('created project ZIP can carry the standard Zipflow commit message metadata', async () => {

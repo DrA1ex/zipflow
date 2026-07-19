@@ -1,18 +1,18 @@
 import path from 'node:path';
+import { handleInputEditorKey } from 'terlio.js';
 import { listLocalModels, providerDefinition } from '../llm/client.js';
 import { loadManagedHistory, resetManagedHistory } from '../history/managed.js';
-import { LLM_LANGUAGES, saveSettings, THEME_NAMES } from '../settings/store.js';
+import { saveSettings } from '../settings/store.js';
 import { ensureDir } from '../utils/fs.js';
-import { displayPath, expandHome } from '../utils/paths.js';
-import { formatByteSize, parseByteSize } from '../utils/size.js';
+import { completePath, expandHome } from '../utils/paths.js';
+import { parseByteSize } from '../utils/size.js';
 import { setScreen } from './state.js';
+import {
+  settingsDefinitions, settingsEditorValue, settingsFieldDefinition, settingsOptions,
+} from './settings-options.js';
 
 export function isSettingsScreen(screen) {
   return screen === 'settings';
-}
-
-export function isSettingsEditorScreen(screen) {
-  return screen === 'settings-input';
 }
 
 export async function openSettings(controller) {
@@ -35,7 +35,7 @@ export async function openSettings(controller) {
     loadingModels: false,
     managedCount: history.paths.length,
     confirmHistoryReset: false,
-    editorField: null,
+    modal: null,
   };
   setScreen(state, 'settings', { status: 'Global settings' });
   controller.invalidate();
@@ -58,70 +58,56 @@ export function closeSettings(controller) {
 
 export function backSettingsEditor(controller) {
   const panel = controller.state.settingsPanel;
-  if (!panel) return controller.showHome();
-  panel.editorField = null;
-  setScreen(controller.state, 'settings', { status: 'Global settings' });
+  if (!panel?.modal) return;
+  panel.modal = null;
+  controller.state.status = 'Global settings';
   controller.invalidate();
 }
 
 export async function submitSettingsEditor(controller) {
   const { state } = controller;
-  const field = state.settingsPanel?.editorField;
-  if (!field) return false;
+  const modal = state.settingsPanel?.modal;
+  if (!modal) return false;
   const entered = state.editor.value.trim();
   try {
-    let value = entered;
-    if (field.id === 'archiveDirectory') {
-      if (!entered) throw new Error('Enter an archive directory.');
-      const absolute = path.resolve(expandHome(entered));
-      await ensureDir(absolute);
-      value = entered;
-    } else if (field.id === 'archiveRetentionDays') {
-      value = parseInteger(entered, 'retention days', 0, 36_500);
-    } else if (field.id === 'archiveMaxBytes') {
-      value = parseByteSize(entered);
-    } else if (field.id === 'llmApiToken') {
-      value = entered;
-    }
-    state.settings = await saveSettings({ ...state.settings, [field.id]: value });
-    state.settingsPanel.editorField = null;
-    setScreen(state, 'settings', { status: `${field.label} saved` });
-    if (field.id === 'llmApiToken') {
-      state.settingsPanel.models = [];
-      state.settingsPanel.modelsProvider = null;
-      state.settingsPanel.modelError = null;
-    }
-    state.settingsPanel.optionIndex = optionIndexFor(state, currentDefinition(state));
+    const value = await validateSettingValue(modal.field, entered);
+    state.settings = await saveSettings({ ...state.settings, [modal.field.id]: value });
+    if (modal.field.id === 'llmApiToken') resetModelCache(state.settingsPanel);
+    state.settingsPanel.modal = null;
+    state.settingsPanel.optionIndex = findOptionIndex(state, modal.returnOptionId);
+    state.status = `${modal.field.label} saved`;
     controller.invalidate();
     return true;
   } catch (error) {
-    controller.setStatus(error.message);
+    modal.error = error.message;
+    state.status = error.message;
+    controller.invalidate();
     return true;
   }
 }
 
 export async function handleSettingsKey(controller, key) {
-  const { state } = controller;
-  const panel = state.settingsPanel;
+  const panel = controller.state.settingsPanel;
   if (!panel) return false;
-  if (key.name === 'escape' || (key.ctrl && key.name === 'b')) {
+  if (panel.modal) return handleModalKey(controller, key);
+  if (key.name === 'escape') {
     closeSettings(controller);
     return true;
   }
   if (key.name === 'left' || key.name === 'right' || key.name === 'tab') {
     panel.focus = panel.focus === 'settings' ? 'options' : 'settings';
-    panel.optionIndex = optionIndexFor(state, currentDefinition(state));
+    panel.optionIndex = preferredOptionIndex(controller.state);
     controller.invalidate();
     return true;
   }
   if (key.name === 'up' || key.name === 'down') {
     const delta = key.name === 'up' ? -1 : 1;
     if (panel.focus === 'settings') {
-      panel.settingIndex = wrap(panel.settingIndex + delta, definitionsFor(state).length);
-      panel.optionIndex = optionIndexFor(state, currentDefinition(state));
-      await ensureDefinitionData(controller, currentDefinition(state));
+      panel.settingIndex = wrap(panel.settingIndex + delta, settingsDefinitions(controller.state).length);
+      panel.optionIndex = preferredOptionIndex(controller.state);
+      await ensureDefinitionData(controller, currentDefinition(controller.state));
     } else {
-      panel.optionIndex = wrap(panel.optionIndex + delta, optionsFor(state, currentDefinition(state)).length);
+      panel.optionIndex = moveOption(controller.state, panel.optionIndex, delta);
     }
     controller.invalidate();
     return true;
@@ -129,8 +115,8 @@ export async function handleSettingsKey(controller, key) {
   if (key.name === 'enter' || key.name === 'space') {
     if (panel.focus === 'settings') {
       panel.focus = 'options';
-      await ensureDefinitionData(controller, currentDefinition(state));
-      panel.optionIndex = optionIndexFor(state, currentDefinition(state));
+      await ensureDefinitionData(controller, currentDefinition(controller.state));
+      panel.optionIndex = preferredOptionIndex(controller.state);
       controller.invalidate();
       return true;
     }
@@ -143,57 +129,85 @@ export async function handleSettingsKey(controller, key) {
 export async function selectSetting(controller, index) {
   const panel = controller.state.settingsPanel;
   if (!panel) return;
-  panel.settingIndex = clamp(index, 0, definitionsFor(controller.state).length - 1);
+  panel.settingIndex = clamp(index, 0, settingsDefinitions(controller.state).length - 1);
   panel.focus = 'settings';
   await ensureDefinitionData(controller, currentDefinition(controller.state));
-  panel.optionIndex = optionIndexFor(controller.state, currentDefinition(controller.state));
+  panel.optionIndex = preferredOptionIndex(controller.state);
   controller.invalidate();
 }
 
 export async function selectOption(controller, index) {
   const panel = controller.state.settingsPanel;
   if (!panel) return;
-  panel.optionIndex = clamp(index, 0, optionsFor(controller.state, currentDefinition(controller.state)).length - 1);
+  panel.optionIndex = clamp(index, 0, optionsFor(controller.state).length - 1);
   panel.focus = 'options';
   await activateOption(controller, panel.optionIndex);
 }
 
 export function settingsViewModel(state) {
-  const definitions = definitionsFor(state);
-  const definition = currentDefinition(state);
+  const definitions = settingsDefinitions(state);
+  const selectedSetting = currentDefinition(state);
   return {
     definitions,
+    selectedSetting,
+    options: settingsOptions(state, selectedSetting),
     settingIndex: state.settingsPanel?.settingIndex ?? 0,
     optionIndex: state.settingsPanel?.optionIndex ?? 0,
     focus: state.settingsPanel?.focus ?? 'settings',
-    options: optionsFor(state, definition),
-    selectedSetting: definition,
+    modal: state.settingsPanel?.modal ?? null,
   };
+}
+
+async function handleModalKey(controller, key) {
+  const { state } = controller;
+  const modal = state.settingsPanel.modal;
+  if (key.name === 'escape') {
+    backSettingsEditor(controller);
+    return true;
+  }
+  if (key.name === 'tab' && modal.field.path) {
+    const completion = await completePath(state.editor.value, {
+      cwd: state.project?.root ?? process.cwd(),
+      directoriesOnly: true,
+    });
+    if (completion.matches.length) {
+      state.editor.set(completion.value);
+      state.status = completion.matches.length === 1 ? 'Path completed' : `${completion.matches.length} matches`;
+    } else state.status = 'No path matches';
+    controller.invalidate();
+    return true;
+  }
+  if (key.name === 'enter') return submitSettingsEditor(controller);
+  modal.error = null;
+  handleInputEditorKey(state.editor, key, { multiline: false });
+  controller.invalidate();
+  return true;
 }
 
 async function activateOption(controller, index) {
   const { state } = controller;
-  const definition = currentDefinition(state);
-  const option = optionsFor(state, definition)[index];
+  const option = optionsFor(state)[index];
   if (!option || option.disabled) return;
   if (option.action === 'refresh-models') return refreshModels(controller);
-  if (option.action === 'edit-setting') return openSettingEditor(controller, definition);
+  if (option.action === 'edit-setting') return openSettingModal(controller, option.fieldId, option.id);
   if (option.action === 'clear-token') {
     state.settings = await saveSettings({ ...state.settings, llmApiToken: '' });
-    state.settingsPanel.models = [];
-    state.settingsPanel.modelsProvider = null;
-    state.settingsPanel.modelError = null;
-    return controller.setStatus('LLM API token cleared');
+    resetModelCache(state.settingsPanel);
+    state.status = 'LLM API token cleared';
+    controller.invalidate();
+    return;
   }
   if (option.action === 'reset-history') {
     state.settingsPanel.confirmHistoryReset = true;
     state.settingsPanel.optionIndex = 0;
-    controller.setStatus('Confirm managed-file history reset');
+    state.status = 'Confirm managed-file history reset';
+    controller.invalidate();
     return;
   }
   if (option.action === 'cancel-history-reset') {
     state.settingsPanel.confirmHistoryReset = false;
-    controller.setStatus('Managed-file history was not changed');
+    state.status = 'Managed-file history was not changed';
+    controller.invalidate();
     return;
   }
   if (option.action === 'confirm-history-reset') {
@@ -201,33 +215,35 @@ async function activateOption(controller, index) {
     state.settingsPanel.managedCount = 0;
     state.settingsPanel.confirmHistoryReset = false;
     controller.message('Managed-file history reset', [`${result.removed} recorded paths removed.`], 'warning');
-    controller.setStatus('Managed-file history reset');
+    state.status = 'Managed-file history reset';
+    controller.invalidate();
     return;
   }
-  state.settings = await saveSettings({ ...state.settings, [definition.id]: option.value });
-  if (definition.id === 'archivePolicy' && option.value === 'move') {
-    await ensureDir(path.resolve(expandHome(state.settings.archiveDirectory)));
-  }
-  normalizePanelIndex(state);
-  if (definition.id === 'llmProvider') {
-    state.settingsPanel.models = [];
-    state.settingsPanel.modelsProvider = null;
-    state.settingsPanel.modelError = null;
-    if (option.value !== 'disabled') await refreshModels(controller, { quiet: true });
-  }
-  controller.setStatus(`${definition.label}: ${option.label}`);
+  if (option.settingId) await applyChoice(controller, option);
 }
 
-function openSettingEditor(controller, definition) {
+async function applyChoice(controller, option) {
   const { state } = controller;
-  state.settingsPanel.editorField = definition;
-  const value = definition.id === 'llmApiToken' ? '' : editorValue(state, definition.id);
-  controller.showEditor('settings-input', {
-    label: definition.editorLabel ?? definition.label,
-    purpose: `settings:${definition.id}`,
-    placeholder: definition.placeholder ?? '',
-    instructions: definition.editorInstructions ?? [],
-  }, value);
+  state.settings = await saveSettings({ ...state.settings, [option.settingId]: option.value });
+  if (option.settingId === 'archivePolicy' && option.value === 'move') {
+    await ensureDir(path.resolve(expandHome(state.settings.archiveDirectory)));
+  }
+  if (option.settingId === 'llmProvider') {
+    resetModelCache(state.settingsPanel);
+    if (option.value !== 'disabled') await refreshModels(controller, { quiet: true });
+  }
+  state.settingsPanel.optionIndex = findOptionIndex(state, option.id);
+  state.status = `${option.label} selected`;
+  controller.invalidate();
+}
+
+function openSettingModal(controller, fieldId, returnOptionId) {
+  const field = settingsFieldDefinition(fieldId);
+  if (!field) return;
+  controller.state.settingsPanel.modal = { field, error: null, returnOptionId };
+  controller.state.editor.set(settingsEditorValue(controller.state, fieldId));
+  controller.state.status = field.label;
+  controller.invalidate();
 }
 
 async function refreshModels(controller, { quiet = false } = {}) {
@@ -242,149 +258,87 @@ async function refreshModels(controller, { quiet = false } = {}) {
     panel.models = await listLocalModels(provider, { apiToken: state.settings.llmApiToken });
     panel.modelsProvider = provider;
     if (!panel.models.includes(state.settings.llmModel)) state.settings = await saveSettings({ ...state.settings, llmModel: '' });
-    if (!quiet) controller.setStatus(`${panel.models.length} ${providerDefinition(provider).label} models available`);
+    if (!quiet) state.status = `${panel.models.length} ${providerDefinition(provider).label} models available`;
   } catch (error) {
     panel.models = [];
     panel.modelsProvider = provider;
     panel.modelError = error.message;
-    if (!quiet) controller.setStatus(error.message);
+    if (!quiet) state.status = error.message;
   } finally {
     panel.loadingModels = false;
-    panel.optionIndex = optionIndexFor(state, currentDefinition(state));
+    panel.optionIndex = preferredOptionIndex(state);
     controller.invalidate();
   }
 }
 
 async function ensureDefinitionData(controller, definition) {
   const panel = controller.state.settingsPanel;
-  if (definition.id === 'llmModel'
+  if (definition.id === 'localLlm'
     && controller.state.settings.llmProvider !== 'disabled'
     && panel.modelsProvider !== controller.state.settings.llmProvider
     && !panel.loadingModels) await refreshModels(controller, { quiet: true });
 }
 
-function definitionsFor(state) {
-  const definitions = [
-    {
-      id: 'theme', label: 'Theme', description: 'Color theme used by every project.',
-      options: THEME_NAMES.map((value) => ({ value, label: titleCase(value) })),
-    },
-    {
-      id: 'checkOutput', label: 'Running check output', description: 'How much command output is shown while checks are still running.',
-      options: [
-        { value: 'compact', label: 'Compact', description: 'Show only check states and durations.' },
-        { value: 'last-line', label: 'Last output line', description: 'Also show the latest non-empty output line.' },
-      ],
-    },
-    {
-      id: 'llmProvider', label: 'Local LLM provider', description: 'Generate a streamed patch summary and proposed commit message after each archive is inspected.',
-      options: [
-        { value: 'disabled', label: 'Disabled', description: 'Do not contact a local LLM server.' },
-        { value: 'ollama', label: 'Ollama', description: 'OpenAI-compatible server at 127.0.0.1:11434.' },
-        { value: 'lmstudio', label: 'LM Studio', description: 'OpenAI-compatible server at 127.0.0.1:1234.' },
-      ],
-    },
-  ];
-  if (state.settings.llmProvider !== 'disabled') definitions.push(
-    { id: 'llmApiToken', label: 'LLM API token', description: tokenDescription(state), input: true, editorLabel: 'LLM API token', placeholder: 'Optional bearer token', editorInstructions: ['Leave the field empty to remove authentication. The token is stored locally in ~/.zipflow/settings.json.'] },
-    { id: 'llmModel', label: 'Local LLM model', description: modelDescription(state) },
-    {
-      id: 'llmLanguage', label: 'LLM response language', description: 'The prompt remains English; summary and commit message use this language.',
-      options: LLM_LANGUAGES.map((value) => ({ value, label: value })),
-    },
-  );
-  definitions.push({
-    id: 'archivePolicy', label: 'Source ZIP after a run', description: 'Choose what Zipflow does with the uploaded source archive after an update is kept.',
-    options: [
-      { value: 'keep', label: 'Do nothing', description: 'Leave the ZIP in its original location.' },
-      { value: 'move', label: 'Move to archive storage', description: 'Move the ZIP and enforce retention and size limits.' },
-      { value: 'delete', label: 'Delete source ZIP', description: 'Delete the uploaded archive after the run is completed.' },
-    ],
-  });
-  if (state.settings.archivePolicy === 'move') definitions.push(
-    { id: 'archiveDirectory', label: 'Archive directory', description: `Current: ${displayArchiveDirectory(state.settings.archiveDirectory)}`, input: true, placeholder: '~/zipflow-archive', editorInstructions: ['The directory is created immediately if it does not exist.'] },
-    { id: 'archiveRetentionDays', label: 'Archive retention', description: `${state.settings.archiveRetentionDays} days · use 0 to disable age-based cleanup`, input: true, placeholder: '30', editorInstructions: ['Only archives moved by Zipflow are eligible for cleanup.'] },
-    { id: 'archiveMaxBytes', label: 'Archive size limit', description: `${formatByteSize(state.settings.archiveMaxBytes)} · use 0 for no size limit`, input: true, placeholder: '1GB', editorInstructions: ['Oldest Zipflow-managed archives are removed first when the limit is exceeded.'] },
-  );
-  if (state.project) definitions.push({
-    id: 'managedHistory', label: 'Managed-file history', description: `${state.settingsPanel?.managedCount ?? 0} paths are recorded for the current project. Snapshot mode can use this list as its deletion boundary.`,
-  });
-  return definitions;
-}
-
-function optionsFor(state, definition) {
-  if (definition.options) return definition.options;
-  if (definition.input) {
-    const options = [{ action: 'edit-setting', label: inputActionLabel(state, definition), description: inputActionDescription(definition) }];
-    if (definition.id === 'llmApiToken' && state.settings.llmApiToken) options.push({ action: 'clear-token', label: 'Clear token' });
-    return options;
+async function validateSettingValue(field, entered) {
+  if (field.id === 'archiveDirectory') {
+    if (!entered) throw new Error('Enter an archive directory.');
+    const absolute = path.resolve(expandHome(entered));
+    await ensureDir(absolute);
+    return entered;
   }
-  if (definition.id === 'llmModel') {
-    const panel = state.settingsPanel;
-    const refresh = { action: 'refresh-models', label: panel?.loadingModels ? 'Loading models…' : 'Refresh available models', disabled: panel?.loadingModels };
-    const models = (panel?.models ?? []).map((model) => ({ value: model, label: model }));
-    if (!models.length) return [refresh, { value: '', label: panel?.modelError ? `Unavailable: ${panel.modelError}` : 'No models returned', disabled: true }];
-    return [refresh, ...models];
+  if (field.id === 'archiveRetentionDays') {
+    if (!/^\d+$/.test(entered)) throw new Error('Enter retention as a whole number of days.');
+    const value = Number(entered);
+    if (value > 36_500) throw new Error('Retention cannot exceed 36,500 days.');
+    return value;
   }
-  if (definition.id === 'managedHistory') {
-    if (state.run && state.plan && !state.run.applied) return [{ label: 'Unavailable during an active update', description: 'Cancel or finish the current archive plan before resetting its deletion history.', disabled: true }];
-    if (state.settingsPanel?.confirmHistoryReset) return [
-      { action: 'confirm-history-reset', label: 'Confirm reset', description: 'Forget every path previously created or updated by Zipflow for this project.' },
-      { action: 'cancel-history-reset', label: 'Cancel' },
-    ];
-    return [{ action: 'reset-history', label: 'Reset managed-file history', description: 'This does not change project files. Future managed-history snapshots start from an empty list.' }];
+  if (field.id === 'archiveMaxBytes') {
+    const value = parseByteSize(entered);
+    if (value > Number.MAX_SAFE_INTEGER) throw new Error('Archive size limit is too large.');
+    return value;
   }
-  return [];
+  if (field.id === 'llmApiToken') return entered;
+  throw new Error(`Unsupported setting: ${field.id}`);
 }
 
 function currentDefinition(state) {
-  const definitions = definitionsFor(state);
+  const definitions = settingsDefinitions(state);
   const index = clamp(state.settingsPanel?.settingIndex ?? 0, 0, Math.max(0, definitions.length - 1));
   if (state.settingsPanel) state.settingsPanel.settingIndex = index;
   return definitions[index];
 }
 
-function optionIndexFor(state, definition) {
-  const options = optionsFor(state, definition);
-  const index = options.findIndex((option) => option.value !== undefined && option.value === state.settings[definition.id]);
-  return Math.max(0, index);
+function optionsFor(state) {
+  return settingsOptions(state, currentDefinition(state));
 }
 
-function normalizePanelIndex(state) {
-  const definitions = definitionsFor(state);
-  state.settingsPanel.settingIndex = clamp(state.settingsPanel.settingIndex, 0, Math.max(0, definitions.length - 1));
-  state.settingsPanel.optionIndex = optionIndexFor(state, currentDefinition(state));
+function preferredOptionIndex(state) {
+  const definition = currentDefinition(state);
+  const options = settingsOptions(state, definition);
+  const selected = options.findIndex((option) => option.settingId === definition.primarySetting && option.selected);
+  return selected >= 0 ? selected : moveOption(state, -1, 1);
 }
 
-function editorValue(state, id) {
-  if (id === 'archiveMaxBytes') return formatByteSize(state.settings[id]).replace(/\s+/g, '');
-  return String(state.settings[id] ?? '');
+function findOptionIndex(state, optionId) {
+  const index = optionsFor(state).findIndex((option) => option.id === optionId);
+  return index >= 0 ? index : preferredOptionIndex(state);
 }
 
-function inputActionLabel(state, definition) {
-  if (definition.id === 'llmApiToken') return state.settings.llmApiToken ? 'Replace configured token' : 'Set optional token';
-  return `Edit ${definition.label.toLowerCase()}`;
+function moveOption(state, current, delta) {
+  const options = optionsFor(state);
+  if (!options.length) return 0;
+  let next = current;
+  for (let attempts = 0; attempts < options.length; attempts += 1) {
+    next = wrap(next + delta, options.length);
+    if (!options[next].disabled) return next;
+  }
+  return 0;
 }
 
-function inputActionDescription(definition) {
-  return definition.id === 'llmApiToken' ? 'The current token is never displayed.' : '';
-}
-
-function tokenDescription(state) {
-  return state.settings.llmApiToken ? 'A bearer token is configured. Its value is hidden.' : 'No token. Local Ollama and LM Studio usually work without authentication.';
-}
-
-function modelDescription(state) {
-  return state.settings.llmModel ? `Selected: ${state.settings.llmModel}` : 'Refresh the provider model list, then choose one model.';
-}
-
-function displayArchiveDirectory(value) {
-  return displayPath(path.resolve(expandHome(value)));
-}
-
-function parseInteger(value, label, min, max) {
-  if (!/^\d+$/.test(value)) throw new Error(`Enter ${label} as a whole number.`);
-  return clamp(Number(value), min, max);
+function resetModelCache(panel) {
+  panel.models = [];
+  panel.modelsProvider = null;
+  panel.modelError = null;
 }
 
 function wrap(value, length) {
@@ -393,8 +347,4 @@ function wrap(value, length) {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
-}
-
-function titleCase(value) {
-  return value.charAt(0).toUpperCase() + value.slice(1);
 }

@@ -1,7 +1,7 @@
 import path from 'node:path';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import createIgnore from 'ignore';
-import { exists, writeTextAtomic } from '../utils/fs.js';
+import { exists } from '../utils/fs.js';
 
 const COMMON_GROUPS = [
   {
@@ -64,23 +64,21 @@ export function renderRecommendedGitignore(project) {
 
 export async function addRecommendedGitignore(project) {
   const target = path.join(project.root, '.gitignore');
-  const hadFile = await exists(target);
-  const previous = await readOptionalText(target);
-  const existingPatterns = existingPatternSet(previous);
-  const sections = [];
-  let addedCount = 0;
-  for (const group of recommendedGitignoreGroups(project)) {
-    const missing = group.patterns.filter((pattern) => !existingPatterns.has(pattern));
-    if (!missing.length) continue;
-    sections.push(`# ${group.title}`, ...missing, '');
-    addedCount += missing.length;
+  if (await exists(target)) {
+    return { path: target, created: false, changed: false, existing: true, addedCount: 0 };
   }
-  if (!addedCount) return { path: target, created: false, changed: false, addedCount: 0 };
-  const recommendations = sections.join('\n').replace(/\n+$/, '\n');
-  const separator = previous ? '\n' : '';
-  const next = `${recommendations}${separator}${previous}`;
-  await writeTextAtomic(target, next);
-  return { path: target, created: !hadFile, changed: true, addedCount };
+  const content = renderRecommendedGitignore(project);
+  try {
+    await writeFile(target, content, { encoding: 'utf8', flag: 'wx' });
+  } catch (error) {
+    if (error.code === 'EEXIST') {
+      return { path: target, created: false, changed: false, existing: true, addedCount: 0 };
+    }
+    throw error;
+  }
+  const addedCount = recommendedGitignoreGroups(project)
+    .reduce((total, group) => total + group.patterns.length, 0);
+  return { path: target, created: true, changed: true, existing: false, addedCount };
 }
 
 export async function createRootGitignoreMatcher(projectRoot) {
@@ -89,22 +87,6 @@ export async function createRootGitignoreMatcher(projectRoot) {
   const matcher = createIgnore();
   matcher.add(await readFile(target, 'utf8'));
   return (relativePath) => matcher.ignores(normalize(relativePath));
-}
-
-async function readOptionalText(target) {
-  try {
-    return await readFile(target, 'utf8');
-  } catch (error) {
-    if (error.code === 'ENOENT') return '';
-    throw error;
-  }
-}
-
-function existingPatternSet(content) {
-  return new Set(String(content)
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith('#')));
 }
 
 function normalize(value) {

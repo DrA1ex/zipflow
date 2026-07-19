@@ -1,6 +1,8 @@
 import {
+  BottomOverlay,
   Box,
   Column,
+  Modal,
   ProgressBar,
   RequireViewport,
   ScrollPane,
@@ -207,11 +209,11 @@ function runtimePane(title, lines, height, theme) {
 function renderSettings(state, width, height, theme) {
   const view = settingsViewModel(state);
   const leftWidth = Math.max(24, Math.min(34, Math.floor(width * 0.36)));
-  return SplitPane({
+  const content = SplitPane({
     orientation: 'horizontal',
     gap: 2,
     height,
-    focus: view.focus,
+    focus: view.modal ? 'options' : view.focus,
     theme,
     panes: [
       {
@@ -220,7 +222,7 @@ function renderSettings(state, width, height, theme) {
         size: leftWidth,
         node: WorkspacePane({
           title: ' SETTINGS ',
-          active: view.focus === 'settings',
+          active: !view.modal && view.focus === 'settings',
           height,
           theme,
           children: [SelectList({
@@ -242,7 +244,7 @@ function renderSettings(state, width, height, theme) {
         grow: 1,
         node: WorkspacePane({
           title: ` ${view.selectedSetting.label.toUpperCase()} `,
-          active: view.focus === 'options',
+          active: !view.modal && view.focus === 'options',
           height,
           theme,
           children: [
@@ -253,7 +255,7 @@ function renderSettings(state, width, height, theme) {
               items: view.options,
               selectedIndex: view.optionIndex,
               windowSize: Math.max(2, height - 9),
-              getLabel: (item) => item.action ? item.label : `${state.settings[view.selectedSetting.id] === item.value ? '●' : '○'} ${item.label}`,
+              getLabel: (item) => item.section ? item.label : item.action ? item.label : `${item.selected ? '●' : '○'} ${item.label}`,
               getDescription: (item) => item.description ?? '',
               getDisabled: (item) => item.disabled,
               theme,
@@ -264,6 +266,46 @@ function renderSettings(state, width, height, theme) {
         }),
       },
     ],
+  });
+  if (!view.modal) return content;
+  return renderSettingsModal({ content, modal: view.modal, state, width, height, theme });
+}
+
+function renderSettingsModal({ content, modal, state, width, height, theme }) {
+  const modalWidth = Math.max(40, Math.min(68, width - 10));
+  const instructions = modal.field.instructions ?? [];
+  const children = [
+    Text(modal.field.description, { wrap: true }),
+    ...instructions.map((line) => Text(color(theme, 'textMuted', line), { wrap: true })),
+    modal.field.unitHint ? Text(color(theme, 'accent', modal.field.unitHint), { wrap: true }) : null,
+    Text(''),
+    TextEditorView({
+      title: ` ${modal.field.label} `,
+      value: state.editor.value,
+      cursor: state.editor.cursor,
+      width: Math.max(26, modalWidth - 4),
+      height: 3,
+      placeholder: modal.field.placeholder ?? '',
+      lineNumbers: false,
+    }),
+    modal.error ? Text(color(theme, 'danger', modal.error), { wrap: true }) : null,
+  ].filter(Boolean);
+  const overlay = Modal({
+    title: ` Edit ${modal.field.label} `,
+    children,
+    footer: 'Enter save · Esc cancel',
+  });
+  const estimatedHeight = Math.min(height - 2, 9 + instructions.length * 2 + (modal.field.unitHint ? 2 : 0) + (modal.error ? 2 : 0));
+  return BottomOverlay({
+    content,
+    overlay,
+    height,
+    bottom: Math.max(1, Math.floor((height - estimatedHeight) / 2)),
+    left: 2,
+    right: 2,
+    width: modalWidth,
+    align: 'center',
+    opaque: true,
   });
 }
 
@@ -298,13 +340,15 @@ function screenTitle(state) {
     'export-running': 'Creating ZIP', 'export-complete': 'ZIP created',
     'setup-git-init': 'Initialize Git', 'setup-gitignore': 'Git ignore rules',
     'setup-initial-commit': 'First commit', 'initial-commit-message': 'First commit message',
-    error: 'Error', settings: 'Settings', 'settings-input': 'Edit global setting',
+    error: 'Error', settings: 'Settings',
   };
   return titles[state.screen] ?? 'Zipflow';
 }
 
 function footerHints(state) {
-  if (state.screen === 'settings') return ['↑/↓ choose', '←/→ switch pane', 'Enter/Space apply', 'Esc or Ctrl+B close', 'Ctrl+T native select'];
+  if (state.screen === 'settings') return state.settingsPanel?.modal
+    ? ['Enter save', 'Esc cancel', 'Tab complete path', 'Ctrl+B close settings']
+    : ['↑/↓ choose', '←/→ switch pane', 'Enter/Space apply', 'Esc or Ctrl+B close', 'Ctrl+T native select'];
   if (state.busy || ['checks-running', 'deploy-running'].includes(state.screen)) return ['Ctrl+C stop'];
   if (isEditorScreen(state.screen)) return state.editorContext?.multiline
     ? ['Enter confirm', 'Ctrl+Enter newline', 'Ctrl+U clear to cursor', 'Esc back', 'Ctrl+T native select']
@@ -333,7 +377,7 @@ function preferredPromptHeight(state) {
 function isEditorScreen(screen) {
   return [
     'project-path-input', 'archive-input', 'custom-check-command', 'custom-check-name',
-    'commit-message', 'commit-template', 'deploy-command', 'export-path', 'initial-commit-message', 'settings-input',
+    'commit-message', 'commit-template', 'deploy-command', 'export-path', 'initial-commit-message',
   ].includes(screen);
 }
 

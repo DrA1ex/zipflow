@@ -1,4 +1,4 @@
-export const WORKFLOW_VERSION = 4;
+export const WORKFLOW_VERSION = 6;
 
 export const DEFAULT_EXCLUDES = [
   '.git/**',
@@ -11,13 +11,13 @@ export const DEFAULT_EXCLUDES = [
   'node_modules/**',
   '.venv/**',
   'venv/**',
+  '.env',
+  '.env.*',
+  '.DS_Store',
   '__pycache__/**',
   'dist/**',
   'build/**',
   'coverage/**',
-  '.env',
-  '.env.*',
-  '.DS_Store',
   '__MACOSX/**',
 ];
 
@@ -88,7 +88,8 @@ export function applyPolicyProfile(workflow, profileId) {
 export function normalizeWorkflow(workflow) {
   const normalized = structuredClone(workflow);
   normalized.version = WORKFLOW_VERSION;
-  normalized.exclude = Array.from(new Set([...DEFAULT_EXCLUDES, ...(normalized.exclude ?? [])]));
+  const configuredExcludes = normalized.exclude ?? [];
+  normalized.exclude = Array.from(new Set([...DEFAULT_EXCLUDES, ...configuredExcludes]));
   normalized.archive = {
     mode: 'overlay',
     stripSingleRootDirectory: true,

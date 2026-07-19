@@ -26,6 +26,6 @@ export function validateZipEntry(entry, limits = DEFAULT_ARCHIVE_LIMITS) {
     path: normalized.replace(/\/$/, ''),
     directory: raw.endsWith('/'),
     mode: mode & 0o777,
-    skip: segments[0] === '__MACOSX' || segments.at(-1) === '.DS_Store',
+    skip: segments[0] === '__MACOSX',
   };
 }

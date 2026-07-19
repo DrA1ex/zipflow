@@ -140,3 +140,71 @@ test('snapshot all keeps files ignored by .gitignore', async () => {
   assert.equal(plan.deleted.some((item) => item.path === 'ignored/local.db'), false);
   assert.equal(plan.preserved.some((item) => item.path === 'ignored/local.db'), true);
 });
+
+test('ordinary dot-directories are synchronized while permanent sensitive dotfile exclusions stay enabled', async () => {
+  const root = await tempDir('zipflow-plan-dotfiles-');
+  await writeFiles(root, {
+    'package.json': '{"name":"fixture"}\n',
+    '.env': 'OLD=1\n',
+    '.config/local.json': '{"old":true}\n',
+  });
+  await initGit(root);
+  const project = await discoverProject(root);
+  const workflow = createRecommendedWorkflow(project);
+  const extracted = await extractedFixture(root, {
+    '.env': 'NEW=2\n',
+    '.config/local.json': '{"new":true}\n',
+    '.github/workflows/test.yml': 'name: test\n',
+    '.DS_Store': 'metadata\n',
+  });
+
+  const plan = await buildUpdatePlan({ project, workflow, extracted });
+
+  assert.deepEqual(plan.created.map((item) => item.path), ['.github/workflows/test.yml']);
+  assert.deepEqual(plan.updated.map((item) => item.path), ['.config/local.json']);
+  assert.deepEqual(plan.skipped.map((item) => item.path).sort(), ['.DS_Store', '.env']);
+  assert.ok(plan.skipped.every((item) => /workflow/i.test(item.reason)));
+});
+
+test('gitignore rules still apply to dot-directories in addition to permanent sensitive exclusions', async () => {
+  const root = await tempDir('zipflow-plan-dotfiles-ignored-');
+  await writeFiles(root, {
+    '.gitignore': '.env\n.idea/\n',
+    'package.json': '{"name":"fixture"}\n',
+  });
+  await initGit(root);
+  const project = await discoverProject(root);
+  const workflow = createRecommendedWorkflow(project);
+  const extracted = await extractedFixture(root, {
+    '.env': 'SECRET=1\n',
+    '.idea/workspace.xml': '<xml/>\n',
+    '.github/workflows/test.yml': 'name: test\n',
+  });
+
+  const plan = await buildUpdatePlan({ project, workflow, extracted });
+  const reasons = Object.fromEntries(plan.skipped.map((item) => [item.path, item.reason]));
+
+  assert.deepEqual(plan.created.map((item) => item.path), ['.github/workflows/test.yml']);
+  assert.deepEqual(Object.keys(reasons).sort(), ['.env', '.idea/workspace.xml']);
+  assert.match(reasons['.env'], /workflow/i);
+  assert.match(reasons['.idea/workspace.xml'], /gitignore/i);
+});
+
+test('snapshot deletion treats tracked dotfiles like ordinary files', async () => {
+  const root = await tempDir('zipflow-plan-dotfile-delete-');
+  await writeFiles(root, {
+    'package.json': '{"name":"fixture"}\n',
+    '.config/tool.json': '{"enabled":true}\n',
+  });
+  await initGit(root);
+  const project = await discoverProject(root);
+  const workflow = createRecommendedWorkflow(project);
+  workflow.archive.mode = 'snapshot';
+  const extracted = await extractedFixture(root, {
+    'package.json': '{"name":"fixture"}\n',
+  });
+
+  const plan = await buildUpdatePlan({ project, workflow, extracted });
+
+  assert.deepEqual(plan.deleted.map((item) => item.path), ['.config/tool.json']);
+});
