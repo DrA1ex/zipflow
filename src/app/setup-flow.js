@@ -1,0 +1,383 @@
+import { discoverProject } from '../project/detect.js';
+import { applyPolicyProfile, createRecommendedWorkflow } from '../workflow/defaults.js';
+import { saveWorkflow } from '../workflow/store.js';
+import { displayPath, parseEnteredPath } from '../utils/paths.js';
+import {
+  activateChecks, handleChecksShortcut, showChecksStep, submitCustomCheckEditor,
+} from './setup-checks.js';
+import {
+  activateGitBootstrap, backGitBootstrap, handlesGitBootstrapScreen, showGitBootstrap, submitGitBootstrapEditor,
+} from './setup-git-init.js';
+
+export async function beginSetup(controller, { fresh = false } = {}) {
+  const { state } = controller;
+  state.draft = fresh || !state.workflow ? createRecommendedWorkflow(state.project) : structuredClone(state.workflow);
+  controller.message(fresh ? 'Starting a new workflow' : 'Reviewing workflow', [
+    'Zipflow inspected the project and prepared a recommended workflow.',
+    'The next steps let you confirm which checks run, how archives replace files, and what Git or deployment actions happen after a successful update.',
+    'Recommended choices are already selected. Change only the parts that differ from how this project is normally maintained.',
+    'Nothing replaces the saved workflow until you review and confirm the final summary.',
+  ]);
+  showProjectStep(controller);
+}
+
+export function handlesSetupScreen(screen) {
+  return handlesGitBootstrapScreen(screen) || screen.startsWith('setup-') || screen.startsWith('custom-check') || [
+    'project-path-input', 'commit-template', 'deploy-command',
+  ].includes(screen);
+}
+
+export async function activateSetup(controller, itemId) {
+  const { screen } = controller.state;
+  if (handlesGitBootstrapScreen(screen)) return activateGitBootstrap(controller, itemId);
+  if (screen === 'setup-project') return activateProject(controller, itemId);
+  if (screen === 'setup-checks') return activateChecks(controller, itemId, () => showPolicyStep(controller));
+  if (screen === 'setup-policy') return activatePolicy(controller, itemId);
+  if (screen === 'setup-archive-mode') return activateArchiveMode(controller, itemId);
+  if (screen === 'setup-deletion-scope') return activateDeletionScope(controller, itemId);
+  if (screen === 'setup-git-checkpoint') return activateCheckpoint(controller, itemId);
+  if (screen === 'setup-git-result') return activateResultCommit(controller, itemId);
+  if (screen === 'setup-git-message') return activateMessageStrategy(controller, itemId);
+  if (screen === 'setup-deploy') return activateDeployPolicy(controller, itemId);
+  if (screen === 'setup-review') return activateReview(controller, itemId);
+}
+
+export async function submitSetupEditor(controller) {
+  const { state } = controller;
+  const purpose = state.editorContext?.purpose;
+  if (purpose === 'setup-project-path') return submitProjectPath(controller);
+  if (await submitGitBootstrapEditor(controller)) return;
+  if (submitCustomCheckEditor(controller)) return;
+  if (purpose === 'commit-template') {
+    const template = state.editor.value.trim();
+    if (!template) return controller.setStatus('Enter a commit message template.');
+    state.draft.git.fixedMessage = template;
+    controller.message('Commit template saved', [template], 'success');
+    return showDeployPolicyStep(controller);
+  }
+  if (purpose === 'deploy-command') {
+    const commandText = state.editor.value.trim();
+    if (!commandText) return controller.setStatus('Enter the deploy command.');
+    state.draft.deploy.commandText = commandText;
+    controller.message('Deploy command configured', [commandText, deployPolicyDescription(state.draft.deploy.policy)], 'success');
+    return showReviewStep(controller);
+  }
+}
+
+export function handleSetupShortcut(controller, key) {
+  return handleChecksShortcut(controller, key);
+}
+
+export function backSetup(controller) {
+  const screen = controller.state.screen;
+  if (handlesGitBootstrapScreen(screen)) {
+    const handled = backGitBootstrap(controller);
+    if (handled !== false) return handled;
+    return showProjectStep(controller);
+  }
+  if (screen === 'setup-project') return controller.showHome();
+  if (screen === 'setup-checks') return showProjectStep(controller);
+  if (screen === 'setup-policy') return showChecksStep(controller);
+  if (screen === 'setup-archive-mode') return showPolicyStep(controller);
+  if (screen === 'setup-deletion-scope') return showArchiveModeStep(controller);
+  if (screen === 'setup-git-checkpoint') return previousBeforeCheckpoint(controller);
+  if (screen === 'setup-git-result') return showCheckpointStep(controller);
+  if (screen === 'setup-git-message') return showResultCommitStep(controller);
+  if (screen === 'setup-deploy') return previousBeforeDeploy(controller);
+  if (screen === 'setup-review') return showDeployPolicyStep(controller);
+  if (screen.startsWith('custom-check')) return showChecksStep(controller);
+  if (screen === 'project-path-input') return showProjectStep(controller);
+  if (screen === 'commit-template') return showMessageStrategyStep(controller);
+  if (screen === 'deploy-command') return showDeployPolicyStep(controller);
+}
+
+function activateProject(controller, itemId) {
+  if (itemId === 'use-project') return controller.state.project.git ? showChecksStep(controller) : showGitBootstrap(controller);
+  if (itemId === 'choose-project') return controller.showEditor('project-path-input', {
+    label: 'Project directory',
+    placeholder: controller.state.project.root,
+    purpose: 'setup-project-path',
+    instructions: ['Enter the project directory. Tab completes directory names.'],
+  }, controller.state.project.root);
+}
+
+async function submitProjectPath(controller) {
+  const { state } = controller;
+  const target = parseEnteredPath(state.editor.value, state.project.root);
+  try {
+    state.project = await discoverProject(target);
+    state.draft = createRecommendedWorkflow(state.project);
+    controller.message('Project selected', [displayPath(state.project.root), detectedLine(state.project)], 'success');
+    showProjectStep(controller);
+  } catch (error) {
+    controller.message('Could not use this directory', [error.message], 'error');
+  }
+}
+
+function showProjectStep(controller) {
+  const { project } = controller.state;
+  controller.showMenu('setup-project', [
+    { id: 'use-project', label: 'Use this project', description: `${displayPath(project.root)} · ${detectedLine(project)}` },
+    { id: 'choose-project', label: 'Choose another directory', description: 'Tab completes directory names' },
+  ], 'Project setup');
+}
+
+function showPolicyStep(controller) {
+  const workflow = controller.state.draft;
+  controller.showMenu('setup-policy', [
+    choice('profile-safe', workflow.policy.id === 'safe', 'Safe', 'Review every archive plan and ask before overwriting local changes.'),
+    choice('profile-practical', workflow.policy.id === 'practical', 'Practical', 'Apply safe plans automatically and ask only when local work is affected.'),
+    choice('profile-trust', workflow.policy.id === 'trust', 'Trust archive', 'Back up and overwrite conflicting local files without asking each time.'),
+    { id: 'policy-continue', label: 'Continue', description: `Selected: ${workflow.policy.label}` },
+  ], 'Conflict and confirmation policy');
+}
+
+function activatePolicy(controller, itemId) {
+  if (itemId.startsWith('profile-')) {
+    applyPolicyProfile(controller.state.draft, itemId.slice(8));
+    return showPolicyStep(controller);
+  }
+  if (itemId === 'policy-continue') return showArchiveModeStep(controller);
+}
+
+function showArchiveModeStep(controller) {
+  const mode = controller.state.draft.archive.mode;
+  controller.showMenu('setup-archive-mode', [
+    choice('archive-overlay', mode === 'overlay', 'Overlay archive', 'Add and update files from the ZIP. Files missing from the ZIP stay untouched.'),
+    choice('archive-snapshot', mode === 'snapshot', 'Full project snapshot', 'Treat the ZIP as the complete managed project. Missing files may be removed.'),
+    { id: 'archive-continue', label: 'Continue', description: mode === 'overlay' ? 'No files are deleted because they are absent from the archive.' : 'You will choose exactly which missing files may be deleted next.' },
+  ], 'How should this archive be interpreted?');
+}
+
+function activateArchiveMode(controller, itemId) {
+  if (itemId === 'archive-overlay' || itemId === 'archive-snapshot') {
+    controller.state.draft.archive.mode = itemId === 'archive-overlay' ? 'overlay' : 'snapshot';
+    return showArchiveModeStep(controller);
+  }
+  if (itemId === 'archive-continue') {
+    return controller.state.draft.archive.mode === 'snapshot' ? showDeletionScopeStep(controller) : showAfterArchiveSettings(controller);
+  }
+}
+
+function showDeletionScopeStep(controller) {
+  const scope = controller.state.draft.deletion.scope;
+  controller.showMenu('setup-deletion-scope', [
+    choice('delete-tracked', scope === 'tracked-only', 'Only clean Git-tracked files', 'Delete a missing file only when Git tracks it and it has no local changes. Untracked local files are kept and reported.'),
+    choice('delete-managed', scope === 'managed-history', 'Only files previously managed by Zipflow', 'Delete a missing file only if an earlier Zipflow run created or updated it. The managed-file history can be reset from Ctrl+B settings.'),
+    choice('delete-all', scope === 'all', 'All files in the managed scope', 'Also delete untracked files missing from the archive. Protected and excluded paths are still kept.'),
+    { id: 'deletion-continue', label: 'Continue', description: deletionScopeDescription(scope) },
+  ], 'Which missing files may snapshot mode delete?');
+}
+
+function activateDeletionScope(controller, itemId) {
+  if (['delete-tracked', 'delete-managed', 'delete-all'].includes(itemId)) {
+    controller.state.draft.deletion.scope = itemId === 'delete-tracked' ? 'tracked-only' : itemId === 'delete-managed' ? 'managed-history' : 'all';
+    return showDeletionScopeStep(controller);
+  }
+  if (itemId === 'deletion-continue') return showAfterArchiveSettings(controller);
+}
+
+function showCheckpointStep(controller) {
+  const value = controller.state.draft.git.checkpoint;
+  controller.showMenu('setup-git-checkpoint', [
+    choice('checkpoint-never', value === 'never', 'Do not create checkpoint commits', 'Zipflow still creates its file backup before applying the archive.'),
+    choice('checkpoint-ask', value === 'ask', 'Ask when local work would be overwritten', 'Offer a checkpoint commit only when an archive conflicts with uncommitted files.'),
+    choice('checkpoint-auto', value === 'auto', 'Create checkpoint automatically when needed', 'Commit the affected local files before Zipflow replaces them with archive versions.'),
+    { id: 'checkpoint-continue', label: 'Continue', description: `Selected: ${checkpointLabel(value)}` },
+  ], 'Protect conflicting local work with Git');
+}
+
+function activateCheckpoint(controller, itemId) {
+  const value = itemId.replace('checkpoint-', '');
+  if (['never', 'ask', 'auto'].includes(value)) {
+    controller.state.draft.git.checkpoint = value;
+    return showCheckpointStep(controller);
+  }
+  if (itemId === 'checkpoint-continue') return showResultCommitStep(controller);
+}
+
+function showResultCommitStep(controller) {
+  const value = controller.state.draft.git.resultCommit;
+  controller.showMenu('setup-git-result', [
+    choice('result-never', value === 'never', 'Do not commit the applied update', 'Leave the successfully checked files in the working tree.'),
+    choice('result-ask', value === 'ask', 'Ask after successful checks', 'Show the proposed message and let you create or skip the commit.'),
+    choice('result-auto', value === 'auto', 'Commit automatically after successful checks', 'Commit only the files applied by this Zipflow run.'),
+    { id: 'result-continue', label: 'Continue', description: `Selected: ${resultCommitLabel(value)}` },
+  ], 'Commit the successfully checked update');
+}
+
+function activateResultCommit(controller, itemId) {
+  const value = itemId.replace('result-', '');
+  if (['never', 'ask', 'auto'].includes(value)) {
+    controller.state.draft.git.resultCommit = value;
+    return showResultCommitStep(controller);
+  }
+  if (itemId === 'result-continue') {
+    return controller.state.draft.git.resultCommit === 'never' ? showDeployPolicyStep(controller) : showMessageStrategyStep(controller);
+  }
+}
+
+function showMessageStrategyStep(controller) {
+  const value = controller.state.draft.git.messageStrategy;
+  controller.showMenu('setup-git-message', [
+    choice('message-metadata', value === 'metadata', 'Read message from the archive', 'Use .zipflow/commit-message.txt first, with legacy filenames supported for compatibility. Fall back to the run identifier.'),
+    choice('message-llm', value === 'llm', 'Generate with the configured local LLM', localLlmMessageDescription(controller.state)),
+    choice('message-generated', value === 'generated', 'Generated run identifier', 'Example: zipflow: apply zf-20260719-7C2F'),
+    choice('message-archive', value === 'archive', 'Archive filename', 'Example: Apply project-update.zip'),
+    choice('message-fixed', value === 'fixed', 'Fixed template', controller.state.draft.git.fixedMessage),
+    { id: 'message-continue', label: 'Continue', description: messageStrategyLabel(value) },
+  ], 'Choose the result commit message source');
+}
+
+function activateMessageStrategy(controller, itemId) {
+  if (itemId.startsWith('message-') && itemId !== 'message-continue') {
+    controller.state.draft.git.messageStrategy = itemId.slice(8);
+    return showMessageStrategyStep(controller);
+  }
+  if (itemId === 'message-continue') {
+    if (controller.state.draft.git.messageStrategy === 'fixed') {
+      return controller.showEditor('commit-template', {
+        label: 'Commit message template',
+        placeholder: 'zipflow: apply {runId}',
+        purpose: 'commit-template',
+        instructions: ['Available values: {runId}, {archiveName}, {projectName}, {date}, {time}.'],
+      }, controller.state.draft.git.fixedMessage);
+    }
+    return showDeployPolicyStep(controller);
+  }
+}
+
+function showDeployPolicyStep(controller) {
+  const value = controller.state.draft.deploy.policy;
+  controller.showMenu('setup-deploy', [
+    choice('deploy-disabled', value === 'disabled', 'No deploy command', 'Finish after checks and the optional result commit.'),
+    choice('deploy-ask', value === 'ask', 'Ask after successful checks', 'Offer to run the deploy command after the update passes all required checks.'),
+    choice('deploy-always', value === 'always', 'Always deploy after successful checks', 'Run the configured deploy command automatically after checks and the optional commit.'),
+    choice('deploy-on-demand', value === 'on-demand', 'Deploy on demand', 'Keep a Run deployment action on the successful result screen.'),
+    { id: 'deploy-continue', label: 'Continue', description: deployPolicyDescription(value) },
+  ], 'Deployment after successful checks');
+}
+
+function activateDeployPolicy(controller, itemId) {
+  if (itemId.startsWith('deploy-') && itemId !== 'deploy-continue') {
+    controller.state.draft.deploy.policy = itemId.slice(7);
+    return showDeployPolicyStep(controller);
+  }
+  if (itemId === 'deploy-continue') {
+    if (controller.state.draft.deploy.policy === 'disabled') return showReviewStep(controller);
+    return controller.showEditor('deploy-command', {
+      label: 'Deploy command',
+      placeholder: 'npm run deploy',
+      purpose: 'deploy-command',
+      instructions: [
+        'This command is not a validation check. It can run only after every required check has passed.',
+        deployPolicyDescription(controller.state.draft.deploy.policy),
+      ],
+    }, controller.state.draft.deploy.commandText);
+  }
+}
+
+function showReviewStep(controller) {
+  const workflow = controller.state.draft;
+  controller.message('Workflow ready', [
+    `${workflow.projectLabels.join(' · ') || 'Custom project'} · ${workflow.checks.filter((check) => check.selected).length} checks`,
+    `${workflow.policy.label} · ${workflow.archive.mode === 'overlay' ? 'Overlay archive' : deletionReviewLabel(workflow.deletion.scope)}`,
+    ...(controller.state.project.git ? [
+      `Checkpoint: ${checkpointLabel(workflow.git.checkpoint)}`,
+      `Result commit: ${resultCommitLabel(workflow.git.resultCommit)}${workflow.git.resultCommit === 'never' ? '' : ` · ${messageStrategyLabel(workflow.git.messageStrategy)}`}`,
+    ] : ['Git: not initialized · file backups only']),
+    `Deploy: ${deployPolicyDescription(workflow.deploy.policy)}${workflow.deploy.commandText ? ` · ${workflow.deploy.commandText}` : ''}`,
+  ], 'success');
+  controller.showMenu('setup-review', [
+    { id: 'save-workflow', label: controller.state.workflow ? 'Replace existing workflow' : 'Save workflow', description: 'The previous workflow remains active until this succeeds' },
+    { id: 'edit-project', label: 'Edit project' },
+    { id: 'edit-checks', label: 'Edit checks' },
+    { id: 'edit-policy', label: 'Edit update policy' },
+    ...(controller.state.project.git ? [{ id: 'edit-git', label: 'Edit Git settings' }] : []),
+    { id: 'edit-deploy', label: 'Edit deployment' },
+    { id: 'cancel-setup', label: 'Cancel' },
+  ], 'Review workflow');
+}
+
+async function activateReview(controller, itemId) {
+  if (itemId === 'edit-project') return showProjectStep(controller);
+  if (itemId === 'edit-checks') return showChecksStep(controller);
+  if (itemId === 'edit-policy') return showPolicyStep(controller);
+  if (itemId === 'edit-git') return showCheckpointStep(controller);
+  if (itemId === 'edit-deploy') return showDeployPolicyStep(controller);
+  if (itemId === 'cancel-setup') return controller.showHome();
+  if (itemId === 'save-workflow') {
+    controller.state.workflow = await saveWorkflow(controller.state.draft);
+    controller.state.draft = null;
+    controller.message('Workflow saved', [controller.state.workflow.name], 'success');
+    controller.showHome();
+  }
+}
+
+function previousBeforeCheckpoint(controller) {
+  return controller.state.draft.archive.mode === 'snapshot' ? showDeletionScopeStep(controller) : showArchiveModeStep(controller);
+}
+
+function previousBeforeDeploy(controller) {
+  if (!controller.state.project.git) return previousBeforeCheckpoint(controller);
+  return controller.state.draft.git.resultCommit === 'never' ? showResultCommitStep(controller) : showMessageStrategyStep(controller);
+}
+
+function showAfterArchiveSettings(controller) {
+  return controller.state.project.git ? showCheckpointStep(controller) : showDeployPolicyStep(controller);
+}
+
+
+function choice(id, selected, label, description) {
+  return { id, label: `${selected ? '●' : '○'} ${label}`, description };
+}
+
+function detectedLine(project) {
+  return `${project.labels.join(' · ') || 'Unknown type'}${project.git ? ' · Git' : ''}`;
+}
+
+function checkpointLabel(value) {
+  if (value === 'auto') return 'Automatic when conflicting local work is affected';
+  if (value === 'never') return 'No checkpoint commit';
+  return 'Ask when conflicting local work is affected';
+}
+
+function resultCommitLabel(value) {
+  if (value === 'auto') return 'Automatic after successful checks';
+  if (value === 'never') return 'No result commit';
+  return 'Ask after successful checks';
+}
+
+function messageStrategyLabel(value) {
+  if (value === 'metadata') return 'Archive metadata file, then generated fallback';
+  if (value === 'llm') return 'Local LLM, then archive metadata and generated fallback';
+  if (value === 'archive') return 'Archive filename';
+  if (value === 'fixed') return 'Fixed template';
+  return 'Generated run identifier';
+}
+
+function localLlmMessageDescription(state) {
+  if (state.settings?.llmProvider !== 'disabled' && state.settings?.llmModel) {
+    return `Use ${state.settings.llmProvider} · ${state.settings.llmModel} to analyze changes.patch. Fall back to archive metadata, then the run identifier.`;
+  }
+  return 'Configure a provider and model in Ctrl+B settings. Until then Zipflow falls back to archive metadata, then the run identifier.';
+}
+
+function deployPolicyDescription(value) {
+  if (value === 'ask') return 'Ask whether to deploy after successful checks';
+  if (value === 'always') return 'Deploy automatically after successful checks';
+  if (value === 'on-demand') return 'Deploy only when selected from the successful result screen';
+  return 'Deployment disabled';
+}
+
+function deletionReviewLabel(scope) {
+  if (scope === 'all') return 'Snapshot · all managed files';
+  if (scope === 'managed-history') return 'Snapshot · files previously managed by Zipflow';
+  return 'Snapshot · clean Git-tracked files only';
+}
+
+function deletionScopeDescription(scope) {
+  if (scope === 'all') return 'More destructive: all non-protected missing files can be removed.';
+  if (scope === 'managed-history') return 'Only paths recorded from earlier successful Zipflow applications may be removed.';
+  return 'Safer Git default: untracked local files remain in place.';
+}

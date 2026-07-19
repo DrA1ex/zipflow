@@ -1,0 +1,324 @@
+import { copyTextToClipboard } from 'terlio.js';
+import { runChecks } from '../checks/runner.js';
+import { runDeploy } from '../deploy/runner.js';
+import { createCommit } from '../git/repository.js';
+import { saveRunRecord, runReportPath } from '../runs/store.js';
+import { formatFailureForClipboard } from '../runs/text-report.js';
+import { saveWorkflow } from '../workflow/store.js';
+import { displayPath } from '../utils/paths.js';
+import { formatArchiveName, planSummary } from '../ui/format.js';
+import { confirmRollback, showRunDetails } from './run-rollback.js';
+import { failRun, releaseRunResources } from './run-lifecycle.js';
+
+export function isPostCheckScreen(screen) {
+  return [
+    'checks-running', 'check-failed', 'commit', 'commit-message', 'deploy-prompt',
+    'deploy-running', 'deploy-failed', 'completed',
+  ].includes(screen);
+}
+
+export async function activatePostCheck(controller, itemId) {
+  const { state } = controller;
+  if (state.screen === 'check-failed') return activateFailedCheck(controller, itemId);
+  if (state.screen === 'commit') {
+    if (itemId === 'create-commit') return createResultCommit(controller, defaultCommitMessage(state));
+    if (itemId === 'edit-message') return controller.showEditor('commit-message', {
+      label: 'Commit message',
+      purpose: 'commit-message',
+      placeholder: defaultCommitMessage(state),
+      instructions: commitMessageInstructions(state),
+    }, defaultCommitMessage(state));
+    if (itemId === 'finish-no-commit') return continueToDeploy(controller);
+  }
+  if (state.screen === 'deploy-prompt') {
+    if (itemId === 'run-deploy') return startDeploy(controller);
+    if (itemId === 'skip-deploy') {
+      state.run.deploy = { skipped: true, policy: state.workflow.deploy.policy, commandText: state.workflow.deploy.commandText };
+      return completeRun(controller, 'completed');
+    }
+  }
+  if (state.screen === 'deploy-failed') return activateDeployFailed(controller, itemId);
+  if (state.screen === 'completed') {
+    if (itemId === 'run-deploy') return startDeploy(controller, { fromCompleted: true });
+    if (itemId === 'another-archive') return beginAnotherArchive(controller);
+    if (itemId === 'view-report') return showRunDetails(controller, state.run);
+    if (itemId === 'rollback') return confirmRollback(controller, state.run);
+    if (itemId === 'home') return controller.showHome();
+    if (itemId === 'exit') return controller.exit(0);
+  }
+}
+
+export function backPostCheck(controller) {
+  if (controller.state.screen === 'commit-message') return showCommitPrompt(controller);
+  if (controller.state.screen === 'deploy-prompt') return showCommitOrComplete(controller);
+  if (controller.state.screen === 'completed') return controller.showHome();
+  return false;
+}
+
+export async function submitPostCheckEditor(controller) {
+  if (controller.state.editorContext?.purpose !== 'commit-message') return false;
+  const message = controller.state.editor.value.trim();
+  if (!message) return controller.setStatus('Enter a commit message.');
+  await createResultCommit(controller, message);
+  return true;
+}
+
+export async function startChecks(controller) {
+  const { state } = controller;
+  const checks = state.workflow.checks.filter((check) => check.selected);
+  state.screen = 'checks-running';
+  state.checkRuntime = { checks, activeIndex: 0, results: [], lastLine: '' };
+  state.status = 'Running checks';
+  controller.invalidate();
+  try {
+    const checksResult = await runChecks({
+      workflow: state.workflow,
+      projectPath: state.project.root,
+      changedPaths: state.run.applied.changedPaths,
+      onUpdate: (event) => {
+        if (event.type === 'started') state.checkRuntime.activeIndex = event.index;
+        if (event.type === 'output') state.checkRuntime.lastLine = lastNonEmptyLine(event.event.text);
+        if (event.type === 'finished') state.checkRuntime.results = [...event.results];
+        controller.invalidate();
+      },
+    });
+    state.run.checks = checksResult;
+    state.run.status = checksResult.ok ? 'checks_passed' : 'checks_failed';
+    state.run = await saveRunRecord(state.run);
+    if (!checksResult.ok) {
+      const failed = checksResult.results.find((item) => !item.ok);
+      controller.message('Checks failed', [
+        failed?.name ?? 'Required check',
+        lastNonEmptyLine(`${failed?.stdout ?? ''}\n${failed?.stderr ?? ''}`) || 'No output',
+      ], 'error');
+      return showFailedCheck(controller);
+    }
+    controller.message('All checks passed', [`${checksResult.passed} checks passed`], 'success');
+    return continueAfterChecks(controller);
+  } catch (error) {
+    await failRun(controller, error);
+  }
+}
+
+function continueAfterChecks(controller) {
+  const { state } = controller;
+  if (!state.run.applied.paths.length || state.workflow.git.resultCommit === 'never') return continueToDeploy(controller);
+  if (state.workflow.git.resultCommit === 'auto') return createResultCommit(controller, defaultCommitMessage(state));
+  return showCommitPrompt(controller);
+}
+
+function showFailedCheck(controller) {
+  controller.showMenu('check-failed', [
+    { id: 'copy-failure', label: 'Copy failure report', description: 'Compact report for ChatGPT' },
+    { id: 'view-failure', label: 'View full failed output' },
+    { id: 'rerun-checks', label: 'Run checks again', description: 'Use after manually fixing files' },
+    { id: 'keep-changes', label: 'Keep changes' },
+    { id: 'rollback', label: 'Roll back update', description: 'Restore the exact pre-run files' },
+  ], 'Checks failed');
+}
+
+async function activateFailedCheck(controller, itemId) {
+  const { state } = controller;
+  if (itemId === 'copy-failure') {
+    const copied = await copyTextToClipboard(formatFailureForClipboard(state.run), { output: controller.runtime.output });
+    return controller.setStatus(copied ? 'Failure report copied' : `Report saved at ${runReportPath(state.run.id)}`);
+  }
+  if (itemId === 'view-failure') {
+    const failed = state.run.checks.results.find((item) => !item.ok);
+    controller.message(`Failed output · ${failed.name}`, [failed.stdout, failed.stderr].filter(Boolean).join('\n').split('\n'));
+    return showFailedCheck(controller);
+  }
+  if (itemId === 'rerun-checks') return startChecks(controller);
+  if (itemId === 'keep-changes') return completeRun(controller, 'completed_with_errors');
+  if (itemId === 'rollback') return confirmRollback(controller, state.run);
+}
+
+function showCommitPrompt(controller) {
+  const message = defaultCommitMessage(controller.state);
+  controller.showMenu('commit', [
+    { id: 'create-commit', label: 'Create commit', description: message },
+    { id: 'edit-message', label: 'Edit message', description: commitMessageSource(controller.state) },
+    { id: 'finish-no-commit', label: 'Continue without commit', description: 'Deployment settings still apply after this step' },
+  ], 'Commit result');
+}
+
+async function createResultCommit(controller, message) {
+  const { state } = controller;
+  const result = await createCommit(state.project.root, state.run.applied.paths, message);
+  if (!result.ok) {
+    controller.message('Commit was not created', [result.reason], 'error');
+    return showCommitPrompt(controller);
+  }
+  state.run.commit = { revision: result.revision, message };
+  state.run = await saveRunRecord(state.run);
+  controller.message('Commit created', [`${result.revision} ${firstLine(message)}`], 'success');
+  return continueToDeploy(controller);
+}
+
+function continueToDeploy(controller) {
+  const policy = controller.state.workflow.deploy?.policy ?? 'disabled';
+  if (policy === 'always') return startDeploy(controller);
+  if (policy === 'ask') return showDeployPrompt(controller);
+  return completeRun(controller, 'completed');
+}
+
+function showDeployPrompt(controller) {
+  const deploy = controller.state.workflow.deploy;
+  controller.showMenu('deploy-prompt', [
+    { id: 'run-deploy', label: 'Run deployment', description: deploy.commandText },
+    { id: 'skip-deploy', label: 'Finish without deployment', description: 'The update and successful checks remain recorded' },
+  ], 'Checks passed · deployment is ready');
+}
+
+async function startDeploy(controller, { fromCompleted = false } = {}) {
+  const { state } = controller;
+  const deploy = state.workflow.deploy;
+  state.screen = 'deploy-running';
+  state.deployRuntime = { commandText: deploy.commandText, lastLine: '', fromCompleted };
+  state.status = 'Deploying';
+  controller.invalidate();
+  try {
+    const result = await runDeploy({
+      deploy,
+      projectPath: state.project.root,
+      onOutput: (event) => {
+        state.deployRuntime.lastLine = lastNonEmptyLine(event.text);
+        controller.invalidate();
+      },
+    });
+    state.run.deploy = { ...result, policy: deploy.policy, commandText: deploy.commandText, cwd: deploy.cwd || '.' };
+    state.run = await saveRunRecord(state.run);
+    if (!result.ok) {
+      controller.message('Deployment failed', [
+        deploy.commandText,
+        lastNonEmptyLine(`${result.stdout}\n${result.stderr}`) || 'No output',
+      ], 'error');
+      return showDeployFailed(controller);
+    }
+    controller.message('Deployment completed', [deploy.commandText], 'success');
+    if (fromCompleted) return showCompleted(controller);
+    return completeRun(controller, 'completed');
+  } catch (error) {
+    await failRun(controller, error);
+  }
+}
+
+function showDeployFailed(controller) {
+  controller.showMenu('deploy-failed', [
+    { id: 'view-deploy-output', label: 'View full deployment output' },
+    { id: 'retry-deploy', label: 'Run deployment again' },
+    { id: 'finish-deploy-error', label: 'Finish and keep the update', description: 'Record the deployment failure without rolling back local files' },
+    { id: 'rollback', label: 'Roll back local update', description: 'External deployment effects cannot be undone by Zipflow' },
+  ], 'Deployment failed');
+}
+
+function activateDeployFailed(controller, itemId) {
+  const { state } = controller;
+  if (itemId === 'view-deploy-output') {
+    controller.message('Deployment output', [state.run.deploy.stdout, state.run.deploy.stderr].filter(Boolean).join('\n').split('\n'));
+    return showDeployFailed(controller);
+  }
+  if (itemId === 'retry-deploy') return startDeploy(controller);
+  if (itemId === 'finish-deploy-error') return completeRun(controller, 'completed_with_errors');
+  if (itemId === 'rollback') return confirmRollback(controller, state.run);
+}
+
+async function completeRun(controller, status) {
+  const { state } = controller;
+  state.run.status = status;
+  state.run = await saveRunRecord(state.run);
+  state.workflow.lastRunId = state.run.id;
+  state.workflow = await saveWorkflow(state.workflow);
+  await releaseRunResources(controller);
+  controller.message(status === 'completed' ? 'Update completed successfully' : 'Update completed with errors', [
+    ...planSummary(state.plan),
+    `Deployment: ${deploymentResultLine(state)}`,
+    `Report: ${displayPath(runReportPath(state.run.id))}`,
+  ], status === 'completed' ? 'success' : 'warning');
+  showCompleted(controller);
+}
+
+function showCompleted(controller) {
+  const { state } = controller;
+  const items = [];
+  if (state.workflow.deploy?.policy === 'on-demand' && !state.run.deploy?.ok) {
+    items.push({ id: 'run-deploy', label: 'Run deployment', description: state.workflow.deploy.commandText });
+  }
+  items.push(
+    { id: 'another-archive', label: 'Apply another archive' },
+    { id: 'view-report', label: 'View report' },
+  );
+  if (!state.run.rollback || state.run.rollback.status !== 'completed') items.push({ id: 'rollback', label: 'Roll back this update' });
+  items.push({ id: 'home', label: 'Return to project' }, { id: 'exit', label: 'Exit' });
+  controller.showMenu('completed', items, 'Run completed');
+}
+
+function showCommitOrComplete(controller) {
+  if (controller.state.workflow.git.resultCommit === 'ask' && controller.state.run.applied.paths.length && !controller.state.run.commit) {
+    return showCommitPrompt(controller);
+  }
+  return completeRun(controller, 'completed');
+}
+
+function beginAnotherArchive(controller) {
+  controller.showEditor('archive-input', {
+    label: 'ZIP archive path',
+    placeholder: '~/Downloads/project-update.zip',
+    purpose: 'archive-path',
+    instructions: ['Drop a ZIP file into the terminal or enter its path. Tab completes ZIP paths.'],
+  }, '');
+  controller.setStatus('Waiting for archive');
+}
+
+export function defaultCommitMessage(state) {
+  const strategy = state.workflow.git.messageStrategy;
+  if (strategy === 'llm' && state.run.llm?.commitMessage) return state.run.llm.commitMessage;
+  if (strategy === 'llm' && state.archiveMetadata?.commitMessage) return state.archiveMetadata.commitMessage;
+  if (strategy === 'metadata' && state.archiveMetadata?.commitMessage) return state.archiveMetadata.commitMessage;
+  if (strategy === 'archive') return `Apply ${formatArchiveName(state.run.archivePath)}`;
+  if (strategy === 'fixed') return renderTemplate(state.workflow.git.fixedMessage, state);
+  return `zipflow: apply ${state.run.id}`;
+}
+
+function renderTemplate(template, state) {
+  const now = new Date();
+  return String(template)
+    .replaceAll('{runId}', state.run.id)
+    .replaceAll('{archiveName}', formatArchiveName(state.run.archivePath))
+    .replaceAll('{projectName}', state.project.name)
+    .replaceAll('{date}', now.toISOString().slice(0, 10))
+    .replaceAll('{time}', now.toTimeString().slice(0, 8));
+}
+
+function commitMessageSource(state) {
+  if (state.workflow.git.messageStrategy === 'llm') {
+    if (state.run.llm?.commitMessage) return `Generated by ${state.run.llm.provider} · ${state.run.llm.model}`;
+    if (state.run.llm?.error) return `Local LLM failed: ${state.run.llm.error}; using the configured fallback`;
+    return 'Local LLM is not configured; using archive metadata or the run identifier';
+  }
+  if (state.workflow.git.messageStrategy === 'metadata') {
+    return state.archiveMetadata?.commitMessageSource
+      ? `Read from ${state.archiveMetadata.commitMessageSource}`
+      : 'No archive message file found; generated run identifier is used';
+  }
+  return 'Change the proposed message for this run only';
+}
+
+function commitMessageInstructions(state) {
+  const source = commitMessageSource(state);
+  return [source, 'The complete text, including additional lines, is passed to Git as the commit message.'];
+}
+
+function deploymentResultLine(state) {
+  if (!state.run.deploy) return state.workflow.deploy?.policy === 'on-demand' ? 'available on demand' : 'not run';
+  if (state.run.deploy.skipped) return 'skipped';
+  return state.run.deploy.ok ? 'passed' : 'failed';
+}
+
+function lastNonEmptyLine(value) {
+  return String(value ?? '').split('\n').map((line) => line.trim()).filter(Boolean).at(-1) ?? '';
+}
+
+function firstLine(value) {
+  return String(value).split('\n')[0];
+}
