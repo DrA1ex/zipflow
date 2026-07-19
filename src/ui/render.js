@@ -19,6 +19,7 @@ import {
 } from 'terlio.js';
 import { displayPath } from '../utils/paths.js';
 import { settingsViewModel } from '../app/settings-panel.js';
+import { llmActivityLines } from '../app/llm-progress.js';
 import { formatDuration } from './format.js';
 
 export function renderZipflow({ state, width, height }) {
@@ -267,14 +268,15 @@ function renderSettings(state, width, height, theme) {
 }
 
 function transcriptLines(state, theme) {
-  if (!state.messages.length) return ['Starting Zipflow…'];
   const lines = [];
+  if (!state.messages.length && !state.llmRuntime) return ['Starting Zipflow…'];
   for (const message of state.messages) {
     const token = message.tone === 'error' ? 'danger' : message.tone === 'success' ? 'success' : message.tone === 'warning' ? 'warning' : 'title';
     lines.push(color(theme, token, message.title));
     for (const line of message.lines ?? []) lines.push(`  ${line}`);
     lines.push('');
   }
+  if (state.llmRuntime) lines.push(...llmActivityLines(state.llmRuntime));
   return lines;
 }
 
@@ -296,7 +298,7 @@ function screenTitle(state) {
     'export-running': 'Creating ZIP', 'export-complete': 'ZIP created',
     'setup-git-init': 'Initialize Git', 'setup-gitignore': 'Git ignore rules',
     'setup-initial-commit': 'First commit', 'initial-commit-message': 'First commit message',
-    error: 'Error', settings: 'Settings',
+    error: 'Error', settings: 'Settings', 'settings-input': 'Edit global setting',
   };
   return titles[state.screen] ?? 'Zipflow';
 }
@@ -304,7 +306,9 @@ function screenTitle(state) {
 function footerHints(state) {
   if (state.screen === 'settings') return ['↑/↓ choose', '←/→ switch pane', 'Enter/Space apply', 'Esc or Ctrl+B close', 'Ctrl+T native select'];
   if (state.busy || ['checks-running', 'deploy-running'].includes(state.screen)) return ['Ctrl+C stop'];
-  if (isEditorScreen(state.screen)) return ['Enter confirm', 'Tab complete path', 'Esc back', 'Ctrl+B settings', 'Ctrl+T native select'];
+  if (isEditorScreen(state.screen)) return state.editorContext?.multiline
+    ? ['Enter confirm', 'Ctrl+Enter newline', 'Ctrl+U clear to cursor', 'Esc back', 'Ctrl+T native select']
+    : ['Enter confirm', 'Tab complete path', 'Esc back', 'Ctrl+B settings', 'Ctrl+T native select'];
   if (state.screen === 'setup-checks') return ['↑/↓ choose', 'Space toggle', 'A add', 'E edit', 'Del remove', 'Enter continue/open', 'Ctrl+B settings'];
   if (state.screen === 'conflicts') return ['↑/↓ choose', 'Space toggle decision', 'Enter action', 'Esc back', 'Ctrl+T native select'];
   if (state.screen === 'export-select') return ['↑/↓ choose', 'Enter/Space toggle', 'Esc back', 'Ctrl+T native select'];
@@ -329,7 +333,7 @@ function preferredPromptHeight(state) {
 function isEditorScreen(screen) {
   return [
     'project-path-input', 'archive-input', 'custom-check-command', 'custom-check-name',
-    'commit-message', 'commit-template', 'deploy-command', 'export-path', 'initial-commit-message',
+    'commit-message', 'commit-template', 'deploy-command', 'export-path', 'initial-commit-message', 'settings-input',
   ].includes(screen);
 }
 

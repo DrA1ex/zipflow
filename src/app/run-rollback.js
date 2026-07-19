@@ -43,6 +43,7 @@ export function showRunDetails(controller, run) {
     `Run: ${run.id}`,
     `Status: ${run.status}`,
     `Archive: ${formatArchiveName(run.archivePath)}`,
+    `Source ZIP: ${archiveDispositionSummary(run.archiveDisposition)}`,
     ...(run.plan?.counts ? planSummary({ counts: run.plan.counts }) : []),
     `Checks: ${run.checks ? `${run.checks.passed} passed · ${run.checks.failed} failed` : 'not run'}`,
     `Commit: ${run.commit ? `${run.commit.revision} ${run.commit.message}` : 'none'}`,
@@ -97,6 +98,15 @@ async function performRollback(controller) {
     controller.message('Rollback failed', [error.message], 'error');
     return showRunDetails(controller, state.run);
   }
+}
+
+function archiveDispositionSummary(value) {
+  if (!value) return 'not processed';
+  if (value.action === 'moved') return `moved to ${displayPath(value.path)}`;
+  if (value.action === 'deleted') return 'deleted';
+  if (value.action === 'kept') return 'left in place';
+  if (value.action === 'failed') return `policy failed: ${value.error}`;
+  return value.action;
 }
 
 function deploySummary(deploy) {

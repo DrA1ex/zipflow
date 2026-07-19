@@ -30,7 +30,9 @@ Owns the interactive state machine.
 - `run-postcheck.js` owns checks, result commits, deployment, and successful completion.
 - `run-rollback.js` owns run details and exact rollback.
 - `run-lifecycle.js` owns cancellation, failure reporting, locks, and temporary cleanup.
-- `settings-panel.js` owns the global two-pane settings interaction.
+- `settings-panel.js` owns the global two-pane settings interaction and guarded text editors for tokens, paths, retention, and size limits.
+- `llm-progress.js` maps streaming model events into a transient Activity view.
+- `archive-policy.js` applies the global source-ZIP disposition after a run is kept.
 - `export-flow.js` owns the interactive Create ZIP workflow.
 - `state.js` contains UI state helpers.
 
@@ -44,11 +46,13 @@ Rendering does not perform project mutations. Activity uses Terlio's component-l
 
 ### `src/settings`
 
-Persists versioned global application settings in `~/.zipflow/settings.json`. Settings are deliberately separate from project workflows. They include the local LLM provider, selected model, and response language.
+Persists versioned global application settings in `~/.zipflow/settings.json`. Settings are deliberately separate from project workflows. They include the local LLM provider, optional bearer token, selected model, response language, and source-ZIP disposition policy.
 
 ### `src/llm`
 
-Uses one OpenAI-compatible client for Ollama and LM Studio. It lists models from `/v1/models`, requests structured JSON from `/v1/chat/completions`, validates the summary and commit message, and retries with JSON mode when a server or model rejects JSON Schema. LLM errors are non-fatal to archive application.
+Uses one OpenAI-compatible client for Ollama and LM Studio. It lists models from `/v1/models` and streams `/v1/chat/completions` responses. The client emits transport, reasoning, content, and completion events without exposing the API token. Both `reasoning_content` and `reasoning` fields are accepted.
+
+Generation validates structured summary and commit-message JSON. HTTP schema rejection retries with JSON mode. A reasoning-only or length-limited response triggers a second formatting pass over the model draft, followed by a conservative unstructured-summary fallback. LLM errors remain non-fatal to archive application.
 
 ### `src/patch`
 
@@ -73,6 +77,8 @@ Collects source paths for tracked, non-ignored, interactive, and all-file export
 ### `src/archive`
 
 Validates and extracts ZIP archives into an isolated temporary directory. It rejects traversal, absolute paths, `.git`, symbolic links, duplicate or case-colliding paths, and configured size-limit violations.
+
+`disposition.js` owns the global post-run policy for the source ZIP. Move mode records only Zipflow-managed archives in `archive-index.json`; retention and size pruning can therefore never delete unrelated files from the selected directory.
 
 `metadata.js` reads supported archive control files, preferring `.zipflow/commit-message.txt`. Control files can provide a commit message but never become project files or snapshot deletion targets.
 
@@ -145,7 +151,8 @@ archive input
   -> isolated extraction
   -> archive metadata
   -> persisted changes.patch
-  -> optional local LLM summary and commit message
+  -> optional streamed local LLM summary and commit message
+  -> optional reasoning-draft formatting pass
   -> copyable Activity plan
   -> bulk conflict policy
   -> optional per-file conflict decisions
@@ -156,6 +163,7 @@ archive input
   -> checks
   -> optional result commit
   -> optional deployment
+  -> source ZIP keep, move, or delete policy
   -> report
   -> cleanup
 ```
@@ -176,6 +184,8 @@ The following rules are enforced below the UI layer:
 - files matched by `.gitignore` are not created, updated, or deleted;
 - protected and untracked ignored paths are removed from result-commit staging;
 - local LLM failures are recorded but cannot block planning or application;
+- API tokens are used only in request headers and are not copied into Activity or run reports;
+- source archive retention removes only files recorded in Zipflow's archive index;
 - files changed after plan review abort application;
 - partial application failures trigger automatic restoration;
 - rollback refuses paths modified after the run;
@@ -223,7 +233,9 @@ Unit and integration tests use temporary projects and Git repositories. Regressi
 - custom-check prompt order;
 - stable radio selection and Space activation;
 - global settings persistence and rendering;
-- OpenAI-compatible model discovery and structured local LLM responses;
+- OpenAI-compatible model discovery, optional authorization, SSE streaming, reasoning-only responses, repair requests, and structured local LLM responses;
+- source archive keep, move, delete, retention, and size-limit behavior;
+- commit-message editor fallback, typing, deletion, and multiline input;
 - patch creation from archive-versus-snapshot changes;
 - managed-file deletion history and reset;
 - Git initialization, ignore generation, and first commit;

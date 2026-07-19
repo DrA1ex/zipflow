@@ -8,6 +8,7 @@ export function formatRunReport(run) {
     `Created: ${run.createdAt}`,
   ];
   if (run.archiveMetadata?.source) lines.push(`Commit message source: ${run.archiveMetadata.source}`);
+  if (run.archiveDisposition) lines.push(`Source archive: ${formatArchiveDisposition(run.archiveDisposition)}`);
   if (run.patch?.path) lines.push(`Patch: ${run.patch.path}`);
   if (run.llm) {
     lines.push('', `Local LLM: ${run.llm.provider ?? 'unknown'} · ${run.llm.model ?? 'unknown'}`);
@@ -15,6 +16,7 @@ export function formatRunReport(run) {
     else {
       lines.push('Summary:', ...(run.llm.summary ?? []).map((line) => `- ${line}`));
       if (run.llm.commitMessage) lines.push('', 'Proposed commit message:', run.llm.commitMessage);
+      if (run.llm.warning) lines.push('', `LLM warning: ${run.llm.warning}`);
     }
   }
   if (run.plan?.counts) lines.push('', 'Plan:', ...formatCounts(run.plan.counts));
@@ -82,6 +84,14 @@ function formatCounts(counts) {
     `- Skipped: ${counts.skipped ?? 0}`,
     `- Conflicts: ${counts.conflicts ?? 0}`,
   ];
+}
+
+function formatArchiveDisposition(disposition) {
+  if (disposition.action === 'moved') return `moved to ${disposition.path}`;
+  if (disposition.action === 'deleted') return 'deleted';
+  if (disposition.action === 'kept') return 'kept in place';
+  if (disposition.action === 'failed') return `policy failed: ${disposition.error}`;
+  return disposition.action ?? 'unknown';
 }
 
 function formatDuration(milliseconds = 0) {

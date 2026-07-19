@@ -22,6 +22,7 @@ export function createInitialState() {
     progress: { value: 0, total: 1, detail: '' },
     checkRuntime: null,
     deployRuntime: null,
+    llmRuntime: null,
     exportDraft: null,
     transcriptScroll: 0,
     transcriptSticky: true,

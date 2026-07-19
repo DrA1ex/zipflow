@@ -4,6 +4,7 @@ import { extractArchive } from '../archive/extract.js';
 import { readArchiveMetadata } from '../archive/metadata.js';
 import { createPlanPatch } from '../patch/create.js';
 import { generateChangeDescription, isLocalLlmEnabled } from '../llm/generate.js';
+import { beginLlmProgress } from './llm-progress.js';
 import { updateManagedHistory } from '../history/managed.js';
 import { buildUpdatePlan } from '../plan/build.js';
 import { applyUpdatePlan } from '../apply/apply.js';
@@ -124,12 +125,18 @@ async function inspectArchive(controller, enteredPath) {
     let llmResult = null;
     let llmError = null;
     if (isLocalLlmEnabled(state.settings) && changedCount(plan) > 0) {
-      state.progress = { value: 5, total: 7, detail: `Generating summary with ${state.settings.llmModel}` };
+      state.progress = { value: 5, total: 7, detail: `Streaming summary from ${state.settings.llmModel}` };
+      const progress = beginLlmProgress(controller);
       controller.invalidate();
       try {
-        llmResult = await generateChangeDescription({ settings: state.settings, project: state.project, plan, patchContent: patch.content });
+        llmResult = await generateChangeDescription(
+          { settings: state.settings, project: state.project, plan, patchContent: patch.content },
+          { onEvent: progress.onEvent },
+        );
       } catch (error) {
         llmError = error.message;
+      } finally {
+        progress.stop();
       }
     }
     state.progress = { value: 7, total: 7, detail: 'Plan ready' };
@@ -147,7 +154,9 @@ async function inspectArchive(controller, enteredPath) {
       model: state.settings.llmModel,
       language: state.settings.llmLanguage,
       summary: llmResult.summary,
-      commitMessage: llmResult.commitMessage,
+      commitMessage: llmResult.commitMessage || null,
+      warning: llmResult.warning || null,
+      diagnostics: llmResult.diagnostics || null,
     } : llmError ? {
       provider: state.settings.llmProvider,
       model: state.settings.llmModel,
@@ -164,7 +173,10 @@ async function inspectArchive(controller, enteredPath) {
       `${formatArchiveName(archivePath)} · ${extracted.fileCount} files${extracted.rootPrefix ? ` · root ${extracted.rootPrefix}/` : ''}`,
       ...(metadata.commitMessageSource ? [`Commit message found: ${metadata.commitMessageSource}`] : []),
     ], 'success');
-    if (llmResult) controller.message('Local LLM summary', llmResult.summary, 'info');
+    if (llmResult) {
+      controller.message('Local LLM summary', llmResult.summary, 'info');
+      if (llmResult.warning) controller.message('Local LLM response needed fallback handling', [llmResult.warning], 'warning');
+    }
     if (llmError) controller.message('Local LLM summary was not generated', [llmError, 'The update can continue; commit message fallbacks remain available.'], 'warning');
     controller.message('Update plan', [...planActivityLines(plan), `Patch: ${displayPath(patch.path)}`], plan.conflicts.length ? 'warning' : 'info');
     state.busy = false;

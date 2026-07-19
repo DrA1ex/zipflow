@@ -12,7 +12,8 @@ import {
   activateRun, backRun, beginArchiveInput, handleConflictShortcut, handlesRunScreen, showLastRun, submitRunEditor,
 } from './run-flow.js';
 import {
-  closeSettings, handleSettingsKey, isSettingsScreen, openSettings, selectOption, selectSetting,
+  backSettingsEditor, closeSettings, handleSettingsKey, isSettingsEditorScreen, isSettingsScreen,
+  openSettings, selectOption, selectSetting, submitSettingsEditor,
 } from './settings-panel.js';
 import { projectSummary } from '../ui/format.js';
 import { terminateActiveProcesses } from '../utils/process.js';
@@ -57,7 +58,7 @@ export class ZipflowController {
       return;
     }
     if (normalized.ctrl && normalized.name === 'b') {
-      if (isSettingsScreen(this.state.screen)) closeSettings(this);
+      if (isSettingsScreen(this.state.screen) || isSettingsEditorScreen(this.state.screen)) closeSettings(this);
       else await openSettings(this);
       return;
     }
@@ -139,8 +140,7 @@ export class ZipflowController {
   }
 
   showEditor(screen, context, value = '') {
-    this.state.editor.clear();
-    this.state.editor.insert(String(value ?? ''));
+    this.state.editor.set(String(value ?? ''));
     this.state.editorContext = context;
     setScreen(this.state, screen, { items: [], status: context.label });
     this.invalidate();
@@ -201,10 +201,12 @@ export class ZipflowController {
 
   async handleEditorKey(key) {
     if (key.name === 'escape') return this.back();
-    if (key.name === 'tab' && ['project-path-input', 'archive-input'].includes(this.state.screen)) {
+    const pathEditor = ['project-path-input', 'archive-input'].includes(this.state.screen)
+      || this.state.editorContext?.purpose === 'settings:archiveDirectory';
+    if (key.name === 'tab' && pathEditor) {
       const completion = await completePath(this.state.editor.value, {
         cwd: this.state.project?.root ?? process.cwd(),
-        directoriesOnly: this.state.screen === 'project-path-input',
+        directoriesOnly: this.state.screen === 'project-path-input' || this.state.editorContext?.purpose === 'settings:archiveDirectory',
         extension: this.state.screen === 'archive-input' ? '.zip' : null,
       });
       if (completion.matches.length) {
@@ -213,17 +215,23 @@ export class ZipflowController {
       } else this.setStatus('No path matches');
       return;
     }
+    if (key.name === 'enter' && key.ctrl && this.state.editorContext?.multiline) {
+      handleInputEditorKey(this.state.editor, key, { multiline: true });
+      return this.invalidate();
+    }
     if (key.name === 'enter') {
-      if (handlesSetupScreen(this.state.screen)) await submitSetupEditor(this);
+      if (isSettingsEditorScreen(this.state.screen)) await submitSettingsEditor(this);
+      else if (handlesSetupScreen(this.state.screen)) await submitSetupEditor(this);
       else if (handlesRunScreen(this.state.screen)) await submitRunEditor(this);
       else if (handlesExportScreen(this.state.screen)) await submitExportEditor(this);
       return this.invalidate();
     }
-    handleInputEditorKey(this.state.editor, key);
+    handleInputEditorKey(this.state.editor, key, { multiline: Boolean(this.state.editorContext?.multiline) });
     this.invalidate();
   }
 
   async back() {
+    if (isSettingsEditorScreen(this.state.screen)) return backSettingsEditor(this);
     if (handlesSetupScreen(this.state.screen)) return backSetup(this);
     if (handlesRunScreen(this.state.screen)) return backRun(this);
     if (handlesExportScreen(this.state.screen)) return backExport(this);
@@ -246,6 +254,6 @@ export class ZipflowController {
 function isEditorScreen(screen) {
   return [
     'project-path-input', 'archive-input', 'custom-check-command', 'custom-check-name',
-    'commit-message', 'commit-template', 'deploy-command', 'export-path', 'initial-commit-message',
+    'commit-message', 'commit-template', 'deploy-command', 'export-path', 'initial-commit-message', 'settings-input',
   ].includes(screen);
 }

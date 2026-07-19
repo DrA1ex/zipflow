@@ -5,13 +5,14 @@ import { formatRunReport } from './text-report.js';
 
 export async function createRunRecord({ id, project, workflow, archivePath }) {
   const record = {
-    version: 3,
+    version: 4,
     id,
     projectPath: project.root,
     projectName: project.name,
     workflowName: workflow.name,
     archivePath,
     archiveMetadata: null,
+    archiveDisposition: null,
     patch: null,
     llm: null,
     status: 'created',

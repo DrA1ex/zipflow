@@ -9,6 +9,7 @@ import { displayPath } from '../utils/paths.js';
 import { formatArchiveName, planSummary } from '../ui/format.js';
 import { confirmRollback, showRunDetails } from './run-rollback.js';
 import { failRun, releaseRunResources } from './run-lifecycle.js';
+import { finalizeSourceArchive } from './archive-policy.js';
 
 export function isPostCheckScreen(screen) {
   return [
@@ -26,8 +27,9 @@ export async function activatePostCheck(controller, itemId) {
       label: 'Commit message',
       purpose: 'commit-message',
       placeholder: defaultCommitMessage(state),
+      multiline: true,
       instructions: commitMessageInstructions(state),
-    }, defaultCommitMessage(state));
+    }, commitMessageEditorInitialValue(state));
     if (itemId === 'finish-no-commit') return continueToDeploy(controller);
   }
   if (state.screen === 'deploy-prompt') {
@@ -229,6 +231,7 @@ async function completeRun(controller, status) {
   state.run = await saveRunRecord(state.run);
   state.workflow.lastRunId = state.run.id;
   state.workflow = await saveWorkflow(state.workflow);
+  await finalizeSourceArchive(controller);
   await releaseRunResources(controller);
   controller.message(status === 'completed' ? 'Update completed successfully' : 'Update completed with errors', [
     ...planSummary(state.plan),
@@ -272,12 +275,34 @@ function beginAnotherArchive(controller) {
 
 export function defaultCommitMessage(state) {
   const strategy = state.workflow.git.messageStrategy;
-  if (strategy === 'llm' && state.run.llm?.commitMessage) return state.run.llm.commitMessage;
-  if (strategy === 'llm' && state.archiveMetadata?.commitMessage) return state.archiveMetadata.commitMessage;
-  if (strategy === 'metadata' && state.archiveMetadata?.commitMessage) return state.archiveMetadata.commitMessage;
+  const llmMessage = cleanCommitMessage(state.run.llm?.commitMessage);
+  const metadataMessage = cleanCommitMessage(state.archiveMetadata?.commitMessage);
+  if (strategy === 'llm' && llmMessage) return llmMessage;
+  if (strategy === 'llm' && metadataMessage) return metadataMessage;
+  if (strategy === 'metadata' && metadataMessage) return metadataMessage;
   if (strategy === 'archive') return `Apply ${formatArchiveName(state.run.archivePath)}`;
-  if (strategy === 'fixed') return renderTemplate(state.workflow.git.fixedMessage, state);
+  if (strategy === 'fixed') return cleanCommitMessage(renderTemplate(state.workflow.git.fixedMessage, state)) || `zipflow: apply ${state.run.id}`;
   return `zipflow: apply ${state.run.id}`;
+}
+
+export function commitMessageEditorInitialValue(state) {
+  if (state.workflow.git.messageStrategy === 'llm' && !cleanCommitMessage(state.run.llm?.commitMessage)) return '';
+  return defaultCommitMessage(state);
+}
+
+function cleanCommitMessage(value) {
+  if (typeof value !== 'string') return '';
+  const message = value.trim();
+  if (!message) return '';
+  if (/^[\[{]/.test(message)) {
+    try {
+      JSON.parse(message);
+      return '';
+    } catch {
+      // A normal commit message may legitimately begin with a bracket.
+    }
+  }
+  return message;
 }
 
 function renderTemplate(template, state) {

@@ -134,7 +134,7 @@ Other supported message sources are the archive filename, a generated run identi
 
 ## Local LLM summaries and commit messages
 
-Zipflow can use either Ollama or LM Studio through their shared OpenAI-compatible HTTP surface. Configure the provider, model, and response language in `Ctrl+B` settings.
+Zipflow can use either Ollama or LM Studio through their shared OpenAI-compatible HTTP surface. Configure the provider, optional bearer token, model, and response language in `Ctrl+B` settings.
 
 Default local endpoints:
 
@@ -149,7 +149,9 @@ When enabled, every inspected archive with content changes produces:
 - a short Activity summary;
 - a proposed commit message stored in the JSON and text run reports.
 
-The system and user prompts are always English. The selected language applies only to the generated summary and commit message. Zipflow requests structured JSON and validates both fields before using them. If the local server is unavailable or the response is invalid, archive application continues and the error is recorded; configured metadata and generated run-ID fallbacks remain available.
+The system and user prompts are always English. The selected language applies only to the generated summary and commit message. Zipflow uses a streaming request, so Activity shows the elapsed time, received chunks, the current model draft, and the structured answer as it arrives. Both `reasoning_content` and `reasoning` streams are understood.
+
+Zipflow requests structured JSON and validates both fields before using them. If a reasoning model consumes its output budget before producing JSON, Zipflow performs a second compact formatting request against the generated draft. If only a useful summary can be recovered, that summary is kept while the commit message uses the configured fallback. Local LLM failures never block archive application.
 
 The workflow commit-message source can be set to **Local LLM**. It uses the generated message first, then `.zipflow/commit-message.txt`, then `zipflow: apply <run-id>`.
 
@@ -186,8 +188,11 @@ Current settings include:
 - any semantic theme shipped by Terlio: Dark, Mono, Amber, Ocean, Forest, Synth, Slate, Paper, or Matrix;
 - compact running-check output or the latest non-empty command output line;
 - local LLM provider: Disabled, Ollama, or LM Studio;
+- an optional bearer token used for both model discovery and generation;
 - a model fetched from the selected server's model list;
 - the language used for generated summaries and commit messages;
+- the post-run source ZIP policy: leave in place, move to archive storage, or delete;
+- archive directory, retention period, and maximum managed archive size when move mode is enabled;
 - a guarded action to reset the current project's managed-file history.
 
 Settings are saved immediately in:
@@ -195,6 +200,17 @@ Settings are saved immediately in:
 ```text
 ~/.zipflow/settings.json
 ```
+
+
+## Source ZIP policy
+
+Global settings control what happens to the uploaded source archive after an update is kept:
+
+- **Do nothing** — the default; leave the ZIP where it was selected;
+- **Move to archive storage** — move it to `~/zipflow-archive` by default;
+- **Delete source ZIP** — remove it after completion.
+
+Move mode creates its directory when selected or first used. The default retention is 30 days and the default maximum size is 1 GB. Cleanup removes the oldest entries first, but it only touches archives recorded in Zipflow's own archive index. Unrelated files in the same directory are never deleted. Cancelled runs, failures before application, and rollbacks before a run is kept do not consume the source archive.
 
 ## Supported project detection
 
@@ -239,6 +255,7 @@ Zipflow stores user data under:
 ```text
 ~/.zipflow/
   settings.json
+  archive-index.json
   workflows/
   runs/
   backups/
@@ -255,7 +272,8 @@ Set `ZIPFLOW_HOME` to use a different location, for example in tests or an isola
 ```text
 ↑ / ↓       move through choices
 Space       toggle or select the current option
-Enter       select, toggle, or continue
+Enter       select, toggle, continue, or submit an editor
+Ctrl+Enter  insert a new line in the commit-message editor
 Esc         go back
 Tab         complete paths or switch settings panes
 ← / →       switch settings panes
