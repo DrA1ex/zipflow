@@ -7,91 +7,131 @@ function jsonResponse(value, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
-function sseResponse(payloads) {
+function sseResponse(events) {
   const encoder = new TextEncoder();
   return new Response(new ReadableStream({
     start(controller) {
-      for (const payload of payloads) controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
-      controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+      for (const entry of events) {
+        const event = entry.event ? `event: ${entry.event}\n` : '';
+        controller.enqueue(encoder.encode(`${event}data: ${JSON.stringify(entry.data)}\n\n`));
+      }
       controller.close();
     },
   }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
 }
 
-test('Ollama and LM Studio use the same OpenAI-compatible model protocol', async () => {
-  const requested = [];
+function lmModels(contextLength = 32_000) {
+  return {
+    models: [
+      {
+        type: 'llm', key: 'gemma', max_context_length: 131_072,
+        loaded_instances: [{ id: 'gemma-loaded', config: { context_length: contextLength } }],
+        capabilities: { reasoning: { allowed_options: ['off', 'on'], default: 'on' } },
+      },
+      { type: 'embedding', key: 'embed', loaded_instances: [] },
+    ],
+  };
+}
+
+function nativeCompletion(content, reasoning = '') {
+  return jsonResponse({
+    output: [
+      ...(reasoning ? [{ type: 'reasoning', content: reasoning }] : []),
+      ...(content ? [{ type: 'message', content }] : []),
+    ],
+    stats: { input_tokens: 100, total_output_tokens: 20 },
+  });
+}
+
+test('LM Studio uses its native model catalog and excludes embedding models', async () => {
+  let requested;
   const fetchImpl = async (url) => {
-    requested.push(url);
+    requested = url;
+    return jsonResponse(lmModels());
+  };
+
+  assert.deepEqual(await listLocalModels('lmstudio', { fetchImpl }), ['gemma-loaded']);
+  assert.equal(requested, 'http://127.0.0.1:1234/api/v1/models');
+});
+
+test('Ollama keeps the OpenAI-compatible model list', async () => {
+  let requested;
+  const fetchImpl = async (url) => {
+    requested = url;
     return jsonResponse({ data: [{ id: 'qwen-coder' }, { id: 'llama' }] });
   };
 
   assert.deepEqual(await listLocalModels('ollama', { fetchImpl }), ['llama', 'qwen-coder']);
-  assert.deepEqual(await listLocalModels('lmstudio', { fetchImpl }), ['llama', 'qwen-coder']);
-  assert.equal(requested[0], 'http://127.0.0.1:11434/v1/models');
-  assert.equal(requested[1], 'http://127.0.0.1:1234/v1/models');
+  assert.equal(requested, 'http://127.0.0.1:11434/v1/models');
 });
 
-test('optional LLM API token is sent only when configured', async () => {
-  const headers = [];
+test('optional LLM API token is sent to native model discovery', async () => {
+  const received = [];
   const fetchImpl = async (_url, options) => {
-    headers.push(new Headers(options.headers));
-    return jsonResponse({ data: [] });
+    received.push(new Headers(options.headers));
+    return jsonResponse(lmModels());
   };
 
   await listLocalModels('lmstudio', { fetchImpl });
   await listLocalModels('lmstudio', { fetchImpl, apiToken: 'secret-token' });
 
-  assert.equal(headers[0].has('authorization'), false);
-  assert.equal(headers[1].get('authorization'), 'Bearer secret-token');
+  assert.equal(received[0].has('authorization'), false);
+  assert.equal(received[1].get('authorization'), 'Bearer secret-token');
 });
 
-test('local LLM generation sends an English structured prompt and parses the requested response language', async () => {
-  let requestBody;
-  const fetchImpl = async (_url, options) => {
-    requestBody = JSON.parse(options.body);
-    return jsonResponse({
-      choices: [{ message: { content: JSON.stringify({
-        summary: ['Добавлена проверка конфигурации.'],
-        commitMessage: 'Добавить проверку конфигурации',
-      }) } }],
-    });
+test('LM Studio generation uses native streaming settings and a safe context length', async () => {
+  let chatBody;
+  const fetchImpl = async (url, options) => {
+    if (url.endsWith('/api/v1/models')) return jsonResponse(lmModels(32_000));
+    chatBody = JSON.parse(options.body);
+    return nativeCompletion(JSON.stringify({
+      summary: ['Добавлена проверка конфигурации.'],
+      commitMessage: 'Добавить проверку конфигурации',
+    }));
   };
 
   const result = await generateChangeDescription({
-    settings: { llmProvider: 'ollama', llmModel: 'qwen-coder', llmLanguage: 'Russian', llmApiToken: '' },
+    settings: { llmProvider: 'lmstudio', llmModel: 'gemma-loaded', llmLanguage: 'Russian', llmApiToken: '' },
     project: { name: 'fixture', labels: ['Node.js'] },
     plan: { counts: { created: 0, updated: 1, deleted: 0 } },
-    patchContent: 'diff --git a/a.js b/a.js\n-old\n+new\n',
+    patchContent: 'diff --git a/a.js b/a.js\n@@ -1 +1 @@\n-old\n+new\n',
   }, { fetchImpl });
 
   assert.deepEqual(result.summary, ['Добавлена проверка конфигурации.']);
   assert.equal(result.commitMessage, 'Добавить проверку конфигурации');
-  assert.match(requestBody.messages[0].content, /Write both summary and commitMessage in Russian/);
-  assert.match(requestBody.messages[1].content, /PATCH START/);
-  assert.equal(requestBody.response_format.type, 'json_schema');
-  assert.equal(requestBody.stream, true);
+  assert.match(chatBody.input, /SYSTEM:\nYou analyze source-code patches/);
+  assert.match(chatBody.input, /Write both summary and commitMessage in Russian/);
+  assert.equal(chatBody.stream, true);
+  assert.equal(chatBody.reasoning, 'off');
+  assert.ok(chatBody.context_length <= 16_384);
 });
 
-test('completion streams reasoning and structured content incrementally', async () => {
+test('LM Studio native stream exposes model loading, prompt progress, reasoning, and answer chunks', async () => {
   const events = [];
   const fetchImpl = async () => sseResponse([
-    { choices: [{ delta: { reasoning_content: 'Inspecting ' }, finish_reason: null }] },
-    { choices: [{ delta: { reasoning: 'the patch.\n' }, finish_reason: null }] },
-    { choices: [{ delta: { content: '{"summary":["Updated files"],' }, finish_reason: null }] },
-    { choices: [{ delta: { content: '"commitMessage":"Update files"}' }, finish_reason: 'stop' }] },
+    { event: 'model_load.start', data: { type: 'model_load.start' } },
+    { event: 'model_load.progress', data: { type: 'model_load.progress', progress: 0.5 } },
+    { event: 'prompt_processing.progress', data: { type: 'prompt_processing.progress', progress: 0.75 } },
+    { event: 'reasoning.delta', data: { type: 'reasoning.delta', content: 'Inspecting the patch.\n' } },
+    { event: 'message.delta', data: { type: 'message.delta', content: '{"summary":["Updated files"],' } },
+    { event: 'message.delta', data: { type: 'message.delta', content: '"commitMessage":"Update files"}' } },
+    { event: 'chat.end', data: { type: 'chat.end', result: { output: [], stats: { input_tokens: 100 } } } },
   ]);
 
   const completion = await createLocalCompletion({
     provider: 'lmstudio', model: 'fixture', messages: [], responseSchema: { type: 'object' },
+    contextLength: 8_192, reasoningOffSupported: false,
   }, { fetchImpl, onEvent: (event) => events.push(event) });
 
   assert.equal(completion.reasoning, 'Inspecting the patch.\n');
   assert.equal(parseResponse(completion.content).commitMessage, 'Update files');
+  assert.ok(events.some((event) => event.type === 'model-load-progress' && event.progress === 0.5));
+  assert.ok(events.some((event) => event.type === 'prompt-progress' && event.progress === 0.75));
   assert.ok(events.some((event) => event.type === 'chunk' && event.reasoningDelta));
   assert.ok(events.some((event) => event.type === 'chunk' && event.contentDelta));
 });
 
-test('completion retries with JSON mode when a server rejects JSON schema', async () => {
+test('Ollama completion retries with JSON mode when JSON schema is rejected', async () => {
   let calls = 0;
   const fetchImpl = async (_url, options) => {
     calls += 1;
@@ -100,7 +140,7 @@ test('completion retries with JSON mode when a server rejects JSON schema', asyn
     return jsonResponse({ choices: [{ message: { content: '{"summary":["ok"],"commitMessage":"Update files"}' } }] });
   };
   const completion = await createLocalCompletion({
-    provider: 'lmstudio', model: 'fixture', messages: [], responseSchema: { type: 'object' },
+    provider: 'ollama', model: 'fixture', messages: [], responseSchema: { type: 'object' },
   }, { fetchImpl });
 
   assert.equal(calls, 2);
@@ -108,41 +148,77 @@ test('completion retries with JSON mode when a server rejects JSON schema', asyn
 });
 
 test('reasoning-only LM Studio response is repaired instead of reported as empty', async () => {
-  let calls = 0;
+  let chatCalls = 0;
   const progress = [];
-  const fetchImpl = async () => {
-    calls += 1;
-    if (calls === 1) return jsonResponse({
-      choices: [{
-        message: {
-          content: '',
-          reasoning_content: [
-            'Summary (Russian):',
-            '1. Добавлена канонизация путей.',
-            '2. Расширены тесты определения проекта.',
-            'Commit Message (Russian):',
-          ].join('\n'),
-        },
-        finish_reason: 'length',
-      }],
-    });
-    return jsonResponse({ choices: [{ message: { content: JSON.stringify({
+  const fetchImpl = async (url) => {
+    if (url.endsWith('/api/v1/models')) return jsonResponse(lmModels());
+    chatCalls += 1;
+    if (chatCalls === 1) return nativeCompletion('', [
+      'Summary (Russian):',
+      '1. Добавлена канонизация путей.',
+      '2. Расширены тесты определения проекта.',
+      'Commit Message (Russian):',
+    ].join('\n'));
+    return nativeCompletion(JSON.stringify({
       summary: ['Добавлена канонизация путей.', 'Расширены тесты определения проекта.'],
       commitMessage: 'Исправить канонизацию путей проекта',
-    }) }, finish_reason: 'stop' }] });
+    }));
   };
 
   const result = await generateChangeDescription({
-    settings: { llmProvider: 'lmstudio', llmModel: 'gemma', llmLanguage: 'Russian', llmApiToken: 'token' },
+    settings: { llmProvider: 'lmstudio', llmModel: 'gemma-loaded', llmLanguage: 'Russian', llmApiToken: 'token' },
     project: { name: 'zipflow', labels: ['Node.js'] },
     plan: { counts: { created: 0, updated: 5, deleted: 0 } },
-    patchContent: 'diff --git a/a.js b/a.js\n-old\n+new\n',
+    patchContent: 'diff --git a/a.js b/a.js\n@@ -1 +1 @@\n-old\n+new\n',
   }, { fetchImpl, onEvent: (event) => progress.push(event) });
 
-  assert.equal(calls, 2);
+  assert.equal(chatCalls, 2);
   assert.equal(result.commitMessage, 'Исправить канонизацию путей проекта');
   assert.equal(result.diagnostics.repaired, true);
   assert.ok(progress.some((event) => event.type === 'phase' && event.phase === 'repairing'));
+});
+
+test('mid-stream context errors are classified instead of becoming No usable output', async () => {
+  const fetchImpl = async () => sseResponse([
+    {
+      event: 'error',
+      data: {
+        type: 'error',
+        error: { type: 'invalid_request', message: 'request (40761 tokens) exceeds the available context size (32000 tokens)' },
+      },
+    },
+  ]);
+
+  await assert.rejects(() => createLocalCompletion({
+    provider: 'lmstudio', model: 'fixture', messages: [], responseSchema: { type: 'object' },
+  }, { fetchImpl }), (error) => {
+    assert.equal(error.code, 'context_exceeded');
+    assert.equal(error.retryableWithSmallerPrompt, true);
+    assert.match(error.message, /context window/);
+    assert.doesNotMatch(error.message, /No usable output/i);
+    return true;
+  });
+});
+
+test('compute errors are reported as local model memory failures', async () => {
+  const fetchImpl = async () => sseResponse([
+    { event: 'error', data: { type: 'error', error: { type: 'internal_error', message: 'Compute error. Insufficient Memory' } } },
+  ]);
+
+  await assert.rejects(() => createLocalCompletion({
+    provider: 'lmstudio', model: 'fixture', messages: [], responseSchema: { type: 'object' },
+  }, { fetchImpl }), (error) => {
+    assert.equal(error.code, 'out_of_memory');
+    assert.equal(error.retryableWithSmallerPrompt, true);
+    assert.match(error.message, /ran out of memory/);
+    return true;
+  });
+});
+
+test('structured response accepts common snake_case aliases', () => {
+  const result = parseResponse('{"summary":"Changed files","commit_message":"Update files"}');
+  assert.deepEqual(result.summary, ['Changed files']);
+  assert.equal(result.commitMessage, 'Update files');
 });
 
 test('unstructured reasoning can preserve a summary when no JSON is available', () => {

@@ -18,6 +18,7 @@ export function formatRunReport(run) {
       if (run.llm.commitMessage) lines.push('', 'Proposed commit message:', run.llm.commitMessage);
       if (run.llm.warning) lines.push('', `LLM warning: ${run.llm.warning}`);
     }
+    if (run.llm.diagnosticsPath) lines.push(`LLM diagnostics: ${run.llm.diagnosticsPath}`);
   }
   if (run.plan?.counts) lines.push('', 'Plan:', ...formatCounts(run.plan.counts));
   if (run.applied) {

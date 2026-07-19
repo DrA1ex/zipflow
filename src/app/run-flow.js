@@ -4,6 +4,7 @@ import { extractArchive } from '../archive/extract.js';
 import { readArchiveMetadata } from '../archive/metadata.js';
 import { createPlanPatch } from '../patch/create.js';
 import { generateChangeDescription, isLocalLlmEnabled } from '../llm/generate.js';
+import { saveLlmDiagnostics } from '../llm/diagnostics.js';
 import { beginLlmProgress } from './llm-progress.js';
 import { updateManagedHistory } from '../history/managed.js';
 import { buildUpdatePlan } from '../plan/build.js';
@@ -124,6 +125,7 @@ async function inspectArchive(controller, enteredPath) {
     const patch = await createPlanPatch(runId, plan);
     let llmResult = null;
     let llmError = null;
+    let llmDiagnosticsPath = null;
     if (isLocalLlmEnabled(state.settings) && changedCount(plan) > 0) {
       state.progress = { value: 5, total: 7, detail: `Streaming summary from ${state.settings.llmModel}` };
       const progress = beginLlmProgress(controller);
@@ -133,8 +135,21 @@ async function inspectArchive(controller, enteredPath) {
           { settings: state.settings, project: state.project, plan, patchContent: patch.content },
           { onEvent: progress.onEvent },
         );
+        llmDiagnosticsPath = await saveLlmDiagnostics(runId, {
+          status: 'completed',
+          provider: state.settings.llmProvider,
+          model: state.settings.llmModel,
+          diagnostics: llmResult.diagnostics ?? null,
+          raw: llmResult.raw ?? null,
+        }).catch(() => null);
       } catch (error) {
         llmError = error.message;
+        llmDiagnosticsPath = await saveLlmDiagnostics(runId, {
+          status: 'failed',
+          provider: state.settings.llmProvider,
+          model: state.settings.llmModel,
+          error,
+        }).catch(() => null);
       } finally {
         progress.stop();
       }
@@ -157,11 +172,13 @@ async function inspectArchive(controller, enteredPath) {
       commitMessage: llmResult.commitMessage || null,
       warning: llmResult.warning || null,
       diagnostics: llmResult.diagnostics || null,
+      diagnosticsPath: llmDiagnosticsPath,
     } : llmError ? {
       provider: state.settings.llmProvider,
       model: state.settings.llmModel,
       language: state.settings.llmLanguage,
       error: llmError,
+      diagnosticsPath: llmDiagnosticsPath,
     } : null;
     state.run.archiveMetadata = metadata.commitMessage ? {
       commitMessage: metadata.commitMessage,
@@ -174,10 +191,22 @@ async function inspectArchive(controller, enteredPath) {
       ...(metadata.commitMessageSource ? [`Commit message found: ${metadata.commitMessageSource}`] : []),
     ], 'success');
     if (llmResult) {
+      const firstAttempt = llmResult.diagnostics?.attempts?.find((item) => typeof item.attempt === 'number');
+      if (firstAttempt?.patch?.truncated) {
+        controller.message('Local LLM input was reduced safely', [
+          `Estimated patch size: ${firstAttempt.patch.originalEstimatedTokens.toLocaleString('en-US')} tokens`,
+          `Sent to model: ${firstAttempt.patch.sentEstimatedTokens.toLocaleString('en-US')} tokens`,
+          `${firstAttempt.patch.omittedFiles} files had no diff excerpt · ${firstAttempt.patch.omittedHunks} hunks omitted`,
+        ], 'warning');
+      }
       controller.message('Local LLM summary', llmResult.summary, 'info');
       if (llmResult.warning) controller.message('Local LLM response needed fallback handling', [llmResult.warning], 'warning');
     }
-    if (llmError) controller.message('Local LLM summary was not generated', [llmError, 'The update can continue; commit message fallbacks remain available.'], 'warning');
+    if (llmError) controller.message('Local LLM summary was not generated', [
+      llmError,
+      ...(llmDiagnosticsPath ? [`Diagnostics: ${displayPath(llmDiagnosticsPath)}`] : []),
+      'The update can continue; commit message fallbacks remain available.',
+    ], 'warning');
     controller.message('Update plan', [...planActivityLines(plan), `Patch: ${displayPath(patch.path)}`], plan.conflicts.length ? 'warning' : 'info');
     state.busy = false;
     if (plan.conflicts.length && state.workflow.policy.conflictPolicy !== 'overwrite') return showConflictSummary(controller);

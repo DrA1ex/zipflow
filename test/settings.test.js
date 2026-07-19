@@ -8,7 +8,7 @@ import { createInitialState } from '../src/app/state.js';
 import { renderZipflow } from '../src/ui/render.js';
 import { ZipflowController } from '../src/app/controller.js';
 import {
-  openSettings, selectOption, selectSetting, settingsViewModel, submitSettingsEditor,
+  handleSettingsKey, openSettings, selectOption, selectSetting, settingsViewModel, submitSettingsEditor,
 } from '../src/app/settings-panel.js';
 import { exists } from '../src/utils/fs.js';
 
@@ -77,23 +77,47 @@ test('new settings default to keeping source ZIPs for 30 days and 1 GB when arch
   assert.equal(DEFAULT_SETTINGS.archiveMaxBytes, 1_000_000_000);
 });
 
-test('renders a stable two-pane settings list without adding dependent fields on the left', () => {
+test('settings initially show categories only', () => {
   const state = createInitialState();
   state.project = { name: 'fixture', root: '/tmp/fixture' };
   state.screen = 'settings';
   state.settings = { ...DEFAULT_SETTINGS, archivePolicy: 'move' };
   state.settingsPanel = {
-    focus: 'settings', settingIndex: 0, optionIndex: 0, managedCount: 0,
+    mode: 'categories', settingIndex: 0, optionIndex: 0, optionIndices: {}, managedCount: 0,
     previous: { screen: 'home', menuItems: [], selectedIndex: 0, status: 'Ready' },
   };
 
   const view = settingsViewModel(state);
   const output = renderToString(renderZipflow({ state, width: 110, height: 30 }), { width: 110, height: 30 });
 
+  assert.equal(view.mode, 'categories');
   assert.deepEqual(view.definitions.map((item) => item.id), ['theme', 'checkOutput', 'localLlm', 'sourceArchive', 'managedHistory']);
+  assert.deepEqual(view.options, []);
+  assert.match(output, /Categories/);
   assert.match(output, /Source archives/);
-  assert.doesNotMatch(output, /Archive retention —/);
+  assert.doesNotMatch(output, /Archive retention/);
 });
+
+test('category and item positions survive returning to categories and reopening', async () => withSettingsHome(async () => {
+  const { state, controller } = await settingsController({ archivePolicy: 'move' });
+  const definitions = settingsViewModel(state).definitions;
+  const sourceIndex = definitions.findIndex((item) => item.id === 'sourceArchive');
+  state.settingsPanel.settingIndex = sourceIndex;
+
+  await handleSettingsKey(controller, { name: 'enter' });
+  assert.equal(state.settingsPanel.mode, 'options');
+  let view = settingsViewModel(state);
+  const retentionIndex = view.options.findIndex((item) => item.id === 'edit:archiveRetentionDays');
+  state.settingsPanel.optionIndex = retentionIndex;
+  await handleSettingsKey(controller, { name: 'escape' });
+
+  assert.equal(state.settingsPanel.mode, 'categories');
+  assert.equal(state.settingsPanel.settingIndex, sourceIndex);
+  await handleSettingsKey(controller, { name: 'enter' });
+  view = settingsViewModel(state);
+  assert.equal(view.options[state.settingsPanel.optionIndex].id, 'edit:archiveRetentionDays');
+}));
+
 
 test('enabling archive storage keeps focus on the selected policy while revealing its dependent controls', async () => withSettingsHome(async () => {
   const { state, controller } = await settingsController({ archivePolicy: 'keep' });

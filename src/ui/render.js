@@ -7,7 +7,6 @@ import {
   RequireViewport,
   ScrollPane,
   SelectList,
-  SplitPane,
   Text,
   TextEditorView,
   WorkspaceFooter,
@@ -208,63 +207,40 @@ function runtimePane(title, lines, height, theme) {
 
 function renderSettings(state, width, height, theme) {
   const view = settingsViewModel(state);
-  const leftWidth = Math.max(24, Math.min(34, Math.floor(width * 0.36)));
-  const content = SplitPane({
-    orientation: 'horizontal',
-    gap: 2,
+  const categories = view.mode === 'categories';
+  const items = categories ? view.definitions : view.options;
+  const title = categories ? ' SETTINGS ' : ` ${view.selectedSetting.label.toUpperCase()} `;
+  const description = categories
+    ? 'Choose a settings category. Enter opens it; Esc closes settings.'
+    : view.selectedSetting.description;
+  const content = WorkspacePane({
+    title,
+    active: !view.modal,
     height,
-    focus: view.modal ? 'options' : view.focus,
     theme,
-    panes: [
-      {
-        id: 'settings',
-        min: 22,
-        size: leftWidth,
-        node: WorkspacePane({
-          title: ' SETTINGS ',
-          active: !view.modal && view.focus === 'settings',
-          height,
-          theme,
-          children: [SelectList({
-            title: 'Global',
-            items: view.definitions,
-            selectedIndex: view.settingIndex,
-            windowSize: Math.max(2, height - 6),
-            getLabel: (item) => item.label,
-            getDescription: (item) => item.description,
-            theme,
-            pointerId: 'zipflow:settings-list',
-            onSelect: (_item, index) => state.dispatch?.({ type: 'settings-select-setting', index }),
-          })],
+    children: [
+      Text(description, { wrap: true }),
+      Text(''),
+      SelectList({
+        title: categories ? 'Categories' : 'Options',
+        items,
+        selectedIndex: view.selectedIndex,
+        windowSize: Math.max(2, height - 8),
+        getLabel: (item) => {
+          if (categories || item.section || item.action) return item.label;
+          return `${item.selected ? '●' : '○'} ${item.label}`;
+        },
+        getDescription: (item) => item.description ?? '',
+        getDisabled: (item) => item.disabled,
+        wrapItems: true,
+        maxItemLines: 3,
+        theme,
+        pointerId: categories ? 'zipflow:settings-categories' : 'zipflow:settings-options',
+        onSelect: (_item, index) => state.dispatch?.({
+          type: categories ? 'settings-select-setting' : 'settings-select-option',
+          index,
         }),
-      },
-      {
-        id: 'options',
-        min: 30,
-        grow: 1,
-        node: WorkspacePane({
-          title: ` ${view.selectedSetting.label.toUpperCase()} `,
-          active: !view.modal && view.focus === 'options',
-          height,
-          theme,
-          children: [
-            Text(view.selectedSetting.description, { wrap: true }),
-            Text(''),
-            SelectList({
-              title: 'Options',
-              items: view.options,
-              selectedIndex: view.optionIndex,
-              windowSize: Math.max(2, height - 9),
-              getLabel: (item) => item.section ? item.label : item.action ? item.label : `${item.selected ? '●' : '○'} ${item.label}`,
-              getDescription: (item) => item.description ?? '',
-              getDisabled: (item) => item.disabled,
-              theme,
-              pointerId: 'zipflow:settings-options',
-              onSelect: (_item, index) => state.dispatch?.({ type: 'settings-select-option', index }),
-            }),
-          ],
-        }),
-      },
+      }),
     ],
   });
   if (!view.modal) return content;
@@ -346,9 +322,11 @@ function screenTitle(state) {
 }
 
 function footerHints(state) {
-  if (state.screen === 'settings') return state.settingsPanel?.modal
-    ? ['Enter save', 'Esc cancel', 'Tab complete path', 'Ctrl+B close settings']
-    : ['↑/↓ choose', '←/→ switch pane', 'Enter/Space apply', 'Esc or Ctrl+B close', 'Ctrl+T native select'];
+  if (state.screen === 'settings') {
+    if (state.settingsPanel?.modal) return ['Enter save', 'Esc cancel', 'Tab complete path', 'Ctrl+B close settings'];
+    if (state.settingsPanel?.mode === 'options') return ['↑/↓ choose', 'Enter/Space apply', 'Esc/← categories', 'Ctrl+B close', 'Ctrl+T native select'];
+    return ['↑/↓ choose category', 'Enter open', 'Esc or Ctrl+B close', 'Ctrl+T native select'];
+  }
   if (state.busy || ['checks-running', 'deploy-running'].includes(state.screen)) return ['Ctrl+C stop'];
   if (isEditorScreen(state.screen)) return state.editorContext?.multiline
     ? ['Enter confirm', 'Ctrl+Enter newline', 'Ctrl+U clear to cursor', 'Esc back', 'Ctrl+T native select']

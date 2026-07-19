@@ -26,9 +26,10 @@ export async function openSettings(controller) {
       selectedIndex: state.selectedIndex,
       status: state.status,
     },
-    focus: 'settings',
+    mode: 'categories',
     settingIndex: 0,
     optionIndex: 0,
+    optionIndices: {},
     models: [],
     modelsProvider: null,
     modelError: null,
@@ -60,7 +61,7 @@ export function backSettingsEditor(controller) {
   const panel = controller.state.settingsPanel;
   if (!panel?.modal) return;
   panel.modal = null;
-  controller.state.status = 'Global settings';
+  controller.state.status = currentDefinition(controller.state).label;
   controller.invalidate();
 }
 
@@ -74,7 +75,7 @@ export async function submitSettingsEditor(controller) {
     state.settings = await saveSettings({ ...state.settings, [modal.field.id]: value });
     if (modal.field.id === 'llmApiToken') resetModelCache(state.settingsPanel);
     state.settingsPanel.modal = null;
-    state.settingsPanel.optionIndex = findOptionIndex(state, modal.returnOptionId);
+    restoreOptionById(state, modal.returnOptionId);
     state.status = `${modal.field.label} saved`;
     controller.invalidate();
     return true;
@@ -90,36 +91,24 @@ export async function handleSettingsKey(controller, key) {
   const panel = controller.state.settingsPanel;
   if (!panel) return false;
   if (panel.modal) return handleModalKey(controller, key);
-  if (key.name === 'escape') {
+  if (key.name === 'escape' || key.name === 'left') {
+    if (panel.mode === 'options') return showCategories(controller);
     closeSettings(controller);
-    return true;
-  }
-  if (key.name === 'left' || key.name === 'right' || key.name === 'tab') {
-    panel.focus = panel.focus === 'settings' ? 'options' : 'settings';
-    panel.optionIndex = preferredOptionIndex(controller.state);
-    controller.invalidate();
     return true;
   }
   if (key.name === 'up' || key.name === 'down') {
     const delta = key.name === 'up' ? -1 : 1;
-    if (panel.focus === 'settings') {
+    if (panel.mode === 'categories') {
       panel.settingIndex = wrap(panel.settingIndex + delta, settingsDefinitions(controller.state).length);
-      panel.optionIndex = preferredOptionIndex(controller.state);
-      await ensureDefinitionData(controller, currentDefinition(controller.state));
     } else {
       panel.optionIndex = moveOption(controller.state, panel.optionIndex, delta);
+      rememberOptionIndex(controller.state);
     }
     controller.invalidate();
     return true;
   }
-  if (key.name === 'enter' || key.name === 'space') {
-    if (panel.focus === 'settings') {
-      panel.focus = 'options';
-      await ensureDefinitionData(controller, currentDefinition(controller.state));
-      panel.optionIndex = preferredOptionIndex(controller.state);
-      controller.invalidate();
-      return true;
-    }
+  if (['enter', 'space', 'right', 'tab'].includes(key.name)) {
+    if (panel.mode === 'categories') return openSelectedCategory(controller);
     await activateOption(controller, panel.optionIndex);
     return true;
   }
@@ -130,32 +119,53 @@ export async function selectSetting(controller, index) {
   const panel = controller.state.settingsPanel;
   if (!panel) return;
   panel.settingIndex = clamp(index, 0, settingsDefinitions(controller.state).length - 1);
-  panel.focus = 'settings';
-  await ensureDefinitionData(controller, currentDefinition(controller.state));
-  panel.optionIndex = preferredOptionIndex(controller.state);
-  controller.invalidate();
+  await openSelectedCategory(controller);
 }
 
 export async function selectOption(controller, index) {
   const panel = controller.state.settingsPanel;
   if (!panel) return;
   panel.optionIndex = clamp(index, 0, optionsFor(controller.state).length - 1);
-  panel.focus = 'options';
+  rememberOptionIndex(controller.state);
   await activateOption(controller, panel.optionIndex);
 }
 
 export function settingsViewModel(state) {
   const definitions = settingsDefinitions(state);
   const selectedSetting = currentDefinition(state);
+  const mode = state.settingsPanel?.mode ?? 'categories';
   return {
+    mode,
     definitions,
     selectedSetting,
-    options: settingsOptions(state, selectedSetting),
+    options: mode === 'options' ? optionsFor(state) : [],
+    selectedIndex: mode === 'categories'
+      ? state.settingsPanel?.settingIndex ?? 0
+      : state.settingsPanel?.optionIndex ?? 0,
     settingIndex: state.settingsPanel?.settingIndex ?? 0,
     optionIndex: state.settingsPanel?.optionIndex ?? 0,
-    focus: state.settingsPanel?.focus ?? 'settings',
     modal: state.settingsPanel?.modal ?? null,
   };
+}
+
+async function openSelectedCategory(controller) {
+  const { state } = controller;
+  const panel = state.settingsPanel;
+  panel.mode = 'options';
+  await ensureDefinitionData(controller, currentDefinition(state));
+  panel.optionIndex = savedOptionIndex(state);
+  state.status = currentDefinition(state).label;
+  controller.invalidate();
+  return true;
+}
+
+function showCategories(controller) {
+  const { state } = controller;
+  rememberOptionIndex(state);
+  state.settingsPanel.mode = 'categories';
+  state.status = 'Global settings';
+  controller.invalidate();
+  return true;
 }
 
 async function handleModalKey(controller, key) {
@@ -188,6 +198,7 @@ async function activateOption(controller, index) {
   const { state } = controller;
   const option = optionsFor(state)[index];
   if (!option || option.disabled) return;
+  if (option.action === 'back-categories') return showCategories(controller);
   if (option.action === 'refresh-models') return refreshModels(controller);
   if (option.action === 'edit-setting') return openSettingModal(controller, option.fieldId, option.id);
   if (option.action === 'clear-token') {
@@ -199,13 +210,14 @@ async function activateOption(controller, index) {
   }
   if (option.action === 'reset-history') {
     state.settingsPanel.confirmHistoryReset = true;
-    state.settingsPanel.optionIndex = 0;
+    restoreOptionById(state, 'confirm-history-reset');
     state.status = 'Confirm managed-file history reset';
     controller.invalidate();
     return;
   }
   if (option.action === 'cancel-history-reset') {
     state.settingsPanel.confirmHistoryReset = false;
+    restoreOptionById(state, 'reset-history');
     state.status = 'Managed-file history was not changed';
     controller.invalidate();
     return;
@@ -216,6 +228,7 @@ async function activateOption(controller, index) {
     state.settingsPanel.confirmHistoryReset = false;
     controller.message('Managed-file history reset', [`${result.removed} recorded paths removed.`], 'warning');
     state.status = 'Managed-file history reset';
+    restoreOptionById(state, 'reset-history');
     controller.invalidate();
     return;
   }
@@ -232,7 +245,7 @@ async function applyChoice(controller, option) {
     resetModelCache(state.settingsPanel);
     if (option.value !== 'disabled') await refreshModels(controller, { quiet: true });
   }
-  state.settingsPanel.optionIndex = findOptionIndex(state, option.id);
+  restoreOptionById(state, option.id);
   state.status = `${option.label} selected`;
   controller.invalidate();
 }
@@ -266,7 +279,7 @@ async function refreshModels(controller, { quiet = false } = {}) {
     if (!quiet) state.status = error.message;
   } finally {
     panel.loadingModels = false;
-    panel.optionIndex = preferredOptionIndex(state);
+    panel.optionIndex = savedOptionIndex(state);
     controller.invalidate();
   }
 }
@@ -309,19 +322,32 @@ function currentDefinition(state) {
 }
 
 function optionsFor(state) {
-  return settingsOptions(state, currentDefinition(state));
+  return [
+    { id: 'back-categories', action: 'back-categories', label: '← Back to categories', description: 'Return without losing this category position.' },
+    ...settingsOptions(state, currentDefinition(state)),
+  ];
 }
 
-function preferredOptionIndex(state) {
+function savedOptionIndex(state) {
+  const panel = state.settingsPanel;
   const definition = currentDefinition(state);
-  const options = settingsOptions(state, definition);
+  const options = optionsFor(state);
+  const saved = panel.optionIndices?.[definition.id];
+  if (Number.isInteger(saved) && options[saved] && !options[saved].disabled) return saved;
   const selected = options.findIndex((option) => option.settingId === definition.primarySetting && option.selected);
   return selected >= 0 ? selected : moveOption(state, -1, 1);
 }
 
-function findOptionIndex(state, optionId) {
+function rememberOptionIndex(state) {
+  const panel = state.settingsPanel;
+  if (!panel || panel.mode !== 'options') return;
+  panel.optionIndices[currentDefinition(state).id] = panel.optionIndex;
+}
+
+function restoreOptionById(state, optionId) {
   const index = optionsFor(state).findIndex((option) => option.id === optionId);
-  return index >= 0 ? index : preferredOptionIndex(state);
+  state.settingsPanel.optionIndex = index >= 0 ? index : savedOptionIndex(state);
+  rememberOptionIndex(state);
 }
 
 function moveOption(state, current, delta) {

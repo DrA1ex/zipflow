@@ -51,9 +51,11 @@ Persists versioned global application settings in `~/.zipflow/settings.json`. Se
 
 ### `src/llm`
 
-Uses one OpenAI-compatible client for Ollama and LM Studio. It lists models from `/v1/models` and streams `/v1/chat/completions` responses. The client emits transport, reasoning, content, and completion events without exposing the API token. Both `reasoning_content` and `reasoning` fields are accepted.
+Uses provider-specific adapters. LM Studio model metadata comes from the native `/api/v1/models` endpoint and generation uses the native `/api/v1/chat` stream, including model-load, prompt-processing, reasoning, message, and error events. Ollama model metadata comes from `/api/ps` and `/api/show`; generation uses its OpenAI-compatible chat-completion stream. API tokens are applied only as authorization headers and are never emitted through Activity events.
 
-Generation validates structured summary and commit-message JSON. HTTP schema rejection retries with JSON mode. A reasoning-only or length-limited response triggers a second formatting pass over the model draft, followed by a conservative unstructured-summary fallback. LLM errors remain non-fatal to archive application.
+`model-info.js` resolves the active or configured context size with a conservative fallback. `patch-budget.js` reserves context for instructions and output, keeps a complete changed-file manifest, and distributes available diff hunks across files. Context overflow and local compute-memory errors trigger progressively smaller-patch retries. `diagnostics.js` stores a bounded, sanitized request/result/error record in the run directory.
+
+Generation validates structured summary and commit-message JSON. Schema rejection retries with JSON mode where supported. A reasoning-only or length-limited response triggers a second formatting pass over the model draft, followed by a conservative unstructured-summary fallback. LLM errors remain non-fatal to archive application.
 
 ### `src/patch`
 
@@ -140,7 +142,7 @@ project
   -> review and atomic workflow replacement
 ```
 
-The left settings list is stable. Dependent controls are omitted from the right pane when their parent feature is disabled, and input-like values open in a modal without replacing the settings screen. Rerenders preserve selection by item identifier rather than resetting to the first item.
+Global settings use a category/detail state machine. The category screen contains only stable top-level categories. Opening a category replaces it with that category's options and an explicit back item; returning restores the previous category selection, and reopening restores the last selected option for that category. Dependent controls are omitted when their parent feature is disabled, and input-like values open in a modal without replacing the current settings level.
 
 ## Run lifecycle
 
@@ -236,7 +238,7 @@ Unit and integration tests use temporary projects and Git repositories. Regressi
 - custom-check prompt order;
 - stable radio selection and Space activation;
 - global settings persistence and rendering;
-- OpenAI-compatible model discovery, optional authorization, SSE streaming, reasoning-only responses, repair requests, and structured local LLM responses;
+- LM Studio and Ollama model metadata, context budgeting, structural patch truncation, optional authorization, native and OpenAI-compatible SSE streams, progress events, context/OOM retries, reasoning-only responses, diagnostics, repair requests, and structured local LLM responses;
 - source archive keep, move, delete, retention, and size-limit behavior;
 - commit-message editor fallback, typing, deletion, and multiline input;
 - patch creation from archive-versus-snapshot changes;

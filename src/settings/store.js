@@ -3,7 +3,7 @@ import { themes } from 'terlio.js';
 import { readJson, writeJsonAtomic } from '../utils/fs.js';
 import { ensureZipflowHome, getZipflowHome } from '../workflow/store.js';
 
-export const SETTINGS_VERSION = 3;
+export const SETTINGS_VERSION = 4;
 export const THEME_NAMES = Object.keys(themes);
 export const LLM_PROVIDERS = ['disabled', 'ollama', 'lmstudio'];
 export const LLM_LANGUAGES = ['English', 'Russian', 'German', 'French', 'Spanish', 'Chinese', 'Japanese'];

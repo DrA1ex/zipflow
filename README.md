@@ -136,13 +136,13 @@ Other supported message sources are the archive filename, a generated run identi
 
 ## Local LLM summaries and commit messages
 
-Zipflow can use either Ollama or LM Studio through their shared OpenAI-compatible HTTP surface. Configure the provider, optional bearer token, model, and response language in `Ctrl+B` settings.
+Zipflow supports Ollama and LM Studio with provider-specific adapters. LM Studio uses its native model catalog and streaming chat API so Zipflow can read the loaded context size and display model-load and prompt-processing progress. Ollama uses its native model metadata endpoints to discover the active or configured context size, then uses its OpenAI-compatible chat-completion stream for generation. Configure the provider, optional bearer token, model, and response language in `Ctrl+B` settings.
 
 Default local endpoints:
 
 ```text
-Ollama:    http://127.0.0.1:11434/v1
-LM Studio: http://127.0.0.1:1234/v1
+Ollama:    http://127.0.0.1:11434
+LM Studio: http://127.0.0.1:1234
 ```
 
 When enabled, every inspected archive with content changes produces:
@@ -151,9 +151,11 @@ When enabled, every inspected archive with content changes produces:
 - a short Activity summary;
 - a proposed commit message stored in the JSON and text run reports.
 
-The system and user prompts are always English. The selected language applies only to the generated summary and commit message. Zipflow uses a streaming request, so Activity shows the elapsed time, received chunks, the current model draft, and the structured answer as it arrives. Both `reasoning_content` and `reasoning` streams are understood.
+The system and user prompts are always English. The selected language applies only to the generated summary and commit message. Activity shows the current transport phase, model-load progress, prompt-processing progress when the provider exposes it, elapsed time, reasoning, and final content as the stream arrives.
 
-Zipflow requests structured JSON and validates both fields before using them. If a reasoning model consumes its output budget before producing JSON, Zipflow performs a second compact formatting request against the generated draft. If only a useful summary can be recovered, that summary is kept while the commit message uses the configured fallback. Local LLM failures never block archive application.
+Before generation, Zipflow discovers the model context size when possible and calculates a conservative prompt budget with space reserved for instructions and output. The complete `changes.patch` remains stored in the run, while the model receives a structurally shortened patch when necessary: the complete changed-file manifest is retained and diff hunks are distributed across files instead of cutting text at an arbitrary byte boundary. Zipflow also caps the effective prompt context conservatively to reduce local GPU-memory pressure. Context-overflow and out-of-memory responses trigger a smaller-patch retry and are reported explicitly rather than as `No usable output`.
+
+Zipflow requests structured JSON and validates both fields before using them. If a reasoning model consumes its output budget before producing JSON, Zipflow performs a second compact formatting request against the generated draft. If only a useful summary can be recovered, that summary is kept while the commit message uses the configured fallback. Provider errors and sanitized raw diagnostics are saved in `~/.zipflow/runs/<run-id>/llm-diagnostics.json`. Local LLM failures never block archive application.
 
 The workflow commit-message source can be set to **Local LLM**. It uses the generated message first, then `.zipflow/commit-message.txt`, then `zipflow: apply <run-id>`.
 
@@ -183,7 +185,7 @@ Deployment stdout, stderr, exit code, and duration are saved in the run report. 
 
 ## Global settings
 
-Press `Ctrl+B` to open a two-pane settings panel. These settings are global and apply to every project. The left pane remains stable; dependent controls appear in the right pane under their parent setting instead of adding new rows on the left. Text, secret, path, and numeric values are edited in compact modal dialogs over the settings panel.
+Press `Ctrl+B` to open global settings. The first screen contains only categories. `Enter`, `Space`, `Right`, or `Tab` opens the selected category; the category screen contains its settings and a **Back to categories** item. `Esc` or `Left` also returns to the category list. Zipflow remembers both the selected category and the selected item inside every category, so navigating back never resets the cursor. Text, secret, path, and numeric values are edited in compact modal dialogs over the settings screen.
 
 Current settings include:
 
@@ -277,8 +279,8 @@ Space       toggle or select the current option
 Enter       select, toggle, continue, or submit an editor
 Ctrl+Enter  insert a new line in the commit-message editor
 Esc         go back
-Tab         complete paths or switch settings panes
-← / →       switch settings panes
+Tab         complete paths or open the selected settings category
+← / →       return from or open a settings category
 Page Up     scroll activity upward
 Page Down   scroll activity downward
 Ctrl+B      open or close global settings
