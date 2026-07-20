@@ -28,6 +28,7 @@ export function createInitialState() {
     progress: { value: 0, total: 1, detail: '' },
     checkRuntime: null,
     deployRuntime: null,
+    postCheckContinuation: null,
     llmRuntime: null,
     llmAbortController: null,
     exportDraft: null,

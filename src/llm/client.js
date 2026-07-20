@@ -339,10 +339,16 @@ function textValue(value) {
 function nativeMessages(messages) {
   const systemPrompt = messages.filter((item) => item.role === 'system').map((item) => item.content).join('\n\n');
   const nonSystem = messages.filter((item) => item.role !== 'system');
-  const input = nonSystem.length === 1
-    ? nonSystem[0].content
-    : nonSystem.map((item) => ({ type: 'message', role: item.role, content: item.content }));
+  const input = nonSystem.length <= 1
+    ? String(nonSystem[0]?.content ?? '')
+    : nonSystem.map((item) => `${nativeRoleLabel(item.role)}:\n${String(item.content ?? '')}`).join('\n\n');
   return { systemPrompt, input };
+}
+
+function nativeRoleLabel(role) {
+  if (role === 'assistant') return 'PREVIOUS MODEL CONTEXT';
+  if (role === 'user') return 'CURRENT USER REQUEST';
+  return String(role ?? 'context').toUpperCase();
 }
 
 function lmStudioChoices(models) {

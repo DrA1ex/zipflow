@@ -122,6 +122,11 @@ function renderTranscript(state, width, height, theme) {
       event.preventDefault();
     },
     selection: state.activitySelection,
+    onSelectionChange: (text, _selection, event) => {
+      if (text || event?.action !== 'release' || event?.button !== 'left') return;
+      const row = Math.max(0, state.transcriptScroll + Math.trunc(Number(event.localY) || 0));
+      state.dispatch?.({ type: 'activity-toggle-row', row });
+    },
     onCopy: (text, _selection, _event, context) => {
       const result = copyTextToClipboard(text, { output: context.runtime.output });
       state.status = result.copied ? 'Activity text copied' : 'Clipboard transfer unavailable';

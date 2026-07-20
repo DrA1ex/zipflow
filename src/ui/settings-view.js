@@ -3,10 +3,12 @@ import {
   Modal,
   SplitPane,
   SelectList,
+  Spinner,
   Text,
   TextEditorView,
   WorkspacePane,
   color,
+  renderNode,
 } from 'terlio.js';
 import { settingsViewModel } from '../app/settings-panel.js';
 import { PathCompletionPopup } from './path-completion.js';
@@ -137,6 +139,12 @@ function renderModelConfigPage(state, view, width, height, theme) {
 }
 
 function choiceLabel(state, item) {
+  if (item.action === 'refresh-models' && item.loading) {
+    return renderNode(Spinner({
+      frame: state.settingsPanel?.modelRefreshFrame ?? 0,
+      label: 'Refreshing available models',
+    }), 48)[0];
+  }
   if (!item.settingId) return item.label;
   const selected = item.selected || state.settings[item.settingId] === item.value;
   return `${selected ? '●' : '○'} ${item.label}`;

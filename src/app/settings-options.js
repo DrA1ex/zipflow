@@ -152,9 +152,10 @@ function managedHistoryParameters(state) {
 function modelChoices(state, parameter) {
   const panel = state.settingsPanel;
   const result = [{
-    id: 'refresh-models', action: 'refresh-models', label: panel?.loadingModels ? 'Refreshing models…' : 'Refresh available models',
+    id: 'refresh-models', action: 'refresh-models', label: 'Refresh available models',
     description: panel?.modelError ?? '',
-    disabled: Boolean(panel?.loadingModels),
+    loading: Boolean(panel?.loadingModels),
+    disabled: false,
   }];
   if (panel?.models?.length) {
     result.push(...panel.models.map((model) => ({
@@ -176,12 +177,18 @@ function modelChoices(state, parameter) {
 
 
 function modelChoiceLabel(state, model) {
-  const identity = [model.paramsString, model.quantization].filter(Boolean).join(' · ');
-  const config = modelConfigSummary(state, model);
-  const details = model.loaded
-    ? ['Loaded', identity, config].filter(Boolean).join(' · ')
-    : [identity, config ? `Configured · ${config}` : ''].filter(Boolean).join(' · ');
-  return details ? `${model.label}\n${details}` : model.label;
+  const identity = [model.label, model.paramsString, model.quantization].filter(Boolean).join(' · ');
+  if (!model.loaded) return identity;
+  const config = formatLoadedModelConfig(modelConfigSummary(state, model));
+  return `${identity} // Loaded${config ? `\n${config}` : ''}`;
+}
+
+function formatLoadedModelConfig(value) {
+  return String(value ?? '')
+    .replace(/^context /i, 'Context ')
+    .replace(/ · batch /i, ' · batch ')
+    .replace(/ · flash /i, ' · flash ')
+    .replace(/ · KV /i, ' · KV ');
 }
 
 function modelDisplayLabel(model) {

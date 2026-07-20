@@ -1,4 +1,4 @@
-import { KeyValueBlock, color, renderNode, wrapText } from 'terlio.js';
+import { PropertyRows, color, renderNode, wrapText } from 'terlio.js';
 import { llmActivityLines } from '../app/llm-progress.js';
 
 export function transcriptLines(state, theme, width) {
@@ -28,6 +28,17 @@ export function toggleActivityBlockAtScroll(state) {
   const range = layout.ranges.find((item) => item.collapsible && item.start <= scroll && item.end >= scroll)
     ?? layout.ranges.find((item) => item.collapsible && item.start >= scroll)
     ?? [...layout.ranges].reverse().find((item) => item.collapsible && item.end <= scroll);
+  return toggleRange(state, range);
+}
+
+export function toggleActivityBlockAtRow(state, row) {
+  const range = state.activityLayout?.ranges?.find((item) => (
+    item.collapsible && item.start <= row && item.end >= row
+  ));
+  return toggleRange(state, range);
+}
+
+function toggleRange(state, range) {
   if (!range) return false;
   const message = state.messages.find((item) => item.id === range.messageId);
   if (!message) return false;
@@ -71,12 +82,16 @@ function diffToken(line) {
 function collapsedLines(lines = []) {
   const visible = lines.slice(0, 2);
   const hidden = Math.max(0, lines.length - visible.length);
-  return hidden ? [...visible, `… ${hidden} more lines · scroll here and press E to expand`] : visible;
+  return hidden ? [...visible, `… ${hidden} more lines · click or press E to expand`] : visible;
 }
 
-function projectActivityBlock(message, _theme, width) {
+function projectActivityBlock(message, theme, width) {
   const rows = (message.lines ?? []).map((line) => splitProjectProperty(line));
-  return renderNode(KeyValueBlock({ title: ` ${message.title} `, rows }), Math.max(24, width - 4));
+  const highlightedTheme = {
+    ...theme,
+    borderMuted: theme?.borderActive ?? theme?.textAccent ?? theme?.border,
+  };
+  return renderNode(PropertyRows({ title: ` ${message.title} `, rows, theme: highlightedTheme }), Math.max(24, width - 4));
 }
 
 function splitProjectProperty(line) {

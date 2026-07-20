@@ -56,9 +56,21 @@ test('LM Studio model list shows parameter counts and only loaded models show ru
   const output = renderToString(renderZipflow({ state, width: 120, height: 32 }), { width: 120, height: 32 });
 
   assert.match(output, /Gemma 12B[\s\S]*12B · Q4_K_M/);
-  assert.match(output, /Qwen 27B[\s\S]*Loaded · 27B · Q5_K_M · context 24,000/);
+  assert.match(output, /Qwen 27B · 27B · Q5_K_M \/\/ Loaded/);
+  assert.match(output, /Context 24,000 · batch 512 · flash enabled · KV gpu memory/);
   assert.doesNotMatch(output, /just-in-time/i);
   assert.doesNotMatch(output, /Read the models currently exposed/i);
+});
+
+
+test('model refresh renders the Terlio inline spinner in the refresh row', async () => {
+  const state = settingsState(await models());
+  state.settingsPanel.loadingModels = true;
+  state.settingsPanel.modelRefreshFrame = 1;
+  const output = renderToString(renderZipflow({ state, width: 120, height: 32 }), { width: 120, height: 32 });
+
+  assert.match(output, /⠙ Refreshing available models/);
+  assert.doesNotMatch(output, /Refreshing available models ×/);
 });
 
 test('model selection skips Refresh and model configuration starts on Use this model', async () => {

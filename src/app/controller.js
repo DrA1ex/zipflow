@@ -16,7 +16,7 @@ import {
   selectModelSettingParameter, selectParameter, selectSetting,
 } from './settings-panel.js';
 import { projectSummary } from '../ui/format.js';
-import { toggleActivityBlockAtScroll } from '../ui/activity.js';
+import { toggleActivityBlockAtRow, toggleActivityBlockAtScroll } from '../ui/activity.js';
 import { terminateActiveProcesses } from '../utils/process.js';
 import { removeIfExists } from '../utils/fs.js';
 import {
@@ -110,6 +110,13 @@ export class ZipflowController {
   }
 
   async dispatch(action) {
+    if (action.type === 'activity-toggle-row') {
+      if (toggleActivityBlockAtRow(this.state, action.row)) {
+        this.setStatus('Activity block toggled');
+        this.invalidate();
+      }
+      return;
+    }
     if (action.type === 'settings-select-setting') return selectSetting(this, action.index);
     if (action.type === 'settings-select-parameter') return selectParameter(this, action.index);
     if (action.type === 'settings-select-choice') return selectChoice(this, action.index);

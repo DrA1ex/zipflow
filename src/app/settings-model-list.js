@@ -6,9 +6,17 @@ export async function refreshModels(controller, { quiet = false } = {}) {
   const provider = state.settings.llmProvider;
   if (provider === 'disabled') return;
   const panel = state.settingsPanel;
+  if (panel.loadingModels) return;
   panel.loadingModels = true;
+  panel.modelRefreshFrame = 0;
   panel.modelError = null;
   controller.invalidate();
+  const spinnerTimer = setInterval(() => {
+    if (!panel.loadingModels) return;
+    panel.modelRefreshFrame = (panel.modelRefreshFrame + 1) % 10_000;
+    controller.invalidate();
+  }, 120);
+  spinnerTimer.unref?.();
   try {
     panel.models = await listLocalModelChoices(provider, { apiToken: state.settings.llmApiToken });
     panel.modelsProvider = provider;
@@ -26,7 +34,9 @@ export async function refreshModels(controller, { quiet = false } = {}) {
     panel.modelError = error.message;
     if (!quiet) state.status = error.message;
   } finally {
+    clearInterval(spinnerTimer);
     panel.loadingModels = false;
+    panel.modelRefreshFrame = 0;
     controller.invalidate();
   }
 }

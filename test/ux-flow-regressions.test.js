@@ -91,6 +91,30 @@ test('Finish keeps Zipflow waiting for the next archive', async () => {
   assert.match(state.status, /Waiting for archive/i);
 });
 
+
+test('keeping an update after failed checks still offers a result commit and skips deployment', async () => {
+  const state = createInitialState();
+  state.project = projectFixture();
+  state.workflow = createRecommendedWorkflow(state.project);
+  state.workflow.git.resultCommit = 'ask';
+  state.workflow.deploy = { policy: 'always', commandText: './scripts/deploy.sh', cwd: '.' };
+  state.run = {
+    id: 'failed-run', status: 'checks_failed',
+    applied: { paths: ['src/index.js'], changedPaths: ['src/index.js'] },
+    checks: { ok: false, passed: 0, failed: 1, results: [{ id: 'test', name: 'Unit tests', ok: false }] },
+  };
+  state.screen = 'check-failed';
+  const controller = new ZipflowController(state);
+
+  await activatePostCheck(controller, 'keep-changes');
+
+  assert.equal(state.screen, 'commit');
+  assert.equal(state.postCheckContinuation.status, 'completed_with_errors');
+  assert.equal(state.postCheckContinuation.skipDeploy, true);
+  assert.ok(state.menuItems.some((item) => item.id === 'create-commit'));
+  assert.match(state.panelIntro.join(' '), /Required checks failed/);
+});
+
 test('run history exposes changed groups and stored file diffs', async () => {
   const root = await tempDir('zipflow-history-diff-');
   const patchPath = path.join(root, 'changes.patch');

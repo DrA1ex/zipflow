@@ -41,8 +41,9 @@ test('Project detected is a framed Activity block and the header does not show t
 
   const output = renderToString(renderZipflow({ state, width: 100, height: 40 }), { width: 100, height: 40 });
   assert.match(output, /┌  Project detected/);
-  assert.match(output, /Root: \/tmp\/fixture/);
-  assert.match(output, /Detected: Node\.js · TypeScript/);
+  assert.match(output, new RegExp(`${escapeRegExp(themes.ocean.borderActive)}┌  Project detected`));
+  assert.match(output, /Root:\s+\/tmp\/fixture/);
+  assert.match(output, /Detected:\s+Node\.js · TypeScript/);
   assert.match(output, /Workflow: configured/);
   assert.doesNotMatch(output, /Theme:/);
 });
@@ -64,6 +65,31 @@ test('Activity has an in-app selection state and Ctrl+T enables native selection
 
   const output = renderToString(renderZipflow({ state, width: 100, height: 30 }), { width: 100, height: 30 });
   assert.match(output, /Selectable text/);
+});
+
+
+test('clicking a collapsed Activity block expands it without disabling text selection', async () => {
+  const state = createInitialState();
+  state.project = { name: 'fixture', root: '/tmp/fixture', labels: [], git: false };
+  appendMessage(state, 'Long output', ['one', 'two', 'three', 'four', 'five'], 'error');
+  setScreen(state, 'home', { items: [{ id: 'exit', label: 'Exit' }], status: 'Ready' });
+  const controller = new ZipflowController(state);
+  controller.invalidate = () => {};
+
+  const tree = renderZipflow({ state, width: 100, height: 30 });
+  const region = findNode(tree, (node) => node.props?.pointerId === 'zipflow:transcript:selection');
+  assert.ok(region);
+  const context = { runtime: { output: { write() {} } } };
+  const base = {
+    button: 'left', localX: 1, localY: 0,
+    preventDefault() {}, stopPropagation() {}, capturePointer() {}, releasePointerCapture() {},
+  };
+  region.props.onClick({ ...base, action: 'click' }, context);
+  region.props.onRelease({ ...base, action: 'release' }, context);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(state.messages[0].collapsed, false);
+  assert.ok(state.activitySelection);
 });
 
 test('Activity renders incremental local LLM progress and streamed text', () => {
@@ -144,6 +170,25 @@ test('complete diff Activity lines retain added and removed line coloring', () =
   assert.notEqual(removed, added);
 });
 
+
+function findNode(node, predicate) {
+  if (!node || typeof node !== 'object') return null;
+  if (predicate(node)) return node;
+  for (const child of node.children ?? []) {
+    const found = findNode(child, predicate);
+    if (found) return found;
+  }
+  for (const pane of node.props?.panes ?? []) {
+    const found = findNode(pane.node, predicate);
+    if (found) return found;
+  }
+  return null;
+}
+
 function stripAnsi(value) {
   return String(value).replace(/\u001b\[[0-9;]*m/g, '');
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

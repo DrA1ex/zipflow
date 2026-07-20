@@ -41,9 +41,10 @@ test('same-context failure analysis includes the previous change review', async 
   }, { fetchImpl });
 
   assert.equal(result.mode, 'same-context');
-  assert.ok(Array.isArray(body.input));
-  assert.equal(body.input[0].role, 'assistant');
-  assert.match(body.input[0].content, /Changed configuration defaults/);
+  assert.equal(typeof body.input, 'string');
+  assert.match(body.input, /PREVIOUS MODEL CONTEXT:/);
+  assert.match(body.input, /Changed configuration defaults/);
+  assert.match(body.input, /CURRENT USER REQUEST:/);
   assert.match(result.text, /LIKELY CAUSE/);
 });
 

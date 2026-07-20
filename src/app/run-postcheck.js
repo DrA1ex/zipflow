@@ -35,7 +35,7 @@ export async function activatePostCheck(controller, itemId) {
       multiline: true,
       instructions: commitMessageInstructions(state),
     }, commitMessageEditorInitialValue(state));
-    if (itemId === 'finish-no-commit') return continueToDeploy(controller);
+    if (itemId === 'finish-no-commit') return continueAfterCommitChoice(controller);
   }
   if (state.screen === 'deploy-prompt') {
     if (itemId === 'run-deploy') return startDeploy(controller);
@@ -147,17 +147,26 @@ async function activateFailedCheck(controller, itemId) {
     return showFailedCheck(controller);
   }
   if (itemId === 'rerun-checks') return startChecks(controller);
-  if (itemId === 'keep-changes') return completeRun(controller, 'completed_with_errors');
+  if (itemId === 'keep-changes') return offerCommitAfterFailedChecks(controller);
   if (itemId === 'rollback') return confirmRollback(controller, state.run);
 }
 
 function showCommitPrompt(controller) {
   const message = defaultCommitMessage(controller.state);
+  const failedChecks = controller.state.postCheckContinuation?.status === 'completed_with_errors';
   controller.showMenu('commit', [
     { id: 'create-commit', label: 'Create commit', description: message },
     { id: 'edit-message', label: 'Edit message', description: commitMessageSource(controller.state) },
-    { id: 'finish-no-commit', label: 'Continue without commit', description: 'Deployment settings still apply after this step' },
-  ], 'Commit result', 0, [`Proposed source: ${commitMessageSource(controller.state)}`, 'The commit includes only paths applied by this Zipflow run.']);
+    {
+      id: 'finish-no-commit', label: 'Continue without commit',
+      description: failedChecks ? 'Keep the update without a commit; deployment remains skipped' : 'Deployment settings still apply after this step',
+    },
+  ], failedChecks ? 'Commit kept changes' : 'Commit result', 0, [
+    `Proposed source: ${commitMessageSource(controller.state)}`,
+    'The commit includes only paths applied by this Zipflow run.',
+    ...(controller.state.postCheckContinuation?.status === 'completed_with_errors'
+      ? ['Required checks failed; this commit records the kept state without running deployment.'] : []),
+  ]);
 }
 
 async function createResultCommit(controller, message) {
@@ -170,7 +179,30 @@ async function createResultCommit(controller, message) {
   state.run.commit = { revision: result.revision, message };
   state.run = await saveRunRecord(state.run);
   controller.message('Commit created', [`${result.revision} ${firstLine(message)}`], 'success');
+  return continueAfterCommitChoice(controller);
+}
+
+function continueAfterCommitChoice(controller) {
+  const continuation = controller.state.postCheckContinuation;
+  if (continuation?.skipDeploy) {
+    controller.state.postCheckContinuation = null;
+    return completeRun(controller, continuation.status);
+  }
+  controller.state.postCheckContinuation = null;
   return continueToDeploy(controller);
+}
+
+function offerCommitAfterFailedChecks(controller) {
+  const { state } = controller;
+  if (!state.run.applied.paths.length || state.workflow.git.resultCommit === 'never') {
+    return completeRun(controller, 'completed_with_errors');
+  }
+  state.postCheckContinuation = { status: 'completed_with_errors', skipDeploy: true };
+  controller.message('Keeping changes after failed checks', [
+    'The update will remain applied. You can still create a commit that records this exact state.',
+    'Deployment will not run because required checks failed.',
+  ], 'warning');
+  return showCommitPrompt(controller);
 }
 
 function continueToDeploy(controller) {
