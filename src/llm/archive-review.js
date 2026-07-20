@@ -5,7 +5,7 @@ import { createRootGitignoreMatcher } from '../git/ignore.js';
 import { listIgnoredPaths } from '../git/repository.js';
 import { isProtectedProjectPath } from '../archive/protected.js';
 import { createLocalCompletion } from './client.js';
-import { getLocalModelProfile } from './model-info.js';
+import { resolveLocalLlmSession } from './session.js';
 import { parseAssessmentResponse } from './response.js';
 
 const REVIEW_SCHEMA = {
@@ -25,13 +25,14 @@ export async function reviewArchiveStructure({ settings, project, workflow, extr
   const notify = options.onEvent ?? (() => {});
   notify({ type: 'phase', phase: 'tree-scan', label: 'Comparing project and archive structure' });
   const comparison = await createTreeComparison({ project, workflow, extracted });
-  const profile = await getLocalModelProfile(settings.llmProvider, settings.llmModel, {
-    fetchImpl: options.fetchImpl,
-    timeoutMs: options.metadataTimeoutMs ?? 10_000,
-    apiToken: settings.llmApiToken,
-    signal: options.signal,
-  });
-  notify({ type: 'model-profile', profile });
+  let session = options.session;
+  if (!session) {
+    session = await resolveLocalLlmSession(settings, {
+      fetchImpl: options.fetchImpl, timeoutMs: options.metadataTimeoutMs ?? 10_000, signal: options.signal,
+    });
+    notify({ type: 'model-profile', profile: session.profile });
+  }
+  const profile = session.profile;
   const prompt = fitComparison(comparison, profile.contextLength);
   notify({
     type: 'tree-budget',
@@ -49,7 +50,7 @@ export async function reviewArchiveStructure({ settings, project, workflow, extr
     ],
     responseSchema: null,
     maxTokens: 512,
-    apiToken: settings.llmApiToken,
+    apiToken: session.apiToken,
     contextLength: Math.min(profile.contextLength, 16_384),
     reasoningOffSupported: profile.reasoningOffSupported,
   }, {

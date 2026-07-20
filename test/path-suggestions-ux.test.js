@@ -86,7 +86,7 @@ test('selecting a ZIP completion only fills the editor until Enter is pressed ag
   assert.equal(submitted, 1);
 });
 
-test('path completion uses leading file and folder icons without trailing type labels', async () => {
+test('path completion uses aligned DIR and ZIP markers without icons', async () => {
   const root = await tempDir('zipflow-path-icons-');
   await mkdir(path.join(root, 'updates'));
   await writeFile(path.join(root, 'release.zip'), 'zip');
@@ -96,7 +96,7 @@ test('path completion uses leading file and folder icons without trailing type l
   await refreshPathSuggestions(controller);
 
   const output = renderToString(renderZipflow({ state, width: 100, height: 30 }), { width: 100, height: 30 });
-  assert.match(output, /📁 updates\//);
-  assert.match(output, /📄 release\.zip/);
-  assert.doesNotMatch(output, /updates\/\s+Directory|release\.zip\s+ZIP/);
+  assert.match(output, /DIR\s+updates\//);
+  assert.match(output, /ZIP\s+release\.zip/);
+  assert.doesNotMatch(output, /📁|📄|Directory|File/);
 });

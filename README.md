@@ -92,7 +92,7 @@ When adding a custom check, Zipflow first asks for the exact command and then as
 For a configured project, drag a ZIP file into the initial archive prompt or enter its path. Path input scans the entered location while you type and shows multiple matching directories and ZIP files in an overlay without shifting the layout. Use `Up`/`Down` to select a suggestion and `Tab` or `Enter` to insert it. A directory opens its contents; a ZIP file only fills the path. Press `Enter` again to submit the completed path, so completion never starts an update unexpectedly. Existing directory paths also expose an explicit **Use this directory** action in directory pickers. 
 The completion overlay uses leading folder and file markers instead of trailing type descriptions, keeping names aligned and easy to scan.
 
-Press `Esc` to return to the project menu. After a completed run, **Finish and wait for next archive** returns directly to the same prompt.
+Press `Esc` to return to the project menu. After a completed run, **Finish and wait for next archive** returns directly to the same prompt. `Esc` on the project menu itself does not exit Zipflow; use `Ctrl+C` or **Exit**.
 
 Zipflow performs the following sequence:
 
@@ -383,3 +383,8 @@ npm run verify
 `npm run verify` performs syntax checks, enforces the 1,000-line hard limit for JavaScript files, warns above the preferred 500-line limit, and runs the automated test suite.
 
 The codebase keeps every JavaScript file below 500 lines.
+
+
+Path suggestions are rendered as a non-displacing overlay with aligned `DIR` and `ZIP` markers. Selecting a suggestion only completes the field; a separate `Enter` confirms the completed archive path.
+
+Local LLM analysis resolves model metadata and authentication once per run, then reuses the same session for archive suitability and change-summary stages. Complete diffs opened from run history retain added/removed-line coloring in Activity.

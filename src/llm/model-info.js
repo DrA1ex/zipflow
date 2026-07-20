@@ -17,7 +17,7 @@ export async function getLocalModelProfile(provider, model, {
       fetchImpl, timeoutMs, apiToken, signal,
     });
   } catch (error) {
-    if (error?.code === 'cancelled' || signal?.aborted) throw error;
+    if (error?.code === 'cancelled' || error?.code === 'invalid_api_key' || [401, 403].includes(error?.status) || signal?.aborted) throw error;
     return fallbackProfile(provider, model);
   }
   return fallbackProfile(provider, model);
@@ -133,12 +133,23 @@ async function requestJson(fetchImpl, url, options, timeoutMs, signal) {
   try {
     if (signal?.aborted) throw Object.assign(new Error('Local LLM generation was cancelled.'), { code: 'cancelled' });
     const response = await fetchImpl(url, { ...options, signal: controller.signal });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    if (!response.ok) throw await metadataResponseError(response);
     return response.json();
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener('abort', abort);
   }
+}
+
+
+async function metadataResponseError(response) {
+  let payload = null;
+  try { payload = await response.json(); } catch { /* response is not JSON */ }
+  const details = payload?.error ?? payload ?? {};
+  const error = new Error(details.message || `Local LLM metadata request failed with HTTP ${response.status}.`);
+  error.status = response.status;
+  error.code = details.code || (response.status === 401 || response.status === 403 ? 'invalid_api_key' : 'metadata_request_failed');
+  return error;
 }
 
 function authHeaders(apiToken) {

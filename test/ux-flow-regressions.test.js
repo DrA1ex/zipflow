@@ -181,3 +181,25 @@ test('ZIP file review groups directories and allows file and folder exclusion', 
   const rootItem = state.menuItems.find((item) => item.id === `export-file:${encodeURIComponent('README.md')}`);
   assert.match(rootItem.description, /Excluded from ZIP/i);
 });
+
+
+test('completed run offers only one action for waiting for the next archive', async () => {
+  const state = createInitialState();
+  state.project = { name: 'fixture', root: '/tmp/fixture', labels: ['Node.js'], git: true };
+  state.workflow = {
+    archive: { mode: 'overlay' }, checks: [], policy: { label: 'Practical' },
+    git: { resultCommit: 'never' }, deploy: { policy: 'disabled' },
+  };
+  state.run = {
+    id: 'run-1', status: 'completed', applied: { paths: [], changedPaths: [] },
+    plan: { counts: { created: 0, updated: 0, deleted: 0, unchanged: 0, skipped: 0, preserved: 0 } },
+    checks: { passed: 0, failed: 0, results: [] },
+  };
+  const controller = new ZipflowController(state);
+  const { showCompleted } = await import('../src/app/run-postcheck.js');
+
+  showCompleted(controller);
+
+  assert.equal(state.menuItems.filter((item) => /next archive|another archive/i.test(item.label)).length, 1);
+  assert.equal(state.menuItems[0].label, 'Finish and wait for next archive');
+});

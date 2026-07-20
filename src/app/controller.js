@@ -319,7 +319,10 @@ export class ZipflowController {
     if (handlesExportScreen(this.state.screen)) return backExport(this);
     if (handlesHistoryScreen(this.state.screen)) return backHistory(this);
     if (handlesManualScreen(this.state.screen)) return backManual(this);
-    if (this.state.screen === 'home' || this.state.screen === 'new-project') return this.exit(0);
+    if (this.state.screen === 'home' || this.state.screen === 'new-project') {
+      this.setStatus('Use Exit or Ctrl+C to close Zipflow.');
+      return false;
+    }
     return this.showHome();
   }
 

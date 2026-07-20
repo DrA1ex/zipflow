@@ -55,7 +55,7 @@ Persists versioned global application settings in `~/.zipflow/settings.json`. Se
 
 ### `src/llm`
 
-Uses provider-specific adapters. LM Studio model metadata comes from the native `/api/v1/models` endpoint, including parameter counts and loaded-instance configuration. `settings-model.js` persists optional per-model load parameters and invokes `/api/v1/models/load` only for an unloaded selection; generation uses only the native `/api/v1/chat` stream, including model-load, prompt-processing, reasoning, message, and error events. Ollama model metadata comes from `/api/ps` and `/api/show`; generation uses its OpenAI-compatible chat-completion stream. Loaded LM Studio instances are resolved before generation and addressed by instance ID. Load-time settings are not repeated, while an optional saved request-context override is passed to `/api/v1/chat`. API tokens are applied only as authorization headers and are never emitted through Activity events. An `AbortSignal` is threaded through metadata, request, and SSE consumption so `Esc` cancels only LLM generation while the archive plan continues.
+Uses provider-specific adapters. LM Studio model metadata comes from the native `/api/v1/models` endpoint, including parameter counts and loaded-instance configuration. `settings-model.js` persists optional per-model load parameters and invokes `/api/v1/models/load` only for an unloaded selection; generation uses only the native `/api/v1/chat` stream, including model-load, prompt-processing, reasoning, message, and error events. Ollama model metadata comes from `/api/ps` and `/api/show`; generation uses its OpenAI-compatible chat-completion stream. Loaded LM Studio instances are resolved before generation and addressed by instance ID. Model metadata, the resolved instance, context configuration, and bearer token are captured once per LLM run and reused by structure review, patch analysis, chunk synthesis, and repair requests; a successful generation is never invalidated by a later metadata refresh. Load-time settings are not repeated, while an optional saved request-context override is passed to `/api/v1/chat`. API tokens are applied only as authorization headers and are never emitted through Activity events. An `AbortSignal` is threaded through metadata, request, and SSE consumption so `Esc` cancels only LLM generation while the archive plan continues.
 
 `model-info.js` resolves the active or configured context size with a conservative fallback. `patch-budget.js` reserves context for instructions and output, keeps a complete changed-file manifest, and distributes available diff hunks across files. Context overflow and local compute-memory errors trigger progressively smaller-patch retries. `diagnostics.js` stores a bounded, sanitized request/result/error record in the run directory.
 
@@ -292,3 +292,11 @@ Unit and integration tests use temporary projects and Git repositories. Regressi
 ## Public dependency lock URLs
 
 `package-lock.json` is part of the distributable source archive and must retain public `https://registry.npmjs.org/` tarball URLs. Local CI, proxy, or private mirror URLs must never be committed into the lockfile.
+
+
+### Terminal navigation invariants
+
+- `Esc` navigates backward or cancels the active sub-process; it never exits from the top-level project menu. Application exit is explicit through `Ctrl+C` or the `Exit` action.
+- Path completion is an overlay. Archive input shows aligned `DIR` and `ZIP` markers and never submits a selected completion until the user confirms the completed path separately.
+- The framed project Activity message calculates all borders from one visible inner width. Complete historical patches use semantic diff coloring inside Activity.
+- The completed-run menu exposes one primary action for returning to archive waiting, avoiding synonymous duplicate actions.

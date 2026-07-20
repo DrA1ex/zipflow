@@ -178,7 +178,7 @@ async function openStoredRunDiff(controller, filePath) {
 
 async function showCompleteRunDiff(controller) {
   const lines = await storedPatchActivityLines(controller.state.run);
-  controller.message(`Run diff · ${controller.state.run.id}`, lines, 'info');
+  controller.message(`Run diff · ${controller.state.run.id}`, lines, 'diff');
   const message = controller.state.messages.at(-1);
   if (message?.collapsible) message.collapsed = false;
   controller.setStatus('Complete diff added to Activity');

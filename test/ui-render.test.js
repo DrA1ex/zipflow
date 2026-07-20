@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { renderToString } from 'terlio.js';
+import { renderToString, themes } from 'terlio.js';
 import { createInitialState, appendMessage, setScreen } from '../src/app/state.js';
 import { renderZipflow } from '../src/ui/render.js';
+import { transcriptLines } from '../src/ui/activity.js';
 import { ZipflowController } from '../src/app/controller.js';
 import { ZIPFLOW_VERSION } from '../src/version.js';
 import { projectSummary } from '../src/ui/format.js';
@@ -110,3 +111,39 @@ test('run screens show the current five-step stage and typed Activity entries', 
   const completedOutput = renderToString(renderZipflow({ state: completedState, width: 100, height: 30 }), { width: 100, height: 30 });
   assert.match(completedOutput, /\[DONE\] Archive inspected/);
 });
+
+
+test('Project detected frame uses the same visible width on every border line', () => {
+  const state = createInitialState();
+  appendMessage(state, 'Project detected', [
+    'Root: ~/dev/zipflow',
+    'Detected: Node.js',
+    'Git: repository detected · Workflow: configured',
+  ], 'project');
+  const lines = transcriptLines(state, themes.ocean, 100).filter((line) => line.trim());
+  const visible = lines.map(stripAnsi);
+  assert.equal(visible[0].length, visible.at(-1).length);
+  for (const line of visible.slice(1, -1)) assert.equal(line.length, visible[0].length);
+  assert.ok(visible.at(-1).endsWith('╯'));
+});
+
+test('complete diff Activity lines retain added and removed line coloring', () => {
+  const state = createInitialState();
+  appendMessage(state, 'Run diff', [
+    'diff --git a/file.js b/file.js',
+    '@@ -1 +1 @@',
+    '-old value',
+    '+new value',
+  ], 'diff');
+  state.messages.at(-1).collapsed = false;
+  const lines = transcriptLines(state, themes.ocean, 100);
+  const removed = lines.find((line) => stripAnsi(line).includes('-old value'));
+  const added = lines.find((line) => stripAnsi(line).includes('+new value'));
+  assert.match(removed, /\u001b\[/);
+  assert.match(added, /\u001b\[/);
+  assert.notEqual(removed, added);
+});
+
+function stripAnsi(value) {
+  return String(value).replace(/\u001b\[[0-9;]*m/g, '');
+}

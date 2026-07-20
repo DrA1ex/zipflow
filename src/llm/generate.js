@@ -1,5 +1,5 @@
 import { createLocalCompletion } from './client.js';
-import { getLocalModelProfile } from './model-info.js';
+import { resolveLocalLlmSession } from './session.js';
 import { createPromptBudget, fitPatchToBudget, reducePatchBudget } from './patch-budget.js';
 import {
   createChangeList, createPatchBatches, estimateTokens, resolveDeliveryMode,
@@ -42,13 +42,15 @@ export async function generateChangeDescription({ settings, project, plan, patch
   const responseSchema = reviewArchive ? REVIEW_RESPONSE_SCHEMA : RESPONSE_SCHEMA;
   const system = buildSystemPrompt(language, reviewArchive);
   const fixedUser = buildUserPrompt(project, plan, { kind: 'change-list', content: createChangeList(plan) });
-  notify({ type: 'phase', phase: 'model-info', label: 'Reading the selected model context limit' });
-  const profile = await getLocalModelProfile(settings.llmProvider, settings.llmModel, {
-    fetchImpl: options.fetchImpl, timeoutMs: options.metadataTimeoutMs ?? 10_000,
-    apiToken: settings.llmApiToken, signal: options.signal,
-  });
-  applyConfiguredContext(settings, profile);
-  notify({ type: 'model-profile', profile });
+  let session = options.session;
+  if (!session) {
+    notify({ type: 'phase', phase: 'model-info', label: 'Reading the selected model context limit' });
+    session = await resolveLocalLlmSession(settings, {
+      fetchImpl: options.fetchImpl, timeoutMs: options.metadataTimeoutMs ?? 10_000, signal: options.signal,
+    });
+    notify({ type: 'model-profile', profile: session.profile });
+  }
+  const profile = session.profile;
   const budget = createPromptBudget({
     contextLength: profile.contextLength,
     fixedPrompt: `${system}\n${fixedUser}`,
@@ -118,15 +120,6 @@ export async function generateChangeDescription({ settings, project, plan, patch
   throw error;
 }
 
-function applyConfiguredContext(settings, profile) {
-  const key = `${settings.llmProvider}:${profile.modelKey || settings.llmModel}`;
-  const configured = Number(settings.llmModelLoadConfigs?.[key]?.contextLength);
-  if (!Number.isInteger(configured) || configured <= 0) return;
-  profile.contextLength = profile.maxContextLength
-    ? Math.min(configured, profile.maxContextLength)
-    : configured;
-  profile.source = 'zipflow-settings';
-}
 
 async function generateFromPatch(context, options, notify) {
   let patchTokens = context.budget.patchTokens;
@@ -325,7 +318,7 @@ function requestCompletion({ settings, profile, messages, maxTokens, contextLeng
     messages,
     responseSchema,
     maxTokens,
-    apiToken: settings.llmApiToken,
+    apiToken: options.apiToken ?? options.session?.apiToken ?? settings.llmApiToken,
     contextLength,
     reasoningOffSupported: profile.reasoningOffSupported,
   }, { ...options, onEvent });

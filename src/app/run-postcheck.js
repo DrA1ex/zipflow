@@ -47,7 +47,6 @@ export async function activatePostCheck(controller, itemId) {
   if (state.screen === 'deploy-failed') return activateDeployFailed(controller, itemId);
   if (state.screen === 'completed') {
     if (itemId === 'run-deploy') return startDeploy(controller, { fromCompleted: true });
-    if (itemId === 'another-archive') return beginAnotherArchive(controller);
     if (itemId === 'copy-summary') {
       const copied = await copyTextToClipboard(formatCompletionForClipboard(state.run), { output: controller.runtime.output });
       return controller.setStatus(copied ? 'Run summary copied' : `Report saved at ${runReportPath(state.run.id)}`);
@@ -314,12 +313,11 @@ function checkSummaryLine(checks) {
     : `Checks ${checks.passed}/${total} passed`;
 }
 
-function showCompleted(controller) {
+export function showCompleted(controller) {
   const { state } = controller;
   const items = [
     { id: 'home', label: 'Finish and wait for next archive', description: 'Keep Zipflow ready for the next ZIP; Esc returns to the project menu' },
     { id: 'copy-summary', label: 'Copy run summary', description: 'Copy a compact summary with changes, checks, commit, and deployment' },
-    { id: 'another-archive', label: 'Wait for another archive', description: 'Start the next update without leaving Zipflow' },
     { id: 'view-report', label: 'View run details', description: 'Open the stored decisions, checks, commit, deployment, and report path' },
   ];
   if (state.workflow.deploy?.policy === 'on-demand' && !state.run.deploy?.ok) {

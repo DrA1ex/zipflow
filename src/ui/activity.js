@@ -48,8 +48,24 @@ function standardActivityMessage(message, theme, width) {
   const bodyWidth = Math.max(20, width - 7);
   return [
     color(theme, token, `${marker}${activityTag(message.tone)} ${message.title}`),
-    ...body.flatMap((line) => wrapText(String(line ?? ''), bodyWidth, '  ')).map((line) => `  ${line}`),
+    ...body.flatMap((line) => formatActivityBodyLine(message, line, theme, bodyWidth)),
   ];
+}
+
+function formatActivityBodyLine(message, line, theme, width) {
+  const value = String(line ?? '');
+  const wrapped = wrapText(value, width, '  ');
+  if (message.tone !== 'diff') return wrapped.map((part) => `  ${part}`);
+  const token = diffToken(value);
+  return wrapped.map((part) => `  ${token ? color(theme, token, part) : part}`);
+}
+
+function diffToken(line) {
+  if (line.startsWith('@@') || line.startsWith('diff --git ')) return 'accent';
+  if (line.startsWith('index ') || line.startsWith('--- ') || line.startsWith('+++ ')) return 'textMuted';
+  if (line.startsWith('+')) return 'success';
+  if (line.startsWith('-')) return 'danger';
+  return null;
 }
 
 function collapsedLines(lines = []) {
@@ -62,7 +78,7 @@ function projectActivityBlock(message, theme, width) {
   const innerWidth = Math.max(24, width - 7);
   const title = ` ${message.title} `;
   const top = `╭─${title}${'─'.repeat(Math.max(0, innerWidth - title.length - 1))}╮`;
-  const bottom = `╰${'─'.repeat(innerWidth + 1)}╯`;
+  const bottom = `╰${'─'.repeat(innerWidth)}╯`;
   const content = (message.lines ?? []).flatMap((line) => wrapText(String(line ?? ''), innerWidth - 2));
   return [
     color(theme, 'accent', top),

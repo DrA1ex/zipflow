@@ -41,3 +41,27 @@ test('configured project home exposes manual tests and deployment when available
   assert.ok(state.menuItems.some((item) => item.id === 'run-tests'));
   assert.ok(state.menuItems.some((item) => item.id === 'run-deploy-now'));
 });
+
+
+test('Escape on the project menu does not exit the application', async () => {
+  const state = createInitialState();
+  state.project = { name: 'fixture', root: '/tmp/fixture', labels: ['Node.js'], git: true };
+  state.workflow = workflowFixture();
+  const controller = new ZipflowController(state);
+  let exits = 0;
+  controller.attachRuntime({ exit: () => { exits += 1; }, invalidate: () => {} });
+  controller.showHome();
+
+  await controller.handleKey({ name: 'escape' });
+
+  assert.equal(exits, 0);
+  assert.equal(state.screen, 'home');
+  assert.match(state.status, /Exit or Ctrl\+C/);
+});
+
+function workflowFixture() {
+  return {
+    archive: { mode: 'overlay' }, checks: [], policy: { label: 'Practical' },
+    git: { checkpoint: 'ask', resultCommit: 'ask' }, deploy: { policy: 'disabled' },
+  };
+}

@@ -16,8 +16,8 @@ export function PathCompletionPopup({ state, width, height, theme }) {
   for (const [offset, item] of visible.entries()) {
     const index = start + offset;
     const selected = index === selectedIndex;
-    const icon = item.isDirectory ? '📁' : '📄';
-    const label = truncateVisible(`${selected ? '›' : ' '} ${icon} ${item.label}`, Math.max(8, safeWidth - 2), '…');
+    const kind = item.isDirectory ? 'DIR' : 'ZIP';
+    const label = truncateVisible(`${selected ? '›' : ' '} ${kind.padEnd(3)}  ${item.label}`, Math.max(8, safeWidth - 2), '…');
     const activate = () => state.dispatch?.({ type: 'path-select', index });
     rows.push(Text(color(theme, selected ? 'selected' : 'suggestion', label), {
       wrap: false,

@@ -105,7 +105,7 @@ export async function suggestPathEntries(value, {
       path: absolute,
       insert: collapseHome(`${absolute}${isDirectory ? path.sep : ''}`),
       label: `${entry.name}${isDirectory ? path.sep : ''}`,
-      detail: isDirectory ? 'Directory' : extension ? extension.toUpperCase().slice(1) : 'File',
+      detail: isDirectory ? 'DIR' : extension ? extension.toUpperCase().slice(1) : 'FILE',
       description: isDirectory ? 'Open this directory.' : 'Select this file.',
       isDirectory,
       submit: !isDirectory,

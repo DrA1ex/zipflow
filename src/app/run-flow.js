@@ -6,6 +6,7 @@ import { evaluateArchiveRisks } from '../archive/risk.js';
 import { createPlanPatch } from '../patch/create.js';
 import { generateChangeDescription, isLocalLlmEnabled } from '../llm/generate.js';
 import { reviewArchiveStructure } from '../llm/archive-review.js';
+import { resolveLocalLlmSession } from '../llm/session.js';
 import { saveLlmDiagnostics } from '../llm/diagnostics.js';
 import { beginLlmProgress } from './llm-progress.js';
 import { updateManagedHistory } from '../history/managed.js';
@@ -184,11 +185,14 @@ async function generateLlmSummary(controller, { plan, patch, extracted }) {
   controller.invalidate();
   const startedAt = Date.now();
   try {
+    progress.onEvent({ type: 'phase', phase: 'model-info', label: 'Reading the selected model context limit' });
+    const session = await resolveLocalLlmSession(state.settings, { signal: abortController.signal });
+    progress.onEvent({ type: 'model-profile', profile: session.profile });
     let structureAssessment = null;
     if (state.settings.llmArchiveReview === 'structure') {
       structureAssessment = await reviewArchiveStructure(
         { settings: state.settings, project: state.project, workflow: state.workflow, extracted, plan },
-        { onEvent: progress.onEvent, signal: abortController.signal },
+        { onEvent: progress.onEvent, signal: abortController.signal, session },
       );
       if (structureAssessment.assessment === 'unsuitable') {
         const result = { summary: structureAssessment.reasons, commitMessage: '', assessment: structureAssessment.assessment, confidence: structureAssessment.confidence, reasons: structureAssessment.reasons, diagnostics: { structure: structureAssessment.diagnostics } };
@@ -202,7 +206,7 @@ async function generateLlmSummary(controller, { plan, patch, extracted }) {
     }
     const result = await generateChangeDescription(
       { settings: state.settings, project: state.project, plan, patchContent: patch.content },
-      { onEvent: progress.onEvent, signal: abortController.signal },
+      { onEvent: progress.onEvent, signal: abortController.signal, session },
     );
     if (structureAssessment) {
       result.structureAssessment = structureAssessment;
