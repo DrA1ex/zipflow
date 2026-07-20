@@ -12,12 +12,12 @@ export function PathCompletionPopup({ state, width, height, theme }) {
     Math.max(0, completion.items.length - windowSize),
   );
   const visible = completion.items.slice(start, start + windowSize);
-  const rows = [Text(color(theme, 'textMuted', `Path suggestions · ${completion.items.length} · ↑/↓ select · Tab/Enter accept`), { wrap: false })];
+  const rows = [Text(color(theme, 'textMuted', `Path suggestions · ${completion.items.length} · ↑/↓ select · Tab/Enter insert`), { wrap: false })];
   for (const [offset, item] of visible.entries()) {
     const index = start + offset;
     const selected = index === selectedIndex;
-    const detail = item.detail ? `  ${item.detail}` : '';
-    const label = truncateVisible(`${selected ? '›' : ' '} ${item.label}${detail}`, Math.max(8, safeWidth - 2), '…');
+    const icon = item.isDirectory ? '📁' : '📄';
+    const label = truncateVisible(`${selected ? '›' : ' '} ${icon} ${item.label}`, Math.max(8, safeWidth - 2), '…');
     const activate = () => state.dispatch?.({ type: 'path-select', index });
     rows.push(Text(color(theme, selected ? 'selected' : 'suggestion', label), {
       wrap: false,

@@ -38,7 +38,7 @@ test('archive path editor keeps completion hidden until input starts, then overl
   assert.match(output, /one\.zip/);
   assert.match(output, /updates\//);
   assert.match(output, /Path suggestions · 3/);
-  assert.match(output, /Tab\/Enter accept/);
+  assert.match(output, /Tab\/Enter insert/);
 
   await controller.handleKey({ name: 'down' });
   await controller.handleKey({ name: 'down' });
@@ -62,4 +62,41 @@ test('Tab opens a selected directory while a selected file completes the path', 
   assert.match(state.editor.value, /updates\/$/);
   assert.equal(state.screen, 'archive-input');
   assert.ok(state.pathSuggestions.items.some((item) => item.label === 'release.zip'));
+});
+
+test('selecting a ZIP completion only fills the editor until Enter is pressed again', async () => {
+  const root = await tempDir('zipflow-path-select-only-');
+  const archive = path.join(root, 'release.zip');
+  await writeFile(archive, 'not-a-real-zip');
+  const { state, controller } = controllerFixture(root);
+  let submitted = 0;
+  controller.submitCurrentEditor = async () => { submitted += 1; };
+  controller.showEditor('archive-input', { label: 'ZIP archive path', purpose: 'archive-path' }, `${root}${path.sep}rel`);
+  state.pathSuggestionActive = true;
+  await refreshPathSuggestions(controller);
+
+  await controller.handleKey({ name: 'tab' });
+
+  assert.equal(state.editor.value, archive);
+  assert.equal(submitted, 0);
+  assert.equal(state.pathSuggestions, null);
+  assert.match(state.status, /press Enter/i);
+
+  await controller.handleKey({ name: 'enter' });
+  assert.equal(submitted, 1);
+});
+
+test('path completion uses leading file and folder icons without trailing type labels', async () => {
+  const root = await tempDir('zipflow-path-icons-');
+  await mkdir(path.join(root, 'updates'));
+  await writeFile(path.join(root, 'release.zip'), 'zip');
+  const { state, controller } = controllerFixture(root);
+  controller.showEditor('archive-input', { label: 'ZIP archive path', purpose: 'archive-path' }, `${root}${path.sep}`);
+  state.pathSuggestionActive = true;
+  await refreshPathSuggestions(controller);
+
+  const output = renderToString(renderZipflow({ state, width: 100, height: 30 }), { width: 100, height: 30 });
+  assert.match(output, /📁 updates\//);
+  assert.match(output, /📄 release\.zip/);
+  assert.doesNotMatch(output, /updates\/\s+Directory|release\.zip\s+ZIP/);
 });

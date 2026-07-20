@@ -66,3 +66,21 @@ test('N and P navigate hunks cyclically without changing the diff mode', () => {
   assert.equal(state.diffView.hunkIndex, 2);
   assert.equal(state.diffView.scroll, 24);
 });
+
+test('real printable N and P key events navigate hunks', () => {
+  const state = createInitialState();
+  state.screen = 'diff-view';
+  state.diffView = {
+    mode: 'unified', hunkIndex: 0, hunkCount: 2, hunkOffsets: [0, 18], scroll: 0,
+  };
+  const controller = new ZipflowController(state);
+  controller.invalidate = () => {};
+
+  assert.equal(handleReviewKey(controller, { printable: true, text: 'n' }), true);
+  assert.equal(state.diffView.hunkIndex, 1);
+  assert.equal(state.diffView.scroll, 18);
+
+  assert.equal(handleReviewKey(controller, { printable: true, text: 'P' }), true);
+  assert.equal(state.diffView.hunkIndex, 0);
+  assert.equal(state.diffView.scroll, 0);
+});

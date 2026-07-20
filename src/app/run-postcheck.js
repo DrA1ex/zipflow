@@ -300,7 +300,7 @@ export function finalSummaryLines(state) {
   const lines = [];
   if (state.run.llm?.summary?.length) lines.push(...state.run.llm.summary);
   lines.push(
-    `${compactPlanLine(state.plan)} · ${checkSummaryLine(state.run.checks)} · Deployment ${deploymentResultLine(state)}`,
+    `${compactPlanLine(state.plan)} · ${checkSummaryLine(state.run.checks)} · Deployment ${deploymentResultLine(state)} · Source archive ${archiveDispositionLine(state.run.archiveDisposition)}`,
     `Commit ${state.run.commit ? `${state.run.commit.revision} ${firstLine(state.run.commit.message)}` : 'not created'} · Report ${displayPath(runReportPath(state.run.id))}`,
   );
   return lines;
@@ -330,13 +330,7 @@ function showCompleted(controller) {
   }
   items.push({ id: 'project-menu', label: 'Return to project menu' });
   items.push({ id: 'exit', label: 'Exit' });
-  controller.showMenu('completed', items, 'Run completed', 0, [
-    compactPlanLine(state.plan),
-    `Checks: ${state.run.checks ? `${state.run.checks.passed} passed · ${state.run.checks.failed} failed` : 'not run'}`,
-    `Commit: ${state.run.commit ? `${state.run.commit.revision} ${firstLine(state.run.commit.message)}` : 'not created'}`,
-    `Deployment: ${deploymentResultLine(state)}`,
-    `Source archive: ${archiveDispositionLine(state.run.archiveDisposition)}`,
-  ]);
+  controller.showMenu('completed', items, 'Run completed', 0);
 }
 
 function showCommitOrComplete(controller) {

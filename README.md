@@ -89,7 +89,10 @@ When adding a custom check, Zipflow first asks for the exact command and then as
 
 ## Applying an archive
 
-For a configured project, drag a ZIP file into the initial archive prompt or enter its path. Path input scans the entered location while you type and shows multiple matching directories and ZIP files in an overlay without shifting the layout. Use `Up`/`Down` to select a suggestion and `Tab` or `Enter` to accept it: a directory opens its contents, while a ZIP file completes and submits the input. Existing directory paths also expose an explicit **Use this directory** action in directory pickers. Press `Esc` to return to the project menu. After a completed run, **Finish and wait for next archive** returns directly to the same prompt.
+For a configured project, drag a ZIP file into the initial archive prompt or enter its path. Path input scans the entered location while you type and shows multiple matching directories and ZIP files in an overlay without shifting the layout. Use `Up`/`Down` to select a suggestion and `Tab` or `Enter` to insert it. A directory opens its contents; a ZIP file only fills the path. Press `Enter` again to submit the completed path, so completion never starts an update unexpectedly. Existing directory paths also expose an explicit **Use this directory** action in directory pickers. 
+The completion overlay uses leading folder and file markers instead of trailing type descriptions, keeping names aligned and easy to scan.
+
+Press `Esc` to return to the project menu. After a completed run, **Finish and wait for next archive** returns directly to the same prompt.
 
 Zipflow performs the following sequence:
 
@@ -119,7 +122,7 @@ A conflict is reported only when the archive would update or delete a path that 
 
 When conflicts exist, Zipflow first presents bulk choices: replace every conflict, keep every local conflict, choose files manually, or cancel and select the archive again. Manual review then advances one file at a time. Each file can keep the local version, use the archive version, apply the same decision to the remaining conflicts, or open a diff before deciding. An optional checkpoint commit can preserve affected local files immediately before archive versions are used.
 
-The normal plan screen stays compact: counts for added, changed, removed, unchanged, ignored, preserved, and conflicting paths. **Review changes** opens grouped details with explicit reasons for skipped and preserved files. Text changes can be viewed as either a unified diff or, when the terminal is wide enough, a side-by-side diff. Distant changes are split into hunks; `N`/`]` and `P`/`[` move between them without losing the current file or diff mode. Binary and oversized files receive a safe informational comparison instead of being rendered as terminal text.
+The normal plan screen stays compact: counts for added, changed, removed, unchanged, ignored, preserved, and conflicting paths. **Review changes** opens grouped details with explicit reasons for skipped and preserved files. Text changes can be viewed as either a unified diff or, when the terminal is wide enough, a side-by-side diff. Distant changes are split into hunks; `N`/`]` and `P`/`[` move between them without losing the current file or diff mode. The mouse wheel scrolls the diff directly, alongside line, page, Home, and End keyboard navigation. Binary and oversized files receive a safe informational comparison instead of being rendered as terminal text.
 
 
 

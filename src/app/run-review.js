@@ -73,8 +73,9 @@ export function handleReviewKey(controller, key) {
       controller.setStatus(`Diff mode: ${state.diffView.mode}`);
       return true;
     }
-    if (['n', 'p', ']', '['].includes(key.name)) {
-      const delta = key.name === 'n' || key.name === ']' ? 1 : -1;
+    const printableName = String(key.text ?? key.name ?? '').toLowerCase();
+    if (['n', 'p', ']', '['].includes(printableName)) {
+      const delta = printableName === 'n' || printableName === ']' ? 1 : -1;
       const count = Math.max(1, state.diffView.hunkCount ?? 1);
       const next = ((state.diffView.hunkIndex ?? 0) + delta + count) % count;
       jumpToHunk(state.diffView, next);

@@ -288,3 +288,7 @@ Unit and integration tests use temporary projects and Git repositories. Regressi
 - compact workflow home, five-stage run progress, duplicate/old/shrinking archive warnings, performance analytics, and persisted run history;
 - ZIP preview and post-create actions;
 - typed Activity and TUI rendering.
+
+## Public dependency lock URLs
+
+`package-lock.json` is part of the distributable source archive and must retain public `https://registry.npmjs.org/` tarball URLs. Local CI, proxy, or private mirror URLs must never be committed into the lockfile.

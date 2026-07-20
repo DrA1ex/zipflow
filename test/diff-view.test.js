@@ -31,3 +31,31 @@ test('large or binary files produce a safe informational diff', async () => {
   assert.equal(diff.binary, true);
   assert.match(unifiedDiffLines(diff)[0], /Binary or large file/);
 });
+
+test('diff view scrolls with the mouse wheel', async () => {
+  const { renderToFrame, TerminalRenderer } = await import('terlio.js');
+  const { createInitialState } = await import('../src/app/state.js');
+  const { renderZipflow } = await import('../src/ui/render.js');
+  const rows = Array.from({ length: 120 }, (_, index) => ({
+    type: 'add', oldNo: null, newNo: index + 1, oldText: '', newText: `added line ${index + 1}`,
+  }));
+  const state = createInitialState();
+  state.project = { name: 'fixture', root: '/tmp/fixture', labels: ['Node.js'], git: true };
+  state.workflow = { policy: { label: 'Practical' } };
+  state.screen = 'diff-view';
+  state.status = 'Diff';
+  state.diffView = {
+    diff: { path: 'src/large.js', binary: false, rows, kind: 'updated' },
+    mode: 'unified', hunkIndex: 0, scroll: 0,
+  };
+  const frame = renderToFrame(renderZipflow({ state, width: 100, height: 30 }), { width: 100, height: 30 });
+  const renderer = new TerminalRenderer({ output: { write() {} } });
+  renderer.pointerRegions = frame.pointerRegions;
+
+  const result = renderer.dispatchPointer({
+    type: 'pointer', x: 10, y: 10, action: 'wheel', name: 'wheel-down', deltaX: 0, deltaY: 1,
+  }, { runtime: { output: { write() {} } } });
+
+  assert.equal(result.event.handled, true);
+  assert.equal(state.diffView.scroll, 3);
+});

@@ -268,8 +268,10 @@ function renderDiffView(state, width, height, theme) {
     pointerId: 'zipflow:diff',
     selection: state.diffSelection,
     onWheel: (event) => {
-      view.scroll = scrollBy(view.scroll, event.deltaY, maxScroll);
+      const direction = event.deltaY < 0 ? -1 : 1;
+      view.scroll = scrollBy(view.scroll, direction * 3, maxScroll);
       event.preventDefault();
+      event.stopPropagation?.();
     },
     onCopy: (text, _selection, _event, context) => copyTextToClipboard(text, { output: context.runtime.output }).copied,
   });

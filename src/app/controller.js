@@ -119,7 +119,7 @@ export class ZipflowController {
       selectPathSuggestion(this.state, action.index);
       if (this.state.pathSuggestions?.owner === 'settings-modal') {
         await handleSettingsKey(this, { name: 'enter' });
-      } else await acceptPathSuggestion(this, { submit: () => this.submitCurrentEditor() });
+      } else await acceptPathSuggestion(this, { submit: () => this.submitCurrentEditor(), submitSelected: false });
       return;
     }
     if (action.type === 'activate-index') {
@@ -286,7 +286,7 @@ export class ZipflowController {
       return this.invalidate();
     }
     if (pathEditor && (key.name === 'tab' || key.name === 'enter') && this.state.pathSuggestions?.items?.length) {
-      await acceptPathSuggestion(this, { submit: () => this.submitCurrentEditor() });
+      await acceptPathSuggestion(this, { submit: () => this.submitCurrentEditor(), submitSelected: false });
       return this.invalidate();
     }
     if (key.name === 'enter' && key.ctrl && this.state.editorContext?.multiline) {

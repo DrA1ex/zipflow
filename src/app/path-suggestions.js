@@ -55,7 +55,7 @@ export function movePathSuggestion(state, delta) {
   return true;
 }
 
-export async function acceptPathSuggestion(controller, { submit }) {
+export async function acceptPathSuggestion(controller, { submit, submitSelected = false } = {}) {
   const { state } = controller;
   const completion = state.pathSuggestions;
   const item = completion?.items?.[completion.selectedIndex];
@@ -63,7 +63,8 @@ export async function acceptPathSuggestion(controller, { submit }) {
   state.editor.set(item.insert);
   if (item.submit) {
     clearPathSuggestions(state);
-    await submit();
+    state.status = 'Path selected · press Enter to continue';
+    if (submitSelected && typeof submit === 'function') await submit();
     return true;
   }
   await refreshPathSuggestions(controller, { settingsModal: completion.owner === 'settings-modal' });
