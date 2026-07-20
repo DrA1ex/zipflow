@@ -64,6 +64,7 @@ export function createInitialState() {
     settingsPanel: null,
     overlays: null,
     helpToast: null,
+    uiAnimationFrame: 0,
     dispatch: null,
   };
 }
@@ -96,6 +97,25 @@ export function appendMessage(state, title, lines = [], tone = 'info', options =
     collapsible, collapsed: options.collapsed ?? collapsible, at: new Date().toISOString(),
   });
   noteActivityChange(state);
+}
+
+export function upsertMessage(state, key, title, lines = [], tone = 'info', options = {}) {
+  const existing = state.messages.find((item) => item.key === key);
+  if (!existing) {
+    appendMessage(state, title, lines, tone, { ...options, key });
+    state.messages[state.messages.length - 1].key = key;
+    return state.messages[state.messages.length - 1];
+  }
+  const normalized = Array.isArray(lines) ? lines : [String(lines)];
+  const collapsible = options.collapsible ?? (tone !== 'project' && tone !== 'summary' && normalized.length > 3);
+  Object.assign(existing, {
+    key, title, lines: normalized, tone, collapsible,
+    collapsedSummary: options.collapsedSummary ?? existing.collapsedSummary ?? null,
+    collapsed: options.collapsed ?? (collapsible ? existing.collapsed ?? false : false),
+    at: new Date().toISOString(),
+  });
+  noteActivityChange(state);
+  return existing;
 }
 
 export function replaceLastMessage(state, title, lines = [], tone = 'info', options = {}) {

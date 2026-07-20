@@ -292,7 +292,7 @@ async function enterCategory(controller) {
 async function activateParameter(controller) {
   const { state } = controller;
   const parameter = panelParameter(state);
-  if (!parameter || parameter.disabled) return true;
+  if (!parameter || parameter.disabled || parameter.blocked) return true;
   rememberParameter(state, parameter.id);
   if (parameter.type === 'action') {
     if (parameter.action === 'storage-refresh') await refreshSettingsStorage(controller);

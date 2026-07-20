@@ -62,7 +62,9 @@ test('workflow review is a detailed final page with save and back only', async (
 
   assert.equal(state.screen, 'setup-review');
   assert.deepEqual(state.menuItems.map((item) => item.id), ['save-workflow', 'review-back']);
-  assert.match(state.panelIntro.join('\n'), /PROJECT[\s\S]*CHECKS[\s\S]*UPDATE POLICY[\s\S]*ARCHIVE INTERPRETATION[\s\S]*GIT[\s\S]*DEPLOYMENT/);
+  const review = state.messages.find((item) => item.key === 'workflow-review-draft');
+  assert.ok(review);
+  assert.match(review.lines.join('\n'), /PROJECT[\s\S]*CHECKS[\s\S]*UPDATE POLICY[\s\S]*ARCHIVE INTERPRETATION[\s\S]*GIT[\s\S]*DEPLOYMENT/);
   assert.doesNotMatch(state.messages.map((item) => item.title).join('\n'), /Workflow ready/);
 
   backSetup(controller);

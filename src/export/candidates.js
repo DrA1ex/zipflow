@@ -54,3 +54,43 @@ async function filterExistingFiles(root, paths, { onProgress = null, signal = nu
   }
   return result.sort();
 }
+
+export async function collectCustomExportPaths({ project, onProgress = null, signal = null }) {
+  return walkFiles(project.root, {
+    include: (relative) => !isRuntimeInternalPath(relative),
+    descend: (relative) => !isRuntimeInternalDirectory(relative),
+    signal,
+    onVisit: ({ relative, files }) => onProgress?.({ phase: 'scan', current: files, detail: relative }),
+  });
+}
+
+export async function classifyCustomExportPaths(project, paths) {
+  let ignored = new Set();
+  if (project.git) ignored = await listIgnoredPaths(project.root, paths, { includeTracked: true });
+  else {
+    const matcher = await createRootGitignoreMatcher(project.root);
+    ignored = new Set(paths.filter((relative) => matcher(relative)));
+  }
+  const annotations = new Map();
+  for (const relative of paths) {
+    const root = normalizeRelativePath(relative).split('/')[0].toLowerCase();
+    if (root === '.git') annotations.set(relative, { kind: 'protected', reason: 'Git repository metadata', excludedByDefault: true });
+    else if (root === '.zipflow') annotations.set(relative, { kind: 'protected', reason: 'Zipflow internal data', excludedByDefault: true });
+    else if (ignored.has(relative)) annotations.set(relative, { kind: 'ignored', reason: 'Ignored by project rules', excludedByDefault: true });
+  }
+  return annotations;
+}
+
+function isRuntimeInternalPath(relative) {
+  const normalized = normalizeRelativePath(relative).toLowerCase();
+  if (normalized.startsWith('.zipflow/tmp/')) return true;
+  if (normalized === '.git/index.lock' || normalized.endsWith('/.git/index.lock')) return true;
+  if (normalized.startsWith('.git/') && normalized.endsWith('.lock')) return true;
+  if (normalized.startsWith('.zipflow/') && normalized.endsWith('.lock')) return true;
+  return false;
+}
+
+function isRuntimeInternalDirectory(relative) {
+  const normalized = normalizeRelativePath(relative).toLowerCase().replace(/\/$/, '');
+  return normalized === '.zipflow/tmp';
+}

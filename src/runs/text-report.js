@@ -30,6 +30,18 @@ export function formatRunReport(run) {
       if (run.llm.assessment) lines.push(`Archive assessment: ${run.llm.assessment} · ${run.llm.confidence ?? 'low'} confidence`);
     }
     if (run.llm.delivery?.resolved) lines.push(`LLM change delivery: ${run.llm.delivery.resolved}${run.llm.delivery.batches ? ` · ${run.llm.delivery.batches} batches` : ''}`);
+    if (run.llm.delivery?.coverage) {
+      const coverage = run.llm.delivery.coverage;
+      lines.push(
+        `LLM content coverage: ${coverage.reviewedFiles} of ${coverage.totalFiles} changed files`,
+        `LLM manifest coverage: ${coverage.manifestFiles} of ${coverage.totalFiles} changed paths`,
+        `LLM patch coverage: ${coverage.patchCoveragePercent}% · ${coverage.omittedFiles} files omitted`,
+      );
+    }
+    const guardCoverage = run.llm.diagnostics?.sample?.coverage;
+    if (!run.llm.delivery?.coverage && guardCoverage) lines.push(
+      `LLM sample-guard coverage: ${guardCoverage.reviewedFiles} of ${guardCoverage.totalFiles} changed files · ${guardCoverage.patchCoveragePercent}% patch coverage`,
+    );
     if (run.llm.diagnosticsPath) lines.push(`LLM diagnostics: ${run.llm.diagnosticsPath}`);
   }
   if (run.llmFailure) {

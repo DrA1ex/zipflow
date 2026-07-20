@@ -103,7 +103,7 @@ test('settings keep categories on the left and the selected category page on the
   const output = renderToString(renderZipflow({ state, width: 110, height: 30 }), { width: 110, height: 30 });
 
   assert.equal(view.focus, 'categories');
-  assert.deepEqual(view.definitions.map((item) => item.id), ['theme', 'checkOutput', 'localLlm', 'sourceArchive', 'managedHistory']);
+  assert.deepEqual(view.definitions.map((item) => item.id), ['theme', 'checkOutput', 'localLlm', 'sourceArchive', 'backups', 'managedHistory']);
   assert.equal(view.direct, true);
   assert.equal(view.activeParameter.id, 'theme');
   assert.equal(view.choices[view.choiceIndex].id, 'theme:ocean');
@@ -171,10 +171,7 @@ test('managed history separates recording policy from destructive clearing', asy
   let view = await selectCategory(controller, 'managedHistory');
   assert.equal(view.direct, false);
   assert.equal(view.focus, 'parameters');
-  assert.deepEqual(view.parameters.map((item) => item.id), [
-    'managed-recording-section', 'managedHistoryPolicy',
-    'managed-current-section', 'managed-count', 'managed-updated', 'managedHistoryClear',
-  ]);
+  assert.deepEqual(view.parameters.map((item) => item.id), ['managedHistoryPolicy', 'managedHistoryClear']);
 
   view = await openParameter(controller, 'managedHistoryPolicy');
   assert.deepEqual(view.choices.map((item) => item.id), [
@@ -246,12 +243,14 @@ test('archive storage parameters stay on one page and input values open in a mod
   const { state, controller } = await settingsController({ archivePolicy: 'move' });
   const view = await selectCategory(controller, 'sourceArchive');
   assert.deepEqual(view.parameters.map((item) => item.id), [
-    'source-policy-section', 'archivePolicy', 'archiveDirectory', 'archiveRetentionDays', 'archiveMaxBytes',
-    'source-storage-section', 'archive-files', 'archive-used', 'archive-oldest', 'archive-path',
+    'archivePolicy', 'archiveDirectory', 'archiveRetentionDays', 'archiveMaxBytes',
     'archiveStorageRefresh', 'archiveStorageClear',
-    'backup-storage-section', 'backupRetentionPolicy', 'backupRetentionDays', 'backupMaxBytes',
-    'backup-directory', 'backup-count', 'backup-used', 'backup-oldest', 'backupStorageClear',
   ]);
+  const backupView = await selectCategory(controller, 'backups');
+  assert.deepEqual(backupView.parameters.map((item) => item.id), [
+    'backupRetentionPolicy', 'backupRetentionDays', 'backupMaxBytes', 'backupStorageRefresh', 'backupStorageClear',
+  ]);
+  await selectCategory(controller, 'sourceArchive');
 
   await openParameter(controller, 'archiveDirectory');
   assert.equal(state.screen, 'settings');
@@ -336,6 +335,7 @@ test('Local LLM settings expose delivery and failed-check analysis choices', asy
   assert.equal(view.choices[view.choiceIndex].id, 'llmChangeDelivery:chunked');
   assert.deepEqual(view.choices.map((item) => item.id), [
     'llmChangeDelivery:adaptive', 'llmChangeDelivery:patch',
+    'llmChangeDelivery:representative', 'llmChangeDelivery:capped',
     'llmChangeDelivery:change-list', 'llmChangeDelivery:chunked',
   ]);
   await handleSettingsKey(controller, { name: 'escape' });

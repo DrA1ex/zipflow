@@ -2,6 +2,7 @@ import { createWorkspaceApp } from 'terlio.js';
 import { createInitialState } from './app/state.js';
 import { ZipflowController } from './app/controller.js';
 import { renderZipflow } from './ui/render.js';
+import { advanceUiAnimation } from './app/ui-animation.js';
 
 export async function startZipflow({ input = process.stdin, output = process.stdout } = {}) {
   const state = createInitialState();
@@ -12,15 +13,16 @@ export async function startZipflow({ input = process.stdin, output = process.std
     input,
     output,
     pointer: 'auto',
-    tickMs: 250,
+    tickMs: 120,
     tick: ({ state: current, overlays }) => {
-      const toastChanged = overlays?.tick?.(0.25) ?? false;
+      const toastChanged = overlays?.tick?.(0.12) ?? false;
       let helpChanged = false;
       if (current.helpToast?.expiresAt && Date.now() >= current.helpToast.expiresAt) {
         current.helpToast = null;
         helpChanged = true;
       }
-      return toastChanged || helpChanged || Boolean(current.llmRuntime || current.busy);
+      const animationChanged = advanceUiAnimation(current);
+      return toastChanged || helpChanged || animationChanged;
     },
     render: ({ state: current, width, height }) => renderZipflow({ state: current, width, height }),
     onKey: ({ key }) => { void controller.handleKey(key).catch((error) => controller.handleUnexpected(error)); },

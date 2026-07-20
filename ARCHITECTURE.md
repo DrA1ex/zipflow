@@ -79,7 +79,7 @@ Uses provider-specific adapters. LM Studio model metadata comes from the native 
 
 `model-info.js` resolves the active or configured context size with a conservative fallback. `patch-budget.js` reserves context for instructions and output, keeps a complete changed-file manifest, and distributes available diff hunks across files. Context overflow and local compute-memory errors trigger progressively smaller-patch retries. `diagnostics.js` stores a bounded, sanitized request/result/error record in the run directory.
 
-`archive-review.js` can compare bounded project/archive trees before change generation. `delivery.js` selects a bounded full patch, an explicit changed-path list, or file-by-file patch batches; adaptive delivery chooses between full-patch and chunked analysis from the discovered context budget. Chunked analysis stores compact notes for each batch and synthesizes them in a final request. Deep review extends the readable response with `assessment`, `confidence`, and concise reasons. `response.js` parses the user-facing section protocol while a hidden JSON-repair request handles models that ignore it or return reasoning-only output. `failure.js` can explain a failed check in a fresh context or with the compact preceding change-review context. LM Studio native requests flatten prior assistant context and the current request into one valid string input because the endpoint does not accept chat-history message objects in `input`. LLM errors remain non-fatal to archive application.
+`archive-review.js` can compare bounded project/archive trees or combine them with representative patch excerpts from at most five priority files. `delivery.js` selects a bounded full patch, representative excerpts, capped priority batches, an explicit changed-path list, or exhaustive file-by-file patch batches. Adaptive delivery progresses from full patch to representative sample and then to at most three batches/twelve files according to the discovered context budget. Every bounded content mode retains the complete path manifest and records explicit coverage diagnostics. Chunked modes store compact notes for each batch and synthesize them in a final request. Deep review extends the readable response with `assessment`, `confidence`, and concise reasons. `response.js` parses the user-facing section protocol while a hidden JSON-repair request handles models that ignore it or return reasoning-only output. `failure.js` can explain a failed check in a fresh context or with the compact preceding change-review context. LM Studio native requests flatten prior assistant context and the current request into one valid string input because the endpoint does not accept chat-history message objects in `input`. LLM errors remain non-fatal to archive application.
 
 ### `src/patch`
 
@@ -99,7 +99,7 @@ Defines defaults, normalizes older workflow files, and persists versioned workfl
 
 ### `src/export`
 
-Collects source paths for tracked, non-ignored, interactive, and all-file exports, then writes ZIP archives. Protected `.git/` and `.zipflow/` roots are filtered below the UI layer.
+Collects source paths for tracked, non-ignored, custom, and all-file exports, then writes ZIP archives. `export-tree.js` presents a shared hierarchical tri-state browser for Custom selection and Review included files. Ignored, generated, sensitive, `.git/`, and `.zipflow/` paths are excluded by default; protected roots require explicit confirmation, while active lock and temporary runtime files remain filtered below the UI layer.
 
 
 ### `src/app/manual-flow.js`
@@ -207,8 +207,8 @@ archive input
   -> isolated extraction
   -> archive metadata
   -> persisted changes.patch
-  -> optional LLM structure guard or deep patch review
-  -> readable streamed local LLM analysis using path, patch, or file-batch delivery
+  -> optional LLM structure, representative sample, or deep patch review
+  -> readable streamed local LLM analysis using path, full-patch, representative, capped-batch, or exhaustive file-batch delivery
   -> immediate durable verdict and summary in Activity before commit-message selection
   -> deterministic archive age/snapshot shrink review
   -> optional reasoning-draft formatting pass
@@ -296,8 +296,8 @@ Unit and integration tests use temporary projects and Git repositories. Regressi
 - child-process cleanup;
 - custom-check prompt order;
 - stable radio selection and Space activation;
-- global settings persistence, schema migration, pane-focus navigation, section/stat rendering, and compact descriptions;
-- LM Studio and Ollama model metadata, atomic model selection, unload/reload configuration, separate prompt/summary/commit languages, compatibility tests, read-only historical replay, context budgeting, structural patch truncation, adaptive/full/path-list/file-batch delivery, optional authorization, native and OpenAI-compatible streams, readable wrapped progress, context/OOM retries, reasoning-only responses, hidden repair requests, failure explanations, and diagnostics;
+- global settings persistence, schema migration, pane-focus navigation, separate source-archive/backup/history categories and compact descriptions;
+- LM Studio and Ollama model metadata, atomic model selection, unload/reload configuration, separate prompt/summary/commit languages, compatibility tests, read-only historical replay, context budgeting, structural patch truncation, adaptive/full/representative/capped/path-list/file-batch delivery, optional authorization, native and OpenAI-compatible streams, readable wrapped progress, context/OOM retries, reasoning-only responses, hidden repair requests, failure explanations, and diagnostics;
 - source archive keep, move, delete, statistics, indexed cleanup, retention, and size-limit behavior;
 - backup statistics, guarded cleanup, retention by age/size, active-run protection, and rollback availability;
 - commit-message editor fallback, typing, deletion, and multiline input;

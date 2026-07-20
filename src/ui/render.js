@@ -178,7 +178,12 @@ function renderCurrent(state, width, height, theme) {
   const selected = state.menuItems[state.selectedIndex];
   const inlineDescriptions = showsInlineDescriptions(state.screen);
   const selectedDescription = inlineDescriptions ? '' : selected?.description ?? '';
-  const descriptionRows = selectedDescription ? Math.min(4, wrapText(selectedDescription, Math.max(20, width - 8)).length) + 1 : 0;
+  const fixedRows = fixedDescriptionRows(state.screen);
+  const wrappedDescription = selectedDescription ? wrapText(selectedDescription, Math.max(20, width - 8)).slice(0, fixedRows || 4) : [];
+  const descriptionRows = fixedRows || (wrappedDescription.length ? wrappedDescription.length + 1 : 0);
+  const descriptionNodes = fixedRows
+    ? Array.from({ length: fixedRows }, (_, index) => Text(color(theme, 'textMuted', wrappedDescription[index] ?? ''), { wrap: false }))
+    : (selectedDescription ? [Text(color(theme, 'textMuted', selectedDescription), { wrap: true })] : []);
   return WorkspacePane({
     title: ` ${screenTitle(state)} `,
     active: true,
@@ -206,7 +211,7 @@ function renderCurrent(state, width, height, theme) {
           event.preventDefault();
         },
       }),
-      selectedDescription ? Text(color(theme, 'textMuted', selectedDescription), { wrap: true }) : null,
+      ...descriptionNodes,
     ].filter(Boolean),
   });
 }
@@ -353,7 +358,7 @@ function screenTitle(state) {
     'commit-message': 'Commit message', 'deploy-prompt': 'Deployment', 'deploy-running': 'Deployment',
     'deploy-failed': 'Deployment failed', completed: 'Completed', 'run-details': 'Last run', 'run-file-groups': 'Changed files', 'run-file-list': 'Changed files',
     'rollback-confirm': 'Rollback', 'rolling-back': 'Rolling back',
-    'export-mode': 'Create ZIP', 'export-select': 'Choose archive contents', 'export-sensitive': 'ZIP safety review', 'export-preview': 'ZIP preview', 'export-files': 'Included files', 'export-path': 'Output archive',
+    'export-mode': 'Create ZIP', 'export-select': 'Choose archive contents', 'export-sensitive': 'ZIP safety review', 'export-protected': 'Protected project data', 'export-preview': 'ZIP preview', 'export-files': 'Included files', 'export-path': 'Output archive',
     'export-running': 'Creating ZIP', 'export-complete': 'ZIP created',
     'setup-git-init': 'Initialize Git', 'setup-gitignore': 'Git ignore rules',
     'setup-initial-commit': 'First commit', 'initial-commit-message': 'First commit message',
@@ -408,7 +413,7 @@ function preferredPromptHeight(state, width = 80, mainHeight = 20) {
   const itemRows = showsInlineDescriptions(state.screen)
     ? state.menuItems.slice(0, 7).reduce((total, item) => total + 1 + Math.min(2, wrapText(String(item.description ?? ''), Math.max(20, width - 10)).length), 0)
     : Math.min(8, Math.max(2, state.menuItems.length));
-  const selectedDescription = showsInlineDescriptions(state.screen) ? 0 : Math.min(3, wrapText(String(state.menuItems[state.selectedIndex]?.description ?? ''), Math.max(20, width - 8)).length);
+  const selectedDescription = showsInlineDescriptions(state.screen) ? 0 : (fixedDescriptionRows(state.screen) || Math.min(3, wrapText(String(state.menuItems[state.selectedIndex]?.description ?? ''), Math.max(20, width - 8)).length));
   return Math.min(maximum, Math.max(7, introRows + itemRows + selectedDescription + 5));
 }
 
@@ -473,6 +478,10 @@ function renderHelpToastOverlay(state, content, width, height, theme) {
 
 function showsInlineDescriptions(screen) {
   return screen === 'archive-safety';
+}
+
+function fixedDescriptionRows(screen) {
+  return screen === 'export-mode' ? 3 : 0;
 }
 
 function isWorkflowSetupScreen(screen) {

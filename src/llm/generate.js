@@ -2,7 +2,8 @@ import { createLocalCompletion } from './client.js';
 import { resolveLocalLlmSession } from './session.js';
 import { createPromptBudget, fitPatchToBudget, reducePatchBudget } from './patch-budget.js';
 import {
-  createChangeList, createPatchBatches, estimateTokens, resolveDeliveryMode,
+  createCappedPatchBatches, createChangeList, createPatchBatches, createRepresentativePatch,
+  estimateTokens, resolveDeliveryMode,
 } from './delivery.js';
 import {
   extractUnstructuredResponse, parseChangeResponse, readableResponseInstructions,
@@ -41,7 +42,7 @@ export async function generateChangeDescription({ settings, project, plan, patch
   const languages = {
     prompt: promptLanguage(settings), summary: summaryLanguage(settings), commit: commitLanguage(settings),
   };
-  const reviewArchive = settings.llmArchiveReview === 'patch';
+  const reviewArchive = ['sample', 'patch'].includes(settings.llmArchiveReview);
   const responseSchema = reviewArchive ? REVIEW_RESPONSE_SCHEMA : RESPONSE_SCHEMA;
   const system = buildSystemPrompt(languages, reviewArchive);
   const fixedUser = buildUserPrompt(project, plan, { kind: 'change-list', content: createChangeList(plan) });
@@ -62,13 +63,19 @@ export async function generateChangeDescription({ settings, project, plan, patch
   const requestedMode = settings.llmChangeDelivery || 'patch';
   const deliveryMode = resolveDeliveryMode(requestedMode, {
     patchEstimatedTokens: estimateTokens(patchContent), patchBudgetTokens: budget.patchTokens,
+    fileCount: changedCount(plan),
   });
   notify({ type: 'delivery-mode', requestedMode, deliveryMode });
+  const context = { settings, project, plan, patchContent, profile, budget, system, reviewArchive, deliveryMode };
   const generation = deliveryMode === 'chunked'
-    ? await generateChunked({ settings, project, plan, patchContent, profile, budget, system, reviewArchive }, options, notify)
-    : deliveryMode === 'change-list'
-      ? await generateFromChangeList({ settings, project, plan, profile, budget, system }, options, notify)
-      : await generateFromPatch({ settings, project, plan, patchContent, profile, budget, system }, options, notify);
+    ? await generateChunked(context, options, notify)
+    : deliveryMode === 'capped'
+      ? await generateChunked(context, options, notify, { capped: true })
+      : deliveryMode === 'representative'
+        ? await generateRepresentative(context, options, notify)
+        : deliveryMode === 'change-list'
+          ? await generateFromChangeList(context, options, notify)
+          : await generateFromPatch(context, options, notify);
 
   const completion = generation.completion;
   const direct = tryReadable(completion.content, reviewArchive) ?? tryReadable(completion.reasoning, reviewArchive);
@@ -124,7 +131,7 @@ export async function generateChangeDescription({ settings, project, plan, patch
 }
 
 
-async function generateFromPatch(context, options, notify) {
+async function generateFromPatch(context, options, notify, { deliveryMode = 'patch', coverage = null, payloadKind = 'patch' } = {}) {
   let patchTokens = context.budget.patchTokens;
   const attempts = [];
   let completion = null;
@@ -141,7 +148,7 @@ async function generateFromPatch(context, options, notify) {
         contextLength: context.budget.effectiveContextTokens,
         messages: [
           { role: 'system', content: context.system },
-          { role: 'user', content: buildUserPrompt(context.project, context.plan, { kind: 'patch', content: fitted.content }) },
+          { role: 'user', content: buildUserPrompt(context.project, context.plan, { kind: payloadKind, content: fitted.content, coverage }) },
         ],
       }, options, (event) => notify({ ...event, stage: 'generation' }));
       attempts.at(-1).completion = completionDiagnostics(completion);
@@ -158,7 +165,20 @@ async function generateFromPatch(context, options, notify) {
     attachDiagnostics(lastError, { profile: context.profile, budget: context.budget, attempts });
     throw lastError;
   }
-  return { completion, attempts, delivery: { requested: context.settings.llmChangeDelivery, resolved: 'patch' } };
+  return { completion, attempts, delivery: { requested: context.settings.llmChangeDelivery, resolved: deliveryMode, ...(coverage ? { coverage } : {}) } };
+}
+
+async function generateRepresentative(context, options, notify) {
+  const sample = createRepresentativePatch(context.patchContent, {
+    maxFiles: Number(context.settings.llmRepresentativeMaxFiles) || 8,
+  });
+  notify({ type: 'coverage', ...sample.coverage });
+  return generateFromPatch(
+    { ...context, patchContent: sample.content },
+    options,
+    notify,
+    { deliveryMode: 'representative', coverage: sample.coverage, payloadKind: 'sample' },
+  );
 }
 
 async function generateFromChangeList(context, options, notify) {
@@ -180,9 +200,14 @@ async function generateFromChangeList(context, options, notify) {
   };
 }
 
-async function generateChunked(context, options, notify) {
+async function generateChunked(context, options, notify, { capped = false } = {}) {
   const maxBatchTokens = Math.max(1_500, Math.min(5_000, Math.floor(context.budget.patchTokens * 0.45)));
-  const batches = createPatchBatches(context.patchContent, { maxEstimatedTokens: maxBatchTokens });
+  const cappedResult = capped ? createCappedPatchBatches(context.patchContent, {
+    maxEstimatedTokens: maxBatchTokens, maxBatches: 3, maxFiles: 12, maxFilesPerBatch: 4,
+  }) : null;
+  const batches = cappedResult?.batches ?? createPatchBatches(context.patchContent, { maxEstimatedTokens: maxBatchTokens });
+  const coverage = cappedResult?.coverage ?? null;
+  if (coverage) notify({ type: 'coverage', ...coverage });
   const notes = [];
   const attempts = [];
   for (let index = 0; index < batches.length; index += 1) {
@@ -209,8 +234,9 @@ async function generateChunked(context, options, notify) {
   return {
     completion, attempts,
     delivery: {
-      requested: context.settings.llmChangeDelivery, resolved: 'chunked',
+      requested: context.settings.llmChangeDelivery, resolved: capped ? 'capped' : 'chunked',
       batches: batches.length, files: [...new Set(batches.flatMap((batch) => batch.files))].length,
+      ...(coverage ? { coverage } : {}),
     },
   };
 }
@@ -279,7 +305,11 @@ function buildUserPrompt(project, plan, payload) {
     `Project types: ${(project.labels ?? []).join(', ') || 'unknown'}`,
     `Plan counts: created=${plan.counts.created}, updated=${plan.counts.updated}, deleted=${plan.counts.deleted}`,
   ];
-  if (payload.kind === 'patch') return [...intro, '', 'CHANGED PATHS:', createChangeList(plan), '', 'PATCH START', payload.content, 'PATCH END'].join('\n');
+  if (payload.kind === 'patch' || payload.kind === 'sample') return [
+    ...intro, '', 'CHANGED PATHS:', createChangeList(plan),
+    ...(payload.kind === 'sample' ? ['', `REPRESENTATIVE PATCH SAMPLE: ${payload.coverage?.reviewedFiles ?? 0} of ${payload.coverage?.totalFiles ?? 0} changed files include content.`, 'Do not imply that omitted file contents were reviewed.'] : []),
+    '', 'PATCH START', payload.content, 'PATCH END',
+  ].join('\n');
   return [...intro, '', 'CHANGED PATHS:', payload.content, '', 'No file contents are provided. Base the response only on path-level evidence and clearly avoid content-specific claims.'].join('\n');
 }
 
@@ -290,7 +320,7 @@ function buildSynthesisPrompt(project, plan, notes) {
     `Plan counts: created=${plan.counts.created}, updated=${plan.counts.updated}, deleted=${plan.counts.deleted}`,
     '', 'COMPLETE CHANGED PATH LIST:', createChangeList(plan),
     '', 'FILE-BATCH ANALYSIS NOTES:', notes.join('\n\n---\n\n'),
-    '', 'Create the final response now. Reconcile duplicated notes and do not claim that tests passed.',
+    '', 'Create the final response now. Reconcile duplicated notes, do not claim that tests passed, and do not imply that unreviewed file contents were analyzed.',
   ].join('\n');
 }
 

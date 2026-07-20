@@ -8,6 +8,8 @@ import { createLocalCompletion } from './client.js';
 import { promptLanguage, promptLanguageDirective, summaryLanguage } from './language.js';
 import { resolveLocalLlmSession } from './session.js';
 import { parseAssessmentResponse } from './response.js';
+import { createChangeList, createRepresentativePatch } from './delivery.js';
+import { fitPatchToBudget } from './patch-budget.js';
 
 const REVIEW_SCHEMA = {
   type: 'object',
@@ -76,6 +78,78 @@ export async function reviewArchiveStructure({ settings, project, workflow, extr
         sentEntries: prompt.sentEntries,
         truncated: prompt.truncated,
       },
+      finishReason: completion.finishReason,
+      usage: completion.usage,
+      chunks: completion.chunks,
+    },
+  };
+}
+
+export async function reviewArchiveSample({ settings, project, workflow, extracted, plan, patchContent }, options = {}) {
+  const notify = options.onEvent ?? (() => {});
+  notify({ type: 'phase', phase: 'sample-guard', label: 'Preparing archive structure and representative patch guard' });
+  const comparison = await createTreeComparison({ project, workflow, extracted });
+  let session = options.session;
+  if (!session) {
+    session = await resolveLocalLlmSession(settings, {
+      fetchImpl: options.fetchImpl, timeoutMs: options.metadataTimeoutMs ?? 10_000, signal: options.signal,
+    });
+    notify({ type: 'model-profile', profile: session.profile });
+  }
+  const profile = session.profile;
+  const tree = fitComparison(comparison, Math.min(profile.contextLength, 10_000));
+  const sample = createRepresentativePatch(patchContent, { maxFiles: 5 });
+  const fitted = fitPatchToBudget(sample.content, Math.max(1_200, Math.min(4_000, Math.floor(profile.contextLength * 0.24))));
+  const coverage = {
+    ...sample.coverage,
+    patchCoveragePercent: Math.min(sample.coverage.patchCoveragePercent, fitted.originalEstimatedTokens
+      ? Math.round(fitted.sentEstimatedTokens / fitted.originalEstimatedTokens * sample.coverage.patchCoveragePercent)
+      : sample.coverage.patchCoveragePercent),
+  };
+  notify({
+    type: 'tree-budget',
+    originalEntries: comparison.project.entries.length + comparison.archive.entries.length,
+    sentEntries: tree.sentEntries,
+    truncated: tree.truncated,
+  });
+  notify({ type: 'coverage', ...coverage });
+  const completion = await createLocalCompletion({
+    provider: settings.llmProvider,
+    model: profile.requestModel,
+    loadedModel: profile.loadedModel,
+    messages: [
+      { role: 'system', content: `${systemPrompt(promptLanguage(settings), summaryLanguage(settings))} The patch excerpts are a bounded representative sample, so do not imply that every changed file was read.` },
+      { role: 'user', content: sampleUserPrompt(project, plan, tree.text, fitted.content, coverage) },
+    ],
+    responseSchema: null,
+    maxTokens: 512,
+    apiToken: session.apiToken,
+    contextLength: Math.min(profile.contextLength, 16_384),
+    reasoningOffSupported: profile.reasoningOffSupported,
+  }, {
+    ...options,
+    onEvent: (event) => notify({ ...event, stage: 'sample-guard' }),
+  });
+  const parsed = parseArchiveAssessment(completion.content) ?? parseArchiveAssessment(completion.reasoning);
+  if (!parsed) {
+    const error = new Error('The local model did not return a usable archive sample assessment.');
+    error.code = 'no_archive_assessment';
+    error.diagnostics = { completion, profile, tree, coverage };
+    throw error;
+  }
+  return {
+    ...parsed,
+    diagnostics: {
+      profile,
+      tree: {
+        projectFiles: comparison.project.fileCount,
+        archiveFiles: comparison.archive.fileCount,
+        originalEntries: comparison.project.entries.length + comparison.archive.entries.length,
+        sentEntries: tree.sentEntries,
+        truncated: tree.truncated,
+      },
+      coverage,
+      patch: fitted,
       finishReason: completion.finishReason,
       usage: completion.usage,
       chunks: completion.chunks,
@@ -199,6 +273,16 @@ function userPrompt(project, plan, treeText) {
     `Detected technologies: ${(project.labels ?? []).join(', ') || 'unknown'}`,
     `Planned changes: created=${plan.counts.created}, updated=${plan.counts.updated}, deleted=${plan.counts.deleted}, unchanged=${plan.counts.unchanged}`,
     '', treeText,
+  ].join('\n');
+}
+
+function sampleUserPrompt(project, plan, treeText, patchText, coverage) {
+  return [
+    userPrompt(project, plan, treeText),
+    '', 'COMPLETE CHANGED PATH MANIFEST:', createChangeList(plan),
+    '', `REPRESENTATIVE PATCH SAMPLE: ${coverage.reviewedFiles} of ${coverage.totalFiles} changed files include content.`,
+    'Do not infer unseen implementation details from omitted files.',
+    '', 'PATCH SAMPLE START', patchText || '(no patch excerpts available)', 'PATCH SAMPLE END',
   ].join('\n');
 }
 

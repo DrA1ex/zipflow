@@ -16,6 +16,7 @@ import {
   closeSettings, handleSettingsKey, isSettingsScreen, openSettings, selectChoice, selectModelSettingChoice,
   selectModelSettingParameter, selectParameter, selectSetting,
 } from './settings-panel.js';
+import { handleReplayDispatch } from './settings-model-replay.js';
 import { projectSummary } from '../ui/format.js';
 import { toggleActivityBlockAtRow, toggleActivityBlockAtScroll } from '../ui/activity.js';
 import { terminateActiveProcesses } from '../utils/process.js';
@@ -161,6 +162,7 @@ export class ZipflowController {
     if (action.type === 'settings-select-choice') return selectChoice(this, action.index);
     if (action.type === 'settings-model-select-parameter') return selectModelSettingParameter(this, action.index);
     if (action.type === 'settings-model-select-choice') return selectModelSettingChoice(this, action.index);
+    if (handleReplayDispatch(this, action)) return;
     if (action.type === 'path-select') {
       selectPathSuggestion(this.state, action.index);
       if (this.state.pathSuggestions?.owner === 'settings-modal') {
@@ -387,7 +389,6 @@ export class ZipflowController {
     this.state.activityUnread = 0;
   }
 
-
   recoveryText() {
     const error = this.recovery?.error;
     return [
@@ -475,7 +476,6 @@ export class ZipflowController {
     this.state.selectedIndex = next;
   }
 }
-
 function isEditorScreen(screen) {
   return [
     'project-path-input', 'archive-input', 'custom-check-command', 'custom-check-name',

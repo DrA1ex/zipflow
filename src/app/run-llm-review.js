@@ -1,4 +1,4 @@
-import { reviewArchiveStructure } from '../llm/archive-review.js';
+import { reviewArchiveSample, reviewArchiveStructure } from '../llm/archive-review.js';
 import { saveLlmDiagnostics } from '../llm/diagnostics.js';
 import { generateChangeDescription, isLocalLlmEnabled } from '../llm/generate.js';
 import { resolveLocalLlmSession } from '../llm/session.js';
@@ -78,13 +78,13 @@ async function generateLlmSummary(controller, { plan, patch, extracted }) {
   const { state } = controller;
   const settings = activeRunSettings(state);
   if (!isLocalLlmEnabled(settings)) return { record: null, assessment: null };
-  if (changedCount(plan) === 0 && settings.llmArchiveReview !== 'structure') return { record: null, assessment: null };
+  if (changedCount(plan) === 0 && !['structure', 'sample'].includes(settings.llmArchiveReview)) return { record: null, assessment: null };
   state.progress = { value: 5, total: 7, detail: `Streaming summary from ${settings.llmModel}` };
   controller.invalidate();
   const llmEstimate = await previousLlmEstimate(state);
   controller.message('Local LLM analysis starting', [
-    `${changedCount(plan)} changed paths · delivery ${deliveryLabel(settings.llmChangeDelivery)}${settings.llmArchiveReview === 'structure' ? ' · project/archive structure guard first' : ''}${llmEstimate ? ` · historical median ${formatEstimate(llmEstimate)}` : ''}.`,
-    'Adaptive delivery uses one patch when it fits and file-by-file batches when it does not. Esc cancels only this LLM step.',
+    `${changedCount(plan)} changed paths · delivery ${deliveryLabel(settings.llmChangeDelivery)}${settings.llmArchiveReview === 'structure' ? ' · project/archive structure guard first' : settings.llmArchiveReview === 'sample' ? ' · bounded structure and patch sample guard first' : ''}${llmEstimate ? ` · historical median ${formatEstimate(llmEstimate)}` : ''}.`,
+    'Adaptive delivery uses a full patch, representative sample, or capped batches according to the model context. Esc cancels only this LLM step.',
   ], 'process');
   const progress = beginLlmProgress(controller, { expectedMs: llmEstimate });
   const abortController = new AbortController();
@@ -95,43 +95,47 @@ async function generateLlmSummary(controller, { plan, patch, extracted }) {
     progress.onEvent({ type: 'phase', phase: 'model-info', label: 'Reading the selected model context limit' });
     const session = await resolveLocalLlmSession(settings, { signal: abortController.signal });
     progress.onEvent({ type: 'model-profile', profile: session.profile });
-    let structureAssessment = null;
+    let guardAssessment = null;
+    let guardMode = null;
     if (settings.llmArchiveReview === 'structure') {
-      structureAssessment = await reviewArchiveStructure(
+      guardMode = 'structure';
+      guardAssessment = await reviewArchiveStructure(
         { settings, project: state.project, workflow: state.workflow, extracted, plan },
         { onEvent: progress.onEvent, signal: abortController.signal, session },
       );
-      if (structureAssessment.assessment === 'unsuitable') {
-        const result = {
-          summary: structureAssessment.reasons,
-          commitMessage: '',
-          assessment: structureAssessment.assessment,
-          confidence: structureAssessment.confidence,
-          reasons: structureAssessment.reasons,
-          diagnostics: { structure: structureAssessment.diagnostics },
-        };
-        const durationMs = Date.now() - startedAt;
-        const diagnosticsPath = await saveLlmDiagnostics(state.run.id, {
-          status: 'completed',
-          provider: settings.llmProvider,
-          model: settings.llmModel,
-          diagnostics: result.diagnostics,
-        }).catch(() => null);
-        return {
-          result,
-          assessment: assessmentRecord(result, 'structure'),
-          diagnosticsPath,
-          record: llmRecord(state, result, diagnosticsPath, durationMs),
-        };
-      }
+    } else if (settings.llmArchiveReview === 'sample') {
+      guardMode = 'sample';
+      guardAssessment = await reviewArchiveSample(
+        { settings, project: state.project, workflow: state.workflow, extracted, plan, patchContent: patch.content },
+        { onEvent: progress.onEvent, signal: abortController.signal, session },
+      );
     }
+    if (guardAssessment?.assessment === 'unsuitable') {
+      const result = {
+        summary: guardAssessment.reasons,
+        commitMessage: '',
+        assessment: guardAssessment.assessment,
+        confidence: guardAssessment.confidence,
+        reasons: guardAssessment.reasons,
+        diagnostics: { [guardMode]: guardAssessment.diagnostics },
+      };
+      const durationMs = Date.now() - startedAt;
+      const diagnosticsPath = await saveLlmDiagnostics(state.run.id, {
+        status: 'completed', provider: settings.llmProvider, model: settings.llmModel, diagnostics: result.diagnostics,
+      }).catch(() => null);
+      return {
+        result, assessment: assessmentRecord(result, guardMode), diagnosticsPath,
+        record: llmRecord(state, result, diagnosticsPath, durationMs),
+      };
+    }
+    const summarySettings = guardAssessment ? { ...settings, llmArchiveReview: 'disabled' } : settings;
     const result = await generateChangeDescription(
-      { settings, project: state.project, plan, patchContent: patch.content },
+      { settings: summarySettings, project: state.project, plan, patchContent: patch.content },
       { onEvent: progress.onEvent, signal: abortController.signal, session },
     );
-    if (structureAssessment) {
-      result.structureAssessment = structureAssessment;
-      result.diagnostics = { ...(result.diagnostics ?? {}), structure: structureAssessment.diagnostics };
+    if (guardAssessment) {
+      result.guardAssessment = guardAssessment;
+      result.diagnostics = { ...(result.diagnostics ?? {}), [guardMode]: guardAssessment.diagnostics };
     }
     const durationMs = Date.now() - startedAt;
     const diagnosticsPath = await saveLlmDiagnostics(state.run.id, {
@@ -143,8 +147,8 @@ async function generateLlmSummary(controller, { plan, patch, extracted }) {
     }).catch(() => null);
     const assessment = result.assessment
       ? assessmentRecord(result, 'patch')
-      : result.structureAssessment
-        ? assessmentRecord(result.structureAssessment, 'structure')
+      : result.guardAssessment
+        ? assessmentRecord(result.guardAssessment, guardMode)
         : null;
     return {
       result,
@@ -215,6 +219,20 @@ function emitLlmResult(controller, llm, reviewMode) {
     if (llm.result.warning) controller.message('Local LLM fallback used', [llm.result.warning], 'warning', {
       collapsedSummary: 'Local LLM · fallback used',
     });
+    const delivery = llm.result.diagnostics?.delivery;
+    const coverage = delivery?.coverage ?? llm.result.diagnostics?.sample?.coverage;
+    if (delivery?.resolved || coverage) controller.message('Local LLM review coverage', [
+      ...(delivery?.resolved ? [`Delivery: ${deliveryLabel(delivery.resolved)}${delivery.batches ? ` · ${delivery.batches} batches` : ''}`] : ['Delivery: archive sample guard']),
+      ...(coverage ? [
+        `Reviewed content: ${coverage.reviewedFiles} of ${coverage.totalFiles} changed files`,
+        `Changed-path manifest: ${coverage.manifestFiles} of ${coverage.totalFiles} files`,
+        `Patch coverage: ${coverage.patchCoveragePercent}% · ${coverage.omittedFiles} files omitted`,
+      ] : []),
+    ], 'info', {
+      collapsedSummary: coverage
+        ? `Local LLM · ${coverage.reviewedFiles}/${coverage.totalFiles} files with content`
+        : `Local LLM · ${deliveryLabel(delivery.resolved)}`,
+    });
     if (llm.result.summary?.length) controller.message('Local LLM summary', llm.result.summary, 'summary', {
       collapsedSummary: `Local LLM · ${llm.result.summary.length} summary points`,
     });
@@ -278,6 +296,8 @@ async function previousLlmEstimate(state) {
 function deliveryLabel(value) {
   if (value === 'patch') return 'full patch';
   if (value === 'change-list') return 'changed paths only';
+  if (value === 'representative') return 'representative sample';
+  if (value === 'capped') return 'capped batches';
   if (value === 'chunked') return 'file-by-file chunks';
   return 'adaptive';
 }

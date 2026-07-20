@@ -1,6 +1,7 @@
 import { discoverProject } from '../project/detect.js';
 import { applyPolicyProfile, createRecommendedWorkflow } from '../workflow/defaults.js';
 import { saveWorkflow } from '../workflow/store.js';
+import { upsertMessage } from './state.js';
 import { displayPath, parseEnteredPath } from '../utils/paths.js';
 import {
   activateChecks, handleChecksShortcut, showChecksStep, submitCustomCheckEditor,
@@ -316,10 +317,15 @@ function activateMessageStrategy(controller, itemId) {
 function showReviewStep(controller) {
   const workflow = controller.state.draft;
   const actionLabel = controller.state.workflow ? 'Replace existing workflow' : 'Save workflow';
+  upsertMessage(controller.state, 'workflow-review-draft', 'Workflow review', workflowReviewLines(controller.state, workflow), 'summary', {
+    collapsible: true,
+    collapsed: false,
+    collapsedSummary: `${workflow.checks.filter((check) => check.selected).length} checks · ${workflow.policy.label} · ${workflow.archive.mode === 'overlay' ? 'overlay' : 'snapshot'}`,
+  });
   controller.showMenu('setup-review', [
     { id: 'save-workflow', label: actionLabel, description: 'Save this complete configuration and make it active for the next update.' },
-    { id: 'review-back', label: 'Back', description: controller.state.setupEditing ? 'Return to workflow sections without discarding the draft.' : 'Return to the previous setup step.' },
-  ], 'Review workflow', 0, workflowReviewLines(controller.state, workflow));
+    { id: 'review-back', label: 'Back', description: 'Return to workflow sections without discarding the draft.' },
+  ], 'Review workflow', 0);
 }
 
 async function activateReview(controller, itemId) {
@@ -329,7 +335,7 @@ async function activateReview(controller, itemId) {
   if (itemId === 'save-workflow') {
     controller.state.workflow = await saveWorkflow(controller.state.draft);
     controller.state.draft = null;
-    controller.message('Workflow saved', [controller.state.workflow.name], 'success');
+    upsertMessage(controller.state, 'workflow-review-draft', 'Workflow saved', [controller.state.workflow.name], 'success', { collapsible: false, collapsed: false });
     const { beginArchiveInput } = await import('./run-flow.js');
     beginArchiveInput(controller);
   }

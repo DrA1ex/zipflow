@@ -31,7 +31,7 @@ import {
 import { prepareArchiveRootReview, selectArchiveRoot, showArchiveRootChoice } from './archive-root.js';
 import { activeRunSettings, captureRunSettings } from './runtime-settings.js';
 import { skipPendingLlmReview, startLlmReview } from './run-llm-review.js';
-import { recentArchiveHint, rememberArchivePath } from '../settings/recent.js';
+import { rememberArchivePath } from '../settings/recent.js';
 
 export { showLastRun };
 
@@ -46,11 +46,7 @@ export function beginArchiveInput(controller) {
     label: 'ZIP archive path',
     placeholder: '~/Downloads/project-update.zip',
     purpose: 'archive-path',
-    instructions: [
-      'Drop a ZIP file into the terminal or enter its path. Tab completes ZIP paths; on an empty field it opens recent archives.',
-      ...(recentArchiveHint(controller.state.settings) ? [recentArchiveHint(controller.state.settings)] : []),
-      'Next: Zipflow compares it with the project, creates changes.patch, and shows a compact review before any files change.',
-    ],
+    instructions: ['Drop a ZIP file into the terminal or enter its path.'],
   }, '');
   controller.setStatus('Step 1 of 5 · Choose archive');
 }
@@ -199,7 +195,7 @@ async function continueArchiveInspection(controller, { archivePath, archiveHash,
 
     const settings = activeRunSettings(state);
     const shouldRunLlm = isLocalLlmEnabled(settings)
-      && (changedCount(resolvedPlan) > 0 || settings.llmArchiveReview === 'structure');
+      && (changedCount(resolvedPlan) > 0 || ['structure', 'sample'].includes(settings.llmArchiveReview));
     if (shouldRunLlm) startLlmReview(controller, { plan: resolvedPlan, patch, extracted });
 
     if (requiresSafetyReview(state.archiveSafety)) return showArchiveSafetyReview(controller);

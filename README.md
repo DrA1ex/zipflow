@@ -195,18 +195,25 @@ Ollama:    http://127.0.0.1:11434
 LM Studio: http://127.0.0.1:1234
 ```
 
+**Test selected model** offers a quick compatibility check and a read-only historical replay. Replay first shows the selected archive update and safety scope, then opens a dimmed modal workspace only after explicit confirmation. Streaming stages remain visible as separate colored blocks; mouse wheel, arrows, Page Up/Page Down, Home, and End work while generation is active. When the user scrolls away from the latest output, new logical blocks are counted without forcing the view downward.
+
 The **Archive review** setting controls whether the model also judges archive suitability:
 
 - **Summary only** generates a summary and commit message without an advisory verdict;
-- **Structure guard** first compares the current project and archive directory/file trees, then labels the archive `suitable`, `suspicious`, or `unsuitable`;
+- **Structure guard** compares the current project and archive directory/file trees;
+- **Sample guard** combines both trees, the complete changed-path manifest, and representative patch excerpts from at most five priority files;
 - **Deep patch review** returns the advisory assessment, reasons, summary, and commit message from the selected change representation.
 
 The separate **Change delivery** setting controls what source-change evidence reaches the model:
 
-- **Adaptive** sends a bounded full patch when it fits and automatically switches to file-by-file analysis for larger changes;
+- **Adaptive** uses a bounded full patch when it fits, a representative sample for medium changes, and capped batches for large changes;
 - **Full patch** sends one context-budgeted `changes.patch` request;
+- **Representative sample** sends the complete changed-path manifest and representative patch excerpts from at most eight priority files;
+- **Capped batches** analyzes at most three priority batches and twelve files before one synthesis request;
 - **Changed paths only** sends only explicit `CREATE`, `UPDATE`, and `DELETE` path records, without file contents;
-- **File-by-file chunks** analyzes small groups of file patches in separate bounded requests and then synthesizes their notes into one final summary and commit message.
+- **File-by-file chunks** performs exhaustive bounded file-batch analysis and then synthesizes one final summary and commit message.
+
+Bounded modes report both manifest coverage and file-content coverage in Activity, historical replay, and diagnostics so the model result cannot be mistaken for a review of every file.
 
 The **Failed checks** setting can leave failures untouched, explain them in a fresh model context, or continue from the compact context of the preceding change review. The same-context mode does not resend the entire patch; it supplies the prior review result together with the failed command and output. If the user keeps an update after required checks fail, Zipflow still offers a result commit for the applied paths; deployment remains skipped for that failed run.
 
@@ -294,7 +301,7 @@ Global settings control what happens to the uploaded source archive after an upd
 
 Move mode creates its directory when selected or first used. Its directory, retention, and size controls appear beside current storage statistics: managed file count, used space, oldest archive, and storage directory. **Clear now** shows the amount to be removed and touches only archives recorded in Zipflow's own archive index; unrelated files in the same directory are never deleted. Retention accepts whole days; maximum size accepts B, KB, MB, GB, KiB, MiB, or GiB. The default retention is 30 days and the default maximum size is 1 GB. Cancelled runs, failures before application, and rollbacks before a run is kept do not consume the source archive.
 
-The same settings page contains a separate backup block. Backups always live in `~/.zipflow/backups` (or the active `ZIPFLOW_HOME`) and the directory is read-only in the UI. Zipflow can keep all backups or prune them by age and total size. Automatic pruning never removes the backup of the active run. Manual cleanup warns that affected history entries will lose rollback capability, and those entries subsequently show `Rollback unavailable` instead of failing late.
+Backups have their own Settings category. They always live in `~/.zipflow/backups` (or the active `ZIPFLOW_HOME`) and the directory is read-only in the UI. Zipflow can keep all backups or prune them by age and total size. Automatic pruning never removes the backup of the active run. Manual cleanup warns that affected history entries will lose rollback capability, and those entries subsequently show `Rollback unavailable` instead of failing late.
 
 ## Supported project detection
 
@@ -327,12 +334,12 @@ If the same archive hash has already been applied, Zipflow shows the previous re
 
 The project home includes **Create ZIP** with four modes:
 
-- **Only Git-tracked files** — the smallest Git-based source snapshot;
-- **All files except ignored** — tracked and untracked files except paths matched by `.gitignore`;
-- **Choose top-level items** — an interactive list of project folders and files, expanded recursively after selection;
-- **All project files** — includes ignored files too.
+- **Git-tracked files** — the smallest Git-based source snapshot;
+- **Non-ignored files** — tracked and untracked files except paths matched by project ignore rules;
+- **Custom selection** — a hierarchical file browser with tri-state folders and individual file selection;
+- **Everything, including ignored files** — an advanced mode followed by a sensitive-file review.
 
-`.git/` and `.zipflow/` are protected in every mode and never appear in the interactive top-level list. The default output path is outside the project so an archive cannot include itself.
+The Custom selection and Review included files screens use the same tree. `Space` toggles a file or directory, `Enter` opens a directory, `Left` or `Shift+Tab` returns to its parent, and `Tab` jumps to the next directory on the current level. Ignored, generated, potentially sensitive, `.git/`, and `.zipflow/` paths start excluded. Internal Git/Zipflow paths require an explicit confirmation before inclusion, while active lock and temporary runtime files remain unavailable. The default output path is outside the project so an archive cannot include itself.
 
 ## Rollback
 

@@ -10,7 +10,8 @@ export function settingsDefinitions(state) {
     { id: 'theme', label: 'Theme', description: '', directParameterId: 'theme' },
     { id: 'checkOutput', label: 'Running checks', description: '', directParameterId: 'checkOutput' },
     { id: 'localLlm', label: 'Local LLM', description: 'Provider, model, languages, review behavior, and authentication.' },
-    { id: 'sourceArchive', label: 'Source archives', description: 'What happens to an uploaded ZIP after a completed update.' },
+    { id: 'sourceArchive', label: 'Source archives', description: 'Retention and storage for completed source ZIPs.' },
+    { id: 'backups', label: 'Backups', description: 'Retention and storage for rollback backups.' },
   ];
   if (state.project) definitions.push({
     id: 'managedHistory',
@@ -33,6 +34,7 @@ export function settingsParameters(state, definition) {
     return localLlmParameters(state);
   }
   if (definition.id === 'sourceArchive') return sourceArchiveParameters(state);
+  if (definition.id === 'backups') return backupParameters(state);
   if (definition.id === 'managedHistory') return managedHistoryParameters(state);
   return [];
 }
@@ -55,11 +57,14 @@ export function settingsChoices(state, parameter) {
   if (parameter.settingId === 'llmArchiveReview') return [
     option(parameter, 'disabled', 'Summary only', 'Generate summary and commit message without an archive suitability verdict.'),
     option(parameter, 'structure', 'Structure guard', 'Compare the project and archive trees before the patch summary request.'),
+    option(parameter, 'sample', 'Sample guard', 'Check both project/archive structure and representative patch excerpts from up to five priority files.'),
     option(parameter, 'patch', 'Deep patch review', 'Assess archive suitability together with summary and commit message from changes.patch.'),
   ];
   if (parameter.settingId === 'llmChangeDelivery') return [
-    option(parameter, 'adaptive', 'Adaptive', 'Use a full patch when it fits; otherwise switch to file-by-file chunk analysis.'),
+    option(parameter, 'adaptive', 'Adaptive', 'Use a full patch when it fits, a representative sample for medium changes, and capped batches for large changes.'),
     option(parameter, 'patch', 'Full patch', 'Send one context-budgeted changes.patch request.'),
+    option(parameter, 'representative', 'Representative sample', 'Send the full changed-path manifest and representative patches from up to eight priority files.'),
+    option(parameter, 'capped', 'Capped batches', 'Analyze at most three priority batches and twelve files, then synthesize one result.'),
     option(parameter, 'change-list', 'Changed paths only', 'Send created, updated, and deleted file paths without file contents.'),
     option(parameter, 'chunked', 'File-by-file chunks', 'Analyze small groups of file patches, then synthesize one final answer.'),
   ];
@@ -152,7 +157,9 @@ function localLlmParameters(state) {
       id: 'llmModelTests', type: 'subpage', label: 'Test selected model',
       value: modelTestValue(state.settingsPanel),
       description: modelTestDescription(state.settingsPanel),
-      disabled: disabled || !state.settings.llmModel || Boolean(state.settingsPanel?.modelTest?.running),
+      disabled: disabled || !state.settings.llmModel,
+      blocked: Boolean(state.settingsPanel?.modelTest?.running),
+      loading: Boolean(state.settingsPanel?.modelTest?.running),
       disabledReason: disabled
         ? 'Enable a local LLM provider first.'
         : !state.settings.llmModel ? 'Choose a model first.' : 'The selected model test is already running.',
@@ -183,12 +190,12 @@ function llmModelTestParameters(state) {
     { id: 'modelTestConnection', type: 'action', action: 'model-test-connection',
       label: running && state.settingsPanel?.modelTest?.running ? 'Testing connection…' : 'Connection and compatibility test',
       value: modelTestValue(state.settingsPanel),
-      description: modelTestDescription(state.settingsPanel), disabled: running, loading: running && Boolean(state.settingsPanel?.modelTest?.running) },
+      description: modelTestDescription(state.settingsPanel), blocked: running, loading: running && Boolean(state.settingsPanel?.modelTest?.running) },
     { id: 'modelTestReplay', type: 'action', action: 'model-test-replay',
       label: 'Replay a historical update', value: '',
-      description: 'Run the current LLM rules against a stored historical patch without changing project files.', disabled: running },
+      description: 'Run the current LLM rules against a stored historical patch without changing project files.', blocked: running },
     { id: 'llmModelTestsBack', type: 'action', action: 'subpage-back', label: 'Back to Local LLM', value: '',
-      description: 'Return to the Local LLM settings page.', disabled: running },
+      description: 'Return to the Local LLM settings page.', blocked: running },
   ];
 }
 
@@ -222,12 +229,9 @@ function shortDate(value) {
 }
 
 function sourceArchiveParameters(state) {
-  const stats = state.settingsPanel?.storageStats ?? {};
-  const archives = stats.archives ?? {};
-  const backups = stats.backups ?? {};
+  const archives = state.settingsPanel?.storageStats?.archives ?? {};
   const loading = Boolean(state.settingsPanel?.loadingStorage);
   const parameters = [
-    sectionRow('source-policy-section', 'SOURCE ARCHIVE POLICY'),
     choiceParameter('archivePolicy', 'Policy', archivePolicyLabel(state.settings.archivePolicy),
       'Choose what Zipflow does with the source ZIP after a completed update.'),
   ];
@@ -240,19 +244,21 @@ function sourceArchiveParameters(state) {
       'Combined managed archive size limit; 0 disables size cleanup.'),
   );
   parameters.push(
-    sectionRow('source-storage-section', 'CURRENT SOURCE ARCHIVE STORAGE'),
-    statRow('archive-files', 'Files', loading ? 'Scanning…' : String(archives.count ?? 0)),
-    statRow('archive-used', 'Used space', loading ? 'Scanning…' : formatByteSize(archives.totalBytes ?? 0)),
-    statRow('archive-oldest', 'Oldest archive', loading ? 'Scanning…' : dateLabel(archives.oldestAt)),
-    statRow('archive-path', 'Directory', displayArchiveDirectory(state.settings.archiveDirectory)),
-    actionRow('archiveStorageRefresh', 'Refresh storage statistics', loading ? 'Scanning…' : '',
-      'Re-scan Zipflow-managed source archives and backups.', { action: 'storage-refresh', disabled: loading }),
+    actionRow('archiveStorageRefresh', 'Refresh statistics', loading ? 'Scanning…' : '',
+      'Re-scan Zipflow-managed source archives.', { action: 'storage-refresh', disabled: loading, loading }),
     { ...choiceParameter('archiveStorageClear', 'Clear now', archives.count ? `${archives.count} files` : 'Empty',
       'Delete only source archives registered in Zipflow’s archive index.'), disabled: loading || !archives.count },
-    sectionRow('backup-storage-section', 'FILE BACKUPS'),
+  );
+  return parameters;
+}
+
+function backupParameters(state) {
+  const backups = state.settingsPanel?.storageStats?.backups ?? {};
+  const loading = Boolean(state.settingsPanel?.loadingStorage);
+  const parameters = [
     choiceParameter('backupRetentionPolicy', 'Retention policy', backupPolicyLabel(state.settings.backupRetentionPolicy),
       'Keep every backup or automatically remove the oldest backups within configured limits.'),
-  );
+  ];
   if (state.settings.backupRetentionPolicy === 'limits') parameters.push(
     inputParameter('backupRetentionDays', 'Retention', `${state.settings.backupRetentionDays} days`,
       'Maximum backup age; 0 disables age cleanup.'),
@@ -260,10 +266,8 @@ function sourceArchiveParameters(state) {
       'Maximum combined backup size; 0 disables size cleanup.'),
   );
   parameters.push(
-    statRow('backup-directory', 'Directory', backups.directory ? displayPath(backups.directory) : '~/.zipflow/backups'),
-    statRow('backup-count', 'Backups', loading ? 'Scanning…' : `${backups.count ?? 0} · ${backups.fileCount ?? 0} files`),
-    statRow('backup-used', 'Used space', loading ? 'Scanning…' : formatByteSize(backups.totalBytes ?? 0)),
-    statRow('backup-oldest', 'Oldest backup', loading ? 'Scanning…' : dateLabel(backups.oldestAt)),
+    actionRow('backupStorageRefresh', 'Refresh statistics', loading ? 'Scanning…' : '',
+      'Re-scan rollback backup storage.', { action: 'storage-refresh', disabled: loading, loading }),
     { ...choiceParameter('backupStorageClear', 'Clear now', backups.count ? `${backups.count} backups` : 'Empty',
       'Delete stored rollback backups except the backup belonging to an active run.'), disabled: loading || !backups.count },
   );
@@ -274,12 +278,8 @@ function managedHistoryParameters(state) {
   const active = Boolean(state.run && !['completed', 'failed', 'cancelled', 'rolled_back'].includes(state.run.status));
   const history = state.settingsPanel?.managedHistory ?? { paths: [], updatedAt: null };
   return [
-    sectionRow('managed-recording-section', 'RECORDING'),
-    choiceParameter('managedHistoryPolicy', 'Policy', managedHistoryPolicyLabel(state.settings.managedHistoryPolicy),
+    choiceParameter('managedHistoryPolicy', 'Recording', managedHistoryPolicyLabel(state.settings.managedHistoryPolicy),
       'Choose whether future successful archive updates update managed-file history.'),
-    sectionRow('managed-current-section', 'CURRENT HISTORY'),
-    statRow('managed-count', 'Recorded paths', String(history.paths?.length ?? 0)),
-    statRow('managed-updated', 'Last updated', dateLabel(history.updatedAt)),
     { ...choiceParameter('managedHistoryClear', 'Clear now', history.paths?.length ? `${history.paths.length} paths` : 'Empty',
       'Forget recorded paths without changing whether future runs are recorded.'),
       disabled: Boolean(active) || !history.paths?.length,
@@ -287,12 +287,32 @@ function managedHistoryParameters(state) {
   ];
 }
 
-function sectionRow(id, label) {
-  return { id, type: 'section', label, value: '', disabled: true };
-}
-
-function statRow(id, label, value) {
-  return { id, type: 'stat', label, value, disabled: true };
+export function settingsPageSummary(state, definition) {
+  const loading = Boolean(state.settingsPanel?.loadingStorage);
+  if (definition.id === 'sourceArchive') {
+    const archives = state.settingsPanel?.storageStats?.archives ?? {};
+    return [
+      loading ? 'Scanning source archive storage…' : `${archives.count ?? 0} archives · ${formatByteSize(archives.totalBytes ?? 0)}`,
+      `Oldest: ${loading ? 'Scanning…' : dateLabel(archives.oldestAt)}`,
+      `Directory: ${displayArchiveDirectory(state.settings.archiveDirectory)}`,
+    ];
+  }
+  if (definition.id === 'backups') {
+    const backups = state.settingsPanel?.storageStats?.backups ?? {};
+    return [
+      loading ? 'Scanning backup storage…' : `${backups.count ?? 0} backups · ${backups.fileCount ?? 0} files · ${formatByteSize(backups.totalBytes ?? 0)}`,
+      `Oldest: ${loading ? 'Scanning…' : dateLabel(backups.oldestAt)}`,
+      `Directory: ${backups.directory ? displayPath(backups.directory) : '~/.zipflow/backups'}`,
+    ];
+  }
+  if (definition.id === 'managedHistory') {
+    const history = state.settingsPanel?.managedHistory ?? { paths: [], updatedAt: null };
+    return [
+      `${history.paths?.length ?? 0} recorded paths`,
+      `Last updated: ${dateLabel(history.updatedAt)}`,
+    ];
+  }
+  return [];
 }
 
 function actionRow(id, label, value, description, extra = {}) {
@@ -399,6 +419,7 @@ function outputLabel(value) {
 
 function archiveReviewLabel(value) {
   if (value === 'structure') return 'Structure guard';
+  if (value === 'sample') return 'Sample guard';
   if (value === 'patch') return 'Deep patch review';
   return 'Summary only';
 }
@@ -406,6 +427,8 @@ function archiveReviewLabel(value) {
 
 function changeDeliveryLabel(value) {
   if (value === 'patch') return 'Full patch';
+  if (value === 'representative') return 'Representative sample';
+  if (value === 'capped') return 'Capped batches';
   if (value === 'change-list') return 'Changed paths only';
   if (value === 'chunked') return 'File-by-file chunks';
   return 'Adaptive';

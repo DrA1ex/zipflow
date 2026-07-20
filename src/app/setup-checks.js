@@ -20,7 +20,7 @@ export function activateChecks(controller, itemId, onContinue) {
   if (itemId.startsWith('check:')) {
     const index = Number(itemId.slice(6));
     toggleCheck(controller.state, index);
-    showChecksStep(controller, controller.state.setupEditing ? controller.state.draft.checks.length + 1 : index);
+    showChecksStep(controller, index);
   }
 }
 
@@ -76,7 +76,7 @@ export function handleChecksShortcut(controller, key) {
   const selected = state.menuItems[state.selectedIndex];
   if (key.name === 'space' && selected?.id.startsWith('check:')) {
     toggleCheck(state, Number(selected.id.slice(6)));
-    showChecksStep(controller, state.setupEditing ? state.draft.checks.length + 1 : state.selectedIndex);
+    showChecksStep(controller, state.selectedIndex);
     return true;
   }
   if (key.printable && key.text.toLowerCase() === 'a') {

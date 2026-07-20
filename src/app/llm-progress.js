@@ -54,12 +54,15 @@ export function updateLlmProgress(controller, event) {
   } else if (event.type === 'delivery-mode') {
     runtime.deliveryMode = event.deliveryMode;
     runtime.label = `Change delivery: ${deliveryLabel(event.deliveryMode)}`;
+  } else if (event.type === 'coverage') {
+    runtime.coverage = event;
+    runtime.label = `Reviewed content from ${formatNumber(event.reviewedFiles)} of ${formatNumber(event.totalFiles)} changed files`;
   } else if (event.type === 'change-list') {
     runtime.deliveryMode = 'change-list';
     runtime.label = `Sending ${formatNumber(event.paths)} changed paths without file contents`;
   } else if (event.type === 'batch-start') {
     runtime.phase = 'chunk-analysis';
-    runtime.deliveryMode = 'chunked';
+    runtime.deliveryMode = runtime.deliveryMode === 'capped' ? 'capped' : 'chunked';
     runtime.batchIndex = event.index;
     runtime.batchTotal = event.total;
     runtime.content = '';
@@ -160,6 +163,12 @@ export function llmActivityLines(runtime, width = 100) {
   const compact = lines.filter(Boolean);
   lines.length = 0;
   lines.push(...compact);
+  if (runtime.coverage) {
+    lines.push(
+      `  Coverage: ${formatNumber(runtime.coverage.reviewedFiles)} of ${formatNumber(runtime.coverage.totalFiles)} files with content · ${formatNumber(runtime.coverage.manifestFiles)} paths in manifest`,
+      `  Patch coverage: ${formatNumber(runtime.coverage.patchCoveragePercent)}% · ${formatNumber(runtime.coverage.omittedFiles)} files omitted`,
+    );
+  }
   if (runtime.patchBudget?.truncated) {
     lines.push(
       `  Patch: ~${formatNumber(runtime.patchBudget.originalEstimatedTokens)} → ~${formatNumber(runtime.patchBudget.sentEstimatedTokens)} tokens`,
@@ -184,6 +193,8 @@ function preview(value, maxLines, width) {
 
 function deliveryLabel(value) {
   if (value === 'patch') return 'full patch';
+  if (value === 'representative') return 'representative sample';
+  if (value === 'capped') return 'capped batches';
   if (value === 'change-list') return 'changed paths only';
   if (value === 'chunked') return 'file-by-file chunks';
   return value || 'adaptive';

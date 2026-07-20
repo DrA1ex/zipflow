@@ -47,6 +47,7 @@ export function settingsModelView(state) {
 export async function handleModelSettingsKey(controller, key) {
   const config = controller.state.settingsPanel?.modelConfig;
   if (!config) return false;
+  if (config.loading) return true;
   if (key.name === 'escape' || key.name === 'left') {
     if (config.focus === 'choices') return backToModelParameters(controller);
     return closeModelConfiguration(controller);
@@ -68,7 +69,7 @@ export async function handleModelSettingsKey(controller, key) {
 
 export async function selectModelParameter(controller, index) {
   const config = controller.state.settingsPanel?.modelConfig;
-  if (!config) return;
+  if (!config || config.loading) return;
   config.focus = 'parameters';
   config.parameterIndex = index;
   await activateModelParameter(controller);
@@ -76,7 +77,7 @@ export async function selectModelParameter(controller, index) {
 
 export async function selectModelChoice(controller, index) {
   const config = controller.state.settingsPanel?.modelConfig;
-  if (!config) return;
+  if (!config || config.loading) return;
   config.choiceIndex = index;
   await activateModelChoice(controller);
 }
@@ -96,11 +97,12 @@ function modelParameters(config) {
   parameters.push({
     id: 'use-model', action: 'use-model', label: config.loading ? (config.progressLabel || 'Applying…') : 'Save and select', value: '',
     description: 'Save these parameters, make this the selected model, and keep only its LLM instance loaded.',
-    disabled: config.loading,
+    loading: config.loading,
+    blocked: config.loading,
   });
   parameters.push({
     id: 'back-models', action: 'back-models', label: 'Back to model list', value: '',
-    description: 'Discard unsaved parameter changes and return to available models.', disabled: config.loading,
+    description: 'Discard unsaved parameter changes and return to available models.', blocked: config.loading,
   });
   return parameters;
 }
@@ -119,7 +121,7 @@ function parameterChoices(config, parameter) {
 async function activateModelParameter(controller) {
   const view = settingsModelView(controller.state);
   const parameter = view?.activeParameter;
-  if (!parameter || parameter.disabled) return true;
+  if (!parameter || parameter.disabled || parameter.blocked) return true;
   if (parameter.action === 'back-models') return closeModelConfiguration(controller);
   if (parameter.action === 'use-model') return useConfiguredModel(controller);
   const config = controller.state.settingsPanel.modelConfig;

@@ -3,13 +3,13 @@ import { themes } from 'terlio.js';
 import { readJson, writeJsonAtomic } from '../utils/fs.js';
 import { ensureZipflowHome, getZipflowHome } from '../workflow/store.js';
 
-export const SETTINGS_VERSION = 10;
+export const SETTINGS_VERSION = 11;
 export const THEME_NAMES = Object.keys(themes);
 export const LLM_PROVIDERS = ['disabled', 'ollama', 'lmstudio'];
 export const LLM_LANGUAGES = ['English', 'Russian', 'German', 'French', 'Spanish', 'Chinese', 'Japanese'];
 export const ARCHIVE_POLICIES = ['keep', 'move', 'delete'];
-export const LLM_ARCHIVE_REVIEW_MODES = ['disabled', 'structure', 'patch'];
-export const LLM_CHANGE_DELIVERY_MODES = ['adaptive', 'patch', 'change-list', 'chunked'];
+export const LLM_ARCHIVE_REVIEW_MODES = ['disabled', 'structure', 'sample', 'patch'];
+export const LLM_CHANGE_DELIVERY_MODES = ['adaptive', 'patch', 'representative', 'capped', 'change-list', 'chunked'];
 export const LLM_FAILURE_ANALYSIS_MODES = ['disabled', 'same-context', 'new-context'];
 export const BACKUP_RETENTION_POLICIES = ['all', 'limits'];
 export const MANAGED_HISTORY_POLICIES = ['record', 'disabled'];

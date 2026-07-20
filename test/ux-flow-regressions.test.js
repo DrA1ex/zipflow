@@ -175,7 +175,7 @@ test('complete historical diff opens a multi-file diff workspace', async () => {
   assert.equal(state.diffView.diff.rows.some((row) => row.type === 'add' && row.newText === 'new'), true);
 });
 
-test('ZIP file review groups directories and allows file and folder exclusion', async () => {
+test('ZIP file review uses a hierarchical tri-state tree', async () => {
   const root = await tempDir('zipflow-export-review-');
   await writeFiles(root, {
     'README.md': 'root\n',
@@ -183,6 +183,7 @@ test('ZIP file review groups directories and allows file and folder exclusion', 
     'src/b.js': 'b\n',
     'test/a.test.js': 'test\n',
   });
+
   const state = createInitialState();
   state.project = projectFixture(root);
   const controller = new ZipflowController(state);
@@ -191,21 +192,24 @@ test('ZIP file review groups directories and allows file and folder exclusion', 
   await activateExport(controller, 'export-all');
   await activateExport(controller, 'export-review-files');
 
-  const rootIndex = state.menuItems.findIndex((item) => item.id === `export-file:${encodeURIComponent('README.md')}`);
-  const srcIndex = state.menuItems.findIndex((item) => item.id === `export-dir:${encodeURIComponent('src')}`);
-  const srcFileIndex = state.menuItems.findIndex((item) => item.id === `export-file:${encodeURIComponent('src/a.js')}`);
-  assert.ok(rootIndex >= 0 && rootIndex < srcIndex && srcIndex < srcFileIndex);
+  const srcId = `export-tree-directory:${encodeURIComponent('src')}`;
+  const readmeId = `export-tree-file:${encodeURIComponent('README.md')}`;
+  assert.ok(state.menuItems.findIndex((item) => item.id === srcId) >= 0);
+  assert.ok(state.menuItems.findIndex((item) => item.id === readmeId) >= 0);
 
-  await activateExport(controller, `export-dir:${encodeURIComponent('src')}`);
+  state.selectedIndex = state.menuItems.findIndex((item) => item.id === srcId);
+  await controller.handleKey({ name: 'space' });
   assert.equal(state.exportDraft.selectedPaths.has('src/a.js'), false);
-  assert.equal(state.menuItems.some((item) => item.id === `export-file:${encodeURIComponent('src/a.js')}`), false);
-  const srcItem = state.menuItems.find((item) => item.id === `export-dir:${encodeURIComponent('src')}`);
-  assert.match(srcItem.description, /hidden/i);
+  assert.match(state.menuItems.find((item) => item.id === srcId).label, /\[ \]/);
 
-  await activateExport(controller, `export-file:${encodeURIComponent('README.md')}`);
-  assert.equal(state.exportDraft.selectedPaths.has('README.md'), false);
-  const rootItem = state.menuItems.find((item) => item.id === `export-file:${encodeURIComponent('README.md')}`);
-  assert.match(rootItem.description, /Excluded from ZIP/i);
+  await activateExport(controller, srcId);
+  assert.equal(state.exportDraft.treeDirectory, 'src');
+  const childId = `export-tree-file:${encodeURIComponent('src/a.js')}`;
+  assert.ok(state.menuItems.some((item) => item.id === childId));
+  await activateExport(controller, childId);
+  assert.equal(state.exportDraft.selectedPaths.has('src/a.js'), true);
+  await controller.handleKey({ name: 'left' });
+  assert.match(state.menuItems.find((item) => item.id === srcId).label, /\[■\]/);
 });
 
 

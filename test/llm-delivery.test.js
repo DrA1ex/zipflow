@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  createChangeList, createPatchBatches, resolveDeliveryMode,
+  createCappedPatchBatches, createChangeList, createPatchBatches, createRepresentativePatch, resolveDeliveryMode,
 } from '../src/llm/delivery.js';
 import { generateChangeDescription } from '../src/llm/generate.js';
 
@@ -28,9 +28,10 @@ const plan = {
   deleted: [{ path: 'src/old.js' }],
 };
 
-test('adaptive delivery uses a patch when it fits and chunks when it does not', () => {
-  assert.equal(resolveDeliveryMode('adaptive', { patchEstimatedTokens: 1_000, patchBudgetTokens: 4_000 }), 'patch');
-  assert.equal(resolveDeliveryMode('adaptive', { patchEstimatedTokens: 5_000, patchBudgetTokens: 4_000 }), 'chunked');
+test('adaptive delivery progresses from full patch to representative sample and capped batches', () => {
+  assert.equal(resolveDeliveryMode('adaptive', { patchEstimatedTokens: 1_000, patchBudgetTokens: 4_000, fileCount: 3 }), 'patch');
+  assert.equal(resolveDeliveryMode('adaptive', { patchEstimatedTokens: 5_000, patchBudgetTokens: 4_000, fileCount: 20 }), 'representative');
+  assert.equal(resolveDeliveryMode('adaptive', { patchEstimatedTokens: 50_000, patchBudgetTokens: 4_000, fileCount: 100 }), 'capped');
   assert.equal(resolveDeliveryMode('change-list', { patchEstimatedTokens: 1, patchBudgetTokens: 1 }), 'change-list');
 });
 
@@ -51,6 +52,23 @@ test('file patch batching keeps complete file sections in small contexts', () =>
   assert.ok(batches.every((batch) => batch.files.length === 1));
   assert.ok(batches.some((batch) => batch.files.includes('src/a.js')));
   assert.ok(batches.some((batch) => batch.files.includes('src/b.js')));
+});
+
+test('representative and capped delivery enforce deterministic file limits', () => {
+  const patch = Array.from({ length: 20 }, (_, index) => [
+    `diff --git a/src/file-${index}.js b/src/file-${index}.js`,
+    `--- a/src/file-${index}.js`,
+    `+++ b/src/file-${index}.js`,
+    '@@ -1 +1 @@',
+    `-old ${index}`,
+    `+new ${index}`,
+  ].join('\n')).join('\n');
+  const representative = createRepresentativePatch(patch, { maxFiles: 8 });
+  const capped = createCappedPatchBatches(patch, { maxBatches: 3, maxFiles: 12, maxFilesPerBatch: 4 });
+  assert.equal(representative.sections.length, 8);
+  assert.equal(representative.coverage.reviewedFiles, 8);
+  assert.ok(capped.batches.length <= 3);
+  assert.ok(new Set(capped.batches.flatMap((batch) => batch.files)).size <= 12);
 });
 
 test('change-list mode sends no patch contents and parses a readable streamed response', async () => {

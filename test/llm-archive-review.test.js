@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { createTreeComparison, parseArchiveAssessment, reviewArchiveStructure } from '../src/llm/archive-review.js';
+import { createTreeComparison, parseArchiveAssessment, reviewArchiveSample, reviewArchiveStructure } from '../src/llm/archive-review.js';
 import { tempDir, writeFiles, extractedFixture } from '../test-support/helpers.js';
 
 function jsonResponse(value, status = 200) {
@@ -142,4 +142,52 @@ test('archive assessment parser accepts inline headings returned by LM Studio', 
       'Присутствуют Sources, Tests и Package.swift.',
     ],
   });
+});
+
+
+test('sample guard sends the complete manifest and at most five representative patch excerpts', async () => {
+  const root = await tempDir('zipflow-sample-review-project-');
+  const projectFiles = Object.fromEntries(Array.from({ length: 10 }, (_, index) => [`src/file-${index}.js`, `old ${index}\n`]));
+  await writeFiles(root, { 'package.json': '{}\n', ...projectFiles });
+  const extracted = await extractedFixture(await tempDir('zipflow-sample-review-archive-'), {
+    'package.json': '{}\n',
+    ...Object.fromEntries(Array.from({ length: 10 }, (_, index) => [`src/file-${index}.js`, `new ${index}\n`])),
+  });
+  const patch = Array.from({ length: 10 }, (_, index) => [
+    `diff --git a/src/file-${index}.js b/src/file-${index}.js`,
+    `--- a/src/file-${index}.js`,
+    `+++ b/src/file-${index}.js`,
+    '@@ -1 +1 @@',
+    `-old ${index}`,
+    `+new ${index}`,
+  ].join('\n')).join('\n');
+  const updated = Array.from({ length: 10 }, (_, index) => ({ path: `src/file-${index}.js` }));
+  let chatBody;
+  const fetchImpl = async (url, options = {}) => {
+    if (url.endsWith('/api/v1/models')) return jsonResponse(modelCatalog());
+    chatBody = JSON.parse(options.body);
+    return nativeCompletion('ASSESSMENT: suitable\nCONFIDENCE: medium\nREASONS:\n- Representative files match the expected project.');
+  };
+
+  const result = await reviewArchiveSample({
+    settings: {
+      llmProvider: 'lmstudio', llmModel: 'gemma-loaded', llmApiToken: '',
+      llmPromptLanguage: 'English', llmSummaryLanguage: 'English', llmCommitLanguage: 'English',
+    },
+    project: { root, name: 'fixture', labels: ['Node.js'], git: false },
+    workflow: { exclude: ['.env', '.env.*', '.venv/**', '.DS_Store'] },
+    extracted,
+    plan: {
+      counts: { created: 0, updated: 10, deleted: 0, unchanged: 1 },
+      created: [], updated, deleted: [],
+    },
+    patchContent: patch,
+  }, { fetchImpl });
+
+  assert.equal(result.assessment, 'suitable');
+  assert.equal(result.diagnostics.coverage.reviewedFiles, 5);
+  assert.equal(result.diagnostics.coverage.totalFiles, 10);
+  assert.match(chatBody.input, /UPDATE src\/file-9\.js/);
+  assert.match(chatBody.input, /REPRESENTATIVE PATCH SAMPLE: 5 of 10/);
+  assert.ok((chatBody.input.match(/diff --git/g) ?? []).length <= 5);
 });

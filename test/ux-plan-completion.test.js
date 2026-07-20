@@ -12,7 +12,7 @@ import { createBackup } from '../src/apply/backup.js';
 import { loadManagedHistory, updateManagedHistory } from '../src/history/managed.js';
 import { settingsChoices, settingsDefinitions, settingsParameters } from '../src/app/settings-options.js';
 import { DEFAULT_SETTINGS, normalizeSettings } from '../src/settings/store.js';
-import { startHistoricalModelReplay, updateReplayWorkspace } from '../src/app/settings-model-replay.js';
+import { beginHistoricalModelReplay, startHistoricalModelReplay, updateReplayWorkspace } from '../src/app/settings-model-replay.js';
 import { showRunDetails } from '../src/app/run-rollback.js';
 import { exists, readJson, writeJsonAtomic } from '../src/utils/fs.js';
 import { tempDir, writeFiles } from '../test-support/helpers.js';
@@ -67,7 +67,8 @@ test('model test rows distinguish missing selection from an active compatibility
   parameters = settingsParameters(state, definition);
   testRow = parameters.find((item) => item.id === 'modelTestConnection');
   assert.equal(testRow.loading, true);
-  assert.equal(testRow.disabled, true);
+  assert.equal(testRow.blocked, true);
+  assert.equal(testRow.disabled, undefined);
   assert.equal(testRow.label, 'Testing connection…');
   assert.doesNotMatch(testRow.description, /Choose a model first/i);
 });
@@ -119,7 +120,8 @@ test('historical model replay uses the stored patch and never changes project fi
     const controller = new ZipflowController(state);
     controller.invalidate = () => {};
 
-    const completed = await startHistoricalModelReplay(controller, 'historical-run');
+    assert.equal(startHistoricalModelReplay(controller, 'historical-run'), true);
+    const completed = await beginHistoricalModelReplay(controller);
 
     assert.equal(completed, true);
     assert.equal(await readFile(path.join(projectRoot, 'src/value.js'), 'utf8'), before);
@@ -135,7 +137,7 @@ test('historical model replay uses the stored patch and never changes project fi
 
 test('historical replay keeps completed batch output when the next batch starts', () => {
   const state = createInitialState();
-  state.settingsPanel = { modelTestWorkspace: { blocks: [], status: '', scroll: 0 } };
+  state.settingsPanel = { modelTestWorkspace: { mode: 'progress', blocks: [], status: '', scroll: 0, follow: true, unreadBlockIds: new Set() } };
   const controller = new ZipflowController(state);
   controller.invalidate = () => {};
 

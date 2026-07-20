@@ -1,10 +1,15 @@
 const FILE_HEADER = /^diff --git a\/(.+?) b\/(.+)$/m;
 const DEFAULT_BATCH_TOKENS = 4_000;
+const IMPORTANT_NAMES = /(^|\/)(package\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|pyproject\.toml|requirements[^/]*\.txt|cargo\.toml|go\.mod|dockerfile|compose[^/]*\.ya?ml|makefile|readme[^/]*|.*config[^/]*|.*\.config\.[^/]+|.*migration[^/]*)$/i;
+const GENERATED_NAMES = /(^|\/)(dist|build|coverage|node_modules|vendor|target|\.cache)(\/|$)|\.(min\.js|map|lock)$/i;
 
-export function resolveDeliveryMode(requested, { patchEstimatedTokens = 0, patchBudgetTokens = 0 } = {}) {
+export function resolveDeliveryMode(requested, { patchEstimatedTokens = 0, patchBudgetTokens = 0, fileCount = 0 } = {}) {
   if (requested && requested !== 'adaptive') return requested;
   if (!patchEstimatedTokens) return 'change-list';
-  return patchEstimatedTokens <= Math.max(1_000, Math.floor(patchBudgetTokens * 0.8)) ? 'patch' : 'chunked';
+  const safeBudget = Math.max(1_000, Math.floor(patchBudgetTokens * 0.8));
+  if (patchEstimatedTokens <= safeBudget) return 'patch';
+  if (patchEstimatedTokens <= Math.max(safeBudget * 3, 12_000) || fileCount <= 40) return 'representative';
+  return 'capped';
 }
 
 export function createChangeList(plan, { limit = 8_000 } = {}) {
@@ -39,6 +44,59 @@ export function splitPatchByFile(patchContent) {
   });
 }
 
+export function selectRepresentativeSections(patchContent, { maxFiles = 8 } = {}) {
+  const sections = splitPatchByFile(patchContent);
+  if (sections.length <= maxFiles) return sections;
+  const ranked = sections.map((section, index) => ({ section, index, score: representativeScore(section) }))
+    .sort((left, right) => right.score - left.score || left.section.path.localeCompare(right.section.path) || left.index - right.index);
+  const selected = [];
+  const topLevels = new Set();
+  for (const candidate of ranked) {
+    const top = candidate.section.path.split('/')[0];
+    if (!topLevels.has(top) && selected.length < maxFiles) {
+      selected.push(candidate);
+      topLevels.add(top);
+    }
+  }
+  for (const candidate of ranked) {
+    if (selected.length >= maxFiles) break;
+    if (!selected.includes(candidate)) selected.push(candidate);
+  }
+  return selected.sort((left, right) => left.index - right.index).map((item) => item.section);
+}
+
+export function createRepresentativePatch(patchContent, { maxFiles = 8 } = {}) {
+  const all = splitPatchByFile(patchContent);
+  const selected = selectRepresentativeSections(patchContent, { maxFiles });
+  const content = selected.map((item) => item.content).join('\n\n');
+  return {
+    sections: selected,
+    content,
+    coverage: coverageRecord(all, selected, patchContent, content),
+  };
+}
+
+export function createCappedPatchBatches(patchContent, {
+  maxBatches = 3,
+  maxFiles = 12,
+  maxEstimatedTokens = DEFAULT_BATCH_TOKENS,
+  maxFilesPerBatch = 4,
+} = {}) {
+  const all = splitPatchByFile(patchContent);
+  const selected = selectRepresentativeSections(patchContent, { maxFiles });
+  const selectedContent = selected.map((item) => item.content).join('\n\n');
+  const batches = createPatchBatches(selectedContent, {
+    maxEstimatedTokens,
+    maxFiles: maxFilesPerBatch,
+  }).slice(0, maxBatches);
+  const includedFiles = new Set(batches.flatMap((batch) => batch.files));
+  const included = selected.filter((section) => includedFiles.has(section.path));
+  return {
+    batches,
+    coverage: coverageRecord(all, included, patchContent, batches.map((batch) => batch.content).join('\n\n')),
+  };
+}
+
 export function createPatchBatches(patchContent, {
   maxEstimatedTokens = DEFAULT_BATCH_TOKENS,
   maxFiles = 8,
@@ -68,6 +126,30 @@ export function createPatchBatches(patchContent, {
 
 export function estimateTokens(value) {
   return Math.max(1, Math.ceil(String(value ?? '').length / 3.5));
+}
+
+function representativeScore(section) {
+  let score = 0;
+  if (/deleted file mode|^--- a\/.+\n\+\+\+ \/dev\/null/m.test(section.content)) score += 100;
+  if (/new file mode|^--- \/dev\/null\n\+\+\+ b\//m.test(section.content)) score += 55;
+  if (IMPORTANT_NAMES.test(section.path)) score += 75;
+  if (/(^|\/)(src|sources|app|lib|server|client|api|migrations?)\//i.test(section.path)) score += 35;
+  if (/(^|\/)(index|main|app|server|cli)\.[^/]+$/i.test(section.path)) score += 30;
+  if (GENERATED_NAMES.test(section.path)) score -= 70;
+  score += Math.min(25, Math.floor(estimateTokens(section.content) / 300));
+  return score;
+}
+
+function coverageRecord(all, selected, fullContent, selectedContent) {
+  const totalChars = Math.max(1, String(fullContent ?? '').length);
+  return {
+    reviewedFiles: selected.length,
+    totalFiles: all.length,
+    manifestFiles: all.length,
+    omittedFiles: Math.max(0, all.length - selected.length),
+    patchCoveragePercent: Math.max(0, Math.min(100, Math.round(String(selectedContent ?? '').length / totalChars * 100))),
+    reviewedPaths: selected.map((item) => item.path),
+  };
 }
 
 function batchRecord(sections, estimatedTokens) {

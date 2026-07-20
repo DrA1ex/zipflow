@@ -64,6 +64,7 @@ function providerLabel(value) {
 
 function compactReviewLabel(value) {
   if (value === 'structure') return 'Structure';
+  if (value === 'sample') return 'Sample guard';
   if (value === 'patch') return 'Deep review';
   return 'Summary';
 }

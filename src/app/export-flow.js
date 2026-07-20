@@ -1,27 +1,33 @@
 import path from 'node:path';
 import { stat } from 'node:fs/promises';
 import { copyTextToClipboard } from 'terlio.js';
-import { collectExportPaths, listExportTopLevel } from '../export/candidates.js';
+import { collectCustomExportPaths, collectExportPaths, classifyCustomExportPaths } from '../export/candidates.js';
 import { inspectPotentiallySensitivePaths, sensitivePathMap } from '../export/sensitive.js';
 import { createProjectArchive } from '../export/create.js';
 import { displayPath, parseEnteredPath } from '../utils/paths.js';
 import { runProcess } from '../utils/process.js';
 import { rememberExportPath } from '../settings/recent.js';
+import {
+  enterTreeDirectory, exportTreeItems, initializeExportTree, leaveTreeDirectory,
+  nextDirectoryItemIndex, selectAllTreePaths, toggleTreeEntry, treeLocationLabel,
+} from './export-tree.js';
 
 export function handlesExportScreen(screen) {
-  return ['export-mode', 'export-select', 'export-sensitive', 'export-preview', 'export-files', 'export-path', 'export-running', 'export-complete'].includes(screen);
+  return ['export-mode', 'export-sensitive', 'export-protected', 'export-preview', 'export-files', 'export-path', 'export-running', 'export-complete'].includes(screen);
 }
 
 export function beginCreateZip(controller) {
   controller.state.exportDraft = {
     mode: null,
-    topLevel: [],
-    selectedRoots: new Set(),
+    paths: [],
     selectedPaths: new Set(),
     pathSizes: new Map(),
+    pathAnnotations: new Map(),
     outputPath: defaultArchivePath(controller.state.project, controller.state.settings),
     sensitive: [],
+    sensitiveMap: new Map(),
     sensitiveAcknowledged: false,
+    protectedPending: null,
   };
   showExportMode(controller);
 }
@@ -33,45 +39,17 @@ export async function activateExport(controller, itemId) {
     const mode = itemId.replace('export-', '');
     if (!['tracked', 'nonignored', 'interactive', 'all'].includes(mode)) return;
     state.exportDraft.mode = mode;
-    if (mode === 'interactive') return prepareInteractiveSelection(controller);
-    return prepareExportPreview(controller);
+    return prepareExportPreview(controller, { custom: mode === 'interactive' });
   }
-  if (state.screen === 'export-select') {
-    if (itemId.startsWith('export-item:')) return toggleExportItem(controller, itemId.slice(12));
-    if (itemId === 'export-select-all') return selectAll(controller, true);
-    if (itemId === 'export-select-none') return selectAll(controller, false);
-    if (itemId === 'export-select-continue') return prepareExportPreview(controller);
-    if (itemId === 'export-cancel') return controller.showHome();
-  }
-  if (state.screen === 'export-sensitive') {
-    if (itemId === 'export-sensitive-exclude') {
-      for (const record of state.exportDraft.sensitive) state.exportDraft.selectedPaths.delete(record.path);
-      state.exportDraft.sensitiveAcknowledged = true;
-      updateSelectedSize(state.exportDraft);
-      controller.toast(`${state.exportDraft.sensitive.length} potentially sensitive files excluded`, 'success');
-      return showExportPreview(controller);
-    }
-    if (itemId === 'export-sensitive-review') return showExportFiles(controller, null, { sensitiveOnly: true });
-    if (itemId === 'export-sensitive-include') {
-      state.exportDraft.sensitiveAcknowledged = true;
-      return showExportPreview(controller);
-    }
-    if (itemId === 'export-cancel') return controller.showHome();
-  }
+  if (state.screen === 'export-sensitive') return activateSensitiveReview(controller, itemId);
+  if (state.screen === 'export-protected') return activateProtectedReview(controller, itemId);
   if (state.screen === 'export-preview') {
     if (itemId === 'export-choose-path') return proceedToExportPath(controller);
-    if (itemId === 'export-review-files') return showExportFiles(controller);
+    if (itemId === 'export-review-files') return showExportFiles(controller, null, { origin: 'preview' });
     if (itemId === 'export-change-mode') return showExportMode(controller);
     if (itemId === 'export-cancel') return controller.showHome();
   }
-  if (state.screen === 'export-files') {
-    if (itemId.startsWith('export-file:')) return toggleReviewFile(controller, decodeURIComponent(itemId.slice(12)), state.selectedIndex);
-    if (itemId.startsWith('export-dir:')) return toggleReviewDirectory(controller, decodeURIComponent(itemId.slice(11)), state.selectedIndex);
-    if (itemId === 'export-files-all') return selectAllReviewFiles(controller, true);
-    if (itemId === 'export-files-none') return selectAllReviewFiles(controller, false);
-    if (itemId === 'export-files-back') return showExportPreview(controller);
-    if (itemId === 'export-choose-path') return proceedToExportPath(controller);
-  }
+  if (state.screen === 'export-files') return activateTreeItem(controller, itemId);
   if (state.screen === 'export-complete') {
     if (itemId === 'export-copy-path') {
       const copied = await copyTextToClipboard(state.exportDraft.result.outputPath, { output: controller.runtime?.output });
@@ -85,15 +63,22 @@ export async function activateExport(controller, itemId) {
 
 export function handleExportShortcut(controller, key) {
   const { state } = controller;
+  if (state.screen !== 'export-files') return false;
   const selected = state.menuItems[state.selectedIndex];
-  if (state.screen === 'export-select' && key.name === 'space' && selected?.id.startsWith('export-item:')) {
-    toggleExportItem(controller, selected.id.slice(12), state.selectedIndex);
+  if (key.name === 'space' && selected?.path) {
+    requestTreeToggle(controller, selected.path, state.selectedIndex);
     return true;
   }
-  if (state.screen === 'export-files' && key.name === 'space') {
-    if (selected?.id.startsWith('export-file:')) toggleReviewFile(controller, decodeURIComponent(selected.id.slice(12)), state.selectedIndex);
-    else if (selected?.id.startsWith('export-dir:')) toggleReviewDirectory(controller, decodeURIComponent(selected.id.slice(11)), state.selectedIndex);
-    else return false;
+  if (key.name === 'tab' && key.shift) {
+    if (leaveTreeDirectory(state.exportDraft)) showExportFiles(controller, 0);
+    return true;
+  }
+  if (key.name === 'tab') {
+    state.selectedIndex = nextDirectoryItemIndex(state.menuItems, state.selectedIndex, 1);
+    return true;
+  }
+  if (key.name === 'left' || key.name === 'backspace') {
+    if (leaveTreeDirectory(state.exportDraft)) showExportFiles(controller, 0);
     return true;
   }
   return false;
@@ -112,12 +97,18 @@ export async function submitExportEditor(controller) {
 }
 
 export function backExport(controller) {
-  const screen = controller.state.screen;
+  const { state } = controller;
+  const screen = state.screen;
   if (screen === 'export-mode') return controller.showHome();
-  if (screen === 'export-select') return showExportMode(controller);
-  if (screen === 'export-sensitive') return controller.state.exportDraft.mode === 'interactive' ? showInteractiveSelection(controller) : showExportMode(controller);
-  if (screen === 'export-preview') return controller.state.exportDraft.mode === 'interactive' ? showInteractiveSelection(controller) : showExportMode(controller);
-  if (screen === 'export-files') return showExportPreview(controller);
+  if (screen === 'export-sensitive') return showExportPreview(controller);
+  if (screen === 'export-protected') return showExportFiles(controller, state.exportDraft.treeReturnIndex ?? 0);
+  if (screen === 'export-preview') return showExportMode(controller);
+  if (screen === 'export-files') {
+    if (leaveTreeDirectory(state.exportDraft)) return showExportFiles(controller, 0);
+    if (state.exportDraft.treeOrigin === 'mode') return showExportMode(controller);
+    if (state.exportDraft.treeOrigin === 'sensitive') return showSensitiveReview(controller);
+    return showExportPreview(controller);
+  }
   if (screen === 'export-path') return showExportPreview(controller);
   if (screen === 'export-complete') return controller.showHome();
 }
@@ -131,50 +122,14 @@ function showExportMode(controller) {
       description: git ? 'Create the smallest reproducible archive from files already tracked by Git.' : 'Initialize Git first to use this mode.',
       disabled: !git,
     },
-    { id: 'export-nonignored', label: 'Non-ignored files', description: 'Include tracked and untracked files, but leave out paths matched by .gitignore.' },
-    { id: 'export-interactive', label: 'Choose top-level items', description: 'Select project folders and files from a compact top-level list.' },
-    { id: 'export-all', label: 'Everything, including ignored files · advanced', description: 'Include ignored files too. A safety review checks likely secrets, private data, caches, and very large files. .git/ and .zipflow/ remain protected.' },
+    { id: 'export-nonignored', label: 'Non-ignored files', description: 'Include tracked and untracked files, except paths matched by project ignore rules.' },
+    { id: 'export-interactive', label: 'Custom selection', description: 'Browse the project as a tree and choose individual folders or files.' },
+    { id: 'export-all', label: 'Everything, including ignored files · advanced', description: 'Include ignored files too. A safety review identifies likely secrets, private data, generated directories, and very large files.' },
     { id: 'export-cancel', label: 'Cancel' },
   ], 'Create ZIP archive');
 }
 
-async function prepareInteractiveSelection(controller) {
-  const entries = await listExportTopLevel(controller.state.project.root);
-  controller.state.exportDraft.topLevel = entries;
-  controller.state.exportDraft.selectedRoots = new Set(entries.map((entry) => entry.name));
-  showInteractiveSelection(controller);
-}
-
-function showInteractiveSelection(controller, selectedIndex = null) {
-  const draft = controller.state.exportDraft;
-  const items = draft.topLevel.map((entry) => ({
-    id: `export-item:${entry.name}`,
-    label: `${draft.selectedRoots.has(entry.name) ? '[x]' : '[ ]'} ${entry.name}${entry.kind === 'directory' ? '/' : ''}`,
-    description: entry.kind === 'directory' ? 'Include this folder recursively' : 'Include this file',
-  }));
-  items.push(
-    { id: 'export-select-all', label: 'Select all' },
-    { id: 'export-select-none', label: 'Clear selection' },
-    { id: 'export-select-continue', label: 'Continue', description: `${draft.selectedRoots.size} top-level items selected`, disabled: draft.selectedRoots.size === 0 },
-    { id: 'export-cancel', label: 'Cancel' },
-  );
-  controller.showMenu('export-select', items, 'Choose archive contents', selectedIndex);
-}
-
-function toggleExportItem(controller, name, selectedIndex = null) {
-  const selected = controller.state.exportDraft.selectedRoots;
-  if (selected.has(name)) selected.delete(name);
-  else selected.add(name);
-  showInteractiveSelection(controller, selectedIndex);
-}
-
-function selectAll(controller, enabled) {
-  const draft = controller.state.exportDraft;
-  draft.selectedRoots = new Set(enabled ? draft.topLevel.map((entry) => entry.name) : []);
-  showInteractiveSelection(controller);
-}
-
-async function prepareExportPreview(controller) {
+async function prepareExportPreview(controller, { custom = false } = {}) {
   const { state } = controller;
   const abortController = new AbortController();
   state.exportAbortController = abortController;
@@ -184,16 +139,18 @@ async function prepareExportPreview(controller) {
   state.progress = { value: 0, total: 1, detail: 'Scanning project files' };
   controller.invalidate();
   try {
-    const paths = await collectExportPaths({
-      project: state.project,
-      mode: state.exportDraft.mode,
-      selectedRoots: [...state.exportDraft.selectedRoots],
-      signal: abortController.signal,
-      onProgress: ({ current = 0, total = 0, detail = '' }) => {
-        state.progress = { value: current, total: Math.max(1, total || current + 1), detail: `Scanning · ${detail}` };
-        controller.invalidate();
-      },
-    });
+    const paths = custom
+      ? await collectCustomExportPaths({
+        project: state.project,
+        signal: abortController.signal,
+        onProgress: scanProgress(controller),
+      })
+      : await collectExportPaths({
+        project: state.project,
+        mode: state.exportDraft.mode,
+        signal: abortController.signal,
+        onProgress: scanProgress(controller),
+      });
     const sortedPaths = paths.sort((left, right) => left.localeCompare(right));
     const pathSizes = await collectPathSizes(state.project.root, sortedPaths, {
       signal: abortController.signal,
@@ -203,27 +160,46 @@ async function prepareExportPreview(controller) {
       },
     });
     state.progress = { value: sortedPaths.length, total: Math.max(1, sortedPaths.length), detail: 'Checking sensitive and generated files' };
-    state.exportDraft.paths = sortedPaths;
-    state.exportDraft.selectedPaths = new Set(sortedPaths);
-    state.exportDraft.pathSizes = pathSizes;
-    state.exportDraft.sensitive = inspectPotentiallySensitivePaths(sortedPaths, { pathSizes });
-    state.exportDraft.sensitiveMap = sensitivePathMap(state.exportDraft.sensitive);
-    state.exportDraft.sensitiveAcknowledged = state.exportDraft.sensitive.length === 0;
+    const sensitive = inspectPotentiallySensitivePaths(sortedPaths, { pathSizes });
+    const annotations = custom ? await classifyCustomExportPaths(state.project, sortedPaths) : new Map();
+    for (const record of sensitive) {
+      if (!annotations.has(record.path)) annotations.set(record.path, { kind: record.category, reason: record.reason, excludedByDefault: true });
+    }
+    const selectedPaths = custom
+      ? new Set(sortedPaths.filter((relative) => !annotations.get(relative)?.excludedByDefault))
+      : new Set(sortedPaths);
+    Object.assign(state.exportDraft, {
+      paths: sortedPaths,
+      selectedPaths,
+      pathSizes,
+      pathAnnotations: annotations,
+      sensitive,
+      sensitiveMap: sensitivePathMap(sensitive),
+      sensitiveAcknowledged: custom || sensitive.length === 0,
+    });
     updateSelectedSize(state.exportDraft);
     state.busy = false;
     state.exportAbortController = null;
-    if (state.exportDraft.sensitive.length) return showSensitiveReview(controller);
+    if (custom) return showExportFiles(controller, 0, { origin: 'mode' });
+    if (sensitive.length) return showSensitiveReview(controller);
     return showExportPreview(controller);
   } catch (error) {
     state.busy = false;
     state.exportAbortController = null;
     if (error.code === 'cancelled') {
       controller.toast('ZIP preview preparation cancelled', 'info');
-      return state.exportDraft.mode === 'interactive' ? showInteractiveSelection(controller) : showExportMode(controller);
+      return showExportMode(controller);
     }
     controller.message('Could not prepare ZIP preview', [error.message], 'error', { collapsedSummary: `ZIP preview failed · ${error.message}` });
     return showExportMode(controller);
   }
+}
+
+function scanProgress(controller) {
+  return ({ current = 0, total = 0, detail = '' }) => {
+    controller.state.progress = { value: current, total: Math.max(1, total || current + 1), detail: `Scanning · ${detail}` };
+    controller.invalidate();
+  };
 }
 
 async function collectPathSizes(root, paths, { signal, onProgress, concurrency = 16 } = {}) {
@@ -245,6 +221,23 @@ async function collectPathSizes(root, paths, { signal, onProgress, concurrency =
   return result;
 }
 
+function activateSensitiveReview(controller, itemId) {
+  const draft = controller.state.exportDraft;
+  if (itemId === 'export-sensitive-exclude') {
+    for (const record of draft.sensitive) draft.selectedPaths.delete(record.path);
+    draft.sensitiveAcknowledged = true;
+    updateSelectedSize(draft);
+    controller.toast(`${draft.sensitive.length} potentially sensitive files excluded`, 'success');
+    return showExportPreview(controller);
+  }
+  if (itemId === 'export-sensitive-review') return showExportFiles(controller, null, { origin: 'sensitive', sensitiveOnly: true });
+  if (itemId === 'export-sensitive-include') {
+    draft.sensitiveAcknowledged = true;
+    return showExportPreview(controller);
+  }
+  if (itemId === 'export-cancel') return controller.showHome();
+}
+
 function showSensitiveReview(controller) {
   const draft = controller.state.exportDraft;
   const counts = draft.sensitive.reduce((map, item) => map.set(item.category, (map.get(item.category) ?? 0) + 1), new Map());
@@ -256,6 +249,110 @@ function showSensitiveReview(controller) {
   ], 'Potentially sensitive files found', 0, [
     `${draft.sensitive.length} flagged files · ${[...counts].map(([kind, count]) => `${count} ${kind}`).join(' · ')}`,
     'This is a conservative filename and path check, not a guarantee that every secret was found.',
+  ]);
+}
+
+function activateProtectedReview(controller, itemId) {
+  const draft = controller.state.exportDraft;
+  if (itemId === 'export-protected-include') {
+    toggleTreeEntry(draft, draft.protectedPending);
+    draft.protectedPending = null;
+    updateSelectedSize(draft);
+    return showExportFiles(controller, draft.treeReturnIndex ?? 0);
+  }
+  if (itemId === 'export-protected-back') {
+    draft.protectedPending = null;
+    return showExportFiles(controller, draft.treeReturnIndex ?? 0);
+  }
+}
+
+function activateTreeItem(controller, itemId) {
+  const draft = controller.state.exportDraft;
+  if (itemId.startsWith('export-tree-directory:')) {
+    enterTreeDirectory(draft, decodeURIComponent(itemId.slice('export-tree-directory:'.length)));
+    return showExportFiles(controller, 0);
+  }
+  if (itemId.startsWith('export-tree-file:')) {
+    requestTreeToggle(controller, decodeURIComponent(itemId.slice('export-tree-file:'.length)), controller.state.selectedIndex);
+    return;
+  }
+  if (itemId === 'export-files-all') {
+    selectRecommendedTreePaths(draft);
+    updateSelectedSize(draft);
+    return showExportFiles(controller);
+  }
+  if (itemId === 'export-files-none') {
+    selectAllTreePaths(draft, false);
+    updateSelectedSize(draft);
+    return showExportFiles(controller);
+  }
+  if (itemId === 'export-files-back') return backExport(controller);
+  if (itemId === 'export-files-continue') {
+    if (draft.treeOrigin === 'sensitive') return showSensitiveReview(controller);
+    if (hasUnacknowledgedSensitiveSelection(draft)) return showSensitiveReview(controller);
+    return showExportPreview(controller);
+  }
+  if (itemId === 'export-choose-path') return proceedToExportPath(controller);
+}
+
+function requestTreeToggle(controller, entryPath, selectedIndex = null) {
+  const draft = controller.state.exportDraft;
+  if (isProtectedSelection(draft, entryPath)) {
+    draft.protectedPending = entryPath;
+    draft.treeReturnIndex = selectedIndex;
+    return controller.showMenu('export-protected', [
+      { id: 'export-protected-include', label: 'Include protected project data', description: 'Include the selected internal directory in this ZIP' },
+      { id: 'export-protected-back', label: 'Back' },
+    ], 'Include protected project data?', 1, [
+      `${entryPath}/ contains Git or Zipflow internal state.`,
+      'It can make the archive much larger and may expose repository or application metadata.',
+    ]);
+  }
+  toggleTreeEntry(draft, entryPath);
+  updateSelectedSize(draft);
+  showExportFiles(controller, selectedIndex);
+}
+
+function isProtectedSelection(draft, entryPath) {
+  const targets = draft.paths.filter((value) => value === entryPath || value.startsWith(`${entryPath}/`));
+  if (!targets.length || targets.every((value) => draft.selectedPaths.has(value))) return false;
+  return targets.some((value) => draft.pathAnnotations?.get(value)?.kind === 'protected');
+}
+
+function selectRecommendedTreePaths(draft) {
+  const visible = draft.treeSensitiveOnly
+    ? new Set(draft.sensitive.map((record) => record.path))
+    : new Set(draft.paths);
+  for (const relative of visible) {
+    if (draft.pathAnnotations?.get(relative)?.excludedByDefault || draft.sensitiveMap?.has(relative)) draft.selectedPaths.delete(relative);
+    else draft.selectedPaths.add(relative);
+  }
+  draft.sensitiveAcknowledged = true;
+}
+
+function showExportFiles(controller, selectedIndex = null, { origin = null, sensitiveOnly = null } = {}) {
+  const draft = controller.state.exportDraft;
+  if (origin !== null || sensitiveOnly !== null || draft.treeDirectory === undefined) {
+    initializeExportTree(draft, {
+      origin: origin ?? draft.treeOrigin ?? 'preview',
+      sensitiveOnly: sensitiveOnly ?? false,
+    });
+  }
+  const items = exportTreeItems(draft);
+  items.push(
+    { id: 'export-files-all', label: 'Select recommended files', description: 'Select visible safe, non-ignored files and leave flagged paths excluded' },
+    { id: 'export-files-none', label: 'Clear selection', description: 'Exclude all files shown by this tree' },
+    {
+      id: 'export-files-continue',
+      label: draft.treeOrigin === 'sensitive' ? 'Back to safety review' : 'Continue',
+      description: `${draft.selectedPaths.size} files selected`,
+      disabled: draft.selectedPaths.size === 0 && draft.treeOrigin !== 'sensitive',
+    },
+    { id: 'export-files-back', label: 'Back' },
+  );
+  controller.showMenu('export-files', items, draft.treeSensitiveOnly ? 'Review flagged files' : 'Choose included files', selectedIndex, [
+    `${treeLocationLabel(draft)} · ${draft.selectedPaths.size} of ${draft.paths.length} files · ${formatBytes(draft.totalSize)}`,
+    'Space toggles selection · Enter opens a folder · Shift+Tab or Left goes to the parent · Tab jumps to the next folder',
   ]);
 }
 
@@ -279,95 +376,11 @@ function showExportPreview(controller) {
     `${draft.selectedPaths.size} of ${draft.paths.length} files · ${formatBytes(draft.totalSize)}`,
     `Mode: ${modeLabel(draft.mode)}`,
     ...(draft.sensitive.length ? [`Safety review: ${draft.sensitive.filter((item) => draft.selectedPaths.has(item.path)).length} flagged files remain included.`] : []),
-    '.git/ and .zipflow/ remain protected in every export mode.',
   ]);
-}
-
-function showExportFiles(controller, selectedIndex = null, { sensitiveOnly = false } = {}) {
-  const draft = controller.state.exportDraft;
-  const items = buildReviewItems(draft, { sensitiveOnly });
-  items.push(
-    { id: 'export-files-all', label: 'Include all files' },
-    { id: 'export-files-none', label: 'Exclude all files' },
-    { id: 'export-files-back', label: 'Back to ZIP preview', description: `${draft.selectedPaths.size} files selected` },
-    { id: 'export-choose-path', label: 'Choose output path and create ZIP', disabled: draft.selectedPaths.size === 0 },
-  );
-  controller.showMenu('export-files', items, sensitiveOnly ? 'Review flagged files' : 'Choose included files', selectedIndex, [
-    `${draft.selectedPaths.size} of ${draft.paths.length} files · ${formatBytes(draft.totalSize)}`,
-    sensitiveOnly ? 'Only flagged files are shown. Enter or Space toggles each file.' : 'Root files appear first. Directories follow alphabetically; Enter or Space toggles a file or an entire directory.',
-  ]);
-}
-
-function buildReviewItems(draft, { sensitiveOnly = false } = {}) {
-  if (sensitiveOnly) return draft.sensitive.map((record) => reviewFileItem(draft, record.path, false));
-  const rootFiles = draft.paths.filter((value) => !value.includes('/'));
-  const directories = [...new Set(draft.paths.filter((value) => value.includes('/')).map((value) => value.split('/')[0]))]
-    .sort((left, right) => left.localeCompare(right));
-  const items = rootFiles.map((filePath) => reviewFileItem(draft, filePath, false));
-  for (const directory of directories) {
-    const children = draft.paths.filter((value) => value.startsWith(`${directory}/`));
-    const selectedCount = children.filter((value) => draft.selectedPaths.has(value)).length;
-    const marker = selectedCount === children.length ? '[x]' : selectedCount ? '[-]' : '[ ]';
-    items.push({
-      id: `export-dir:${encodeURIComponent(directory)}`,
-      label: dimIfExcluded(`${marker} ${directory}/`, selectedCount === 0),
-      description: selectedCount ? `${selectedCount} of ${children.length} files included · Enter toggles the folder` : `Excluded · ${children.length} files hidden`,
-    });
-    if (selectedCount) {
-      for (const filePath of children) items.push(reviewFileItem(draft, filePath, true));
-    }
-  }
-  return items;
-}
-
-function reviewFileItem(draft, filePath, nested) {
-  const selected = draft.selectedPaths.has(filePath);
-  const label = `${selected ? '[x]' : '[ ]'} ${nested ? '  ' : ''}${filePath}`;
-  return {
-    id: `export-file:${encodeURIComponent(filePath)}`,
-    label: dimIfExcluded(label, !selected),
-    description: draft.sensitiveMap?.get(filePath)?.reason ?? (selected ? 'Included in ZIP' : 'Excluded from ZIP · Enter to include'),
-  };
-}
-
-function toggleReviewFile(controller, filePath, selectedIndex = null) {
-  const selected = controller.state.exportDraft.selectedPaths;
-  if (selected.has(filePath)) selected.delete(filePath);
-  else {
-    selected.add(filePath);
-    if (controller.state.exportDraft.sensitiveMap?.has(filePath)) controller.state.exportDraft.sensitiveAcknowledged = false;
-  }
-  updateSelectedSize(controller.state.exportDraft);
-  showExportFiles(controller, selectedIndex);
-}
-
-function toggleReviewDirectory(controller, directory, selectedIndex = null) {
-  const draft = controller.state.exportDraft;
-  const children = draft.paths.filter((value) => value.startsWith(`${directory}/`));
-  const allSelected = children.every((value) => draft.selectedPaths.has(value));
-  for (const filePath of children) {
-    if (allSelected) draft.selectedPaths.delete(filePath);
-    else draft.selectedPaths.add(filePath);
-  }
-  if (!allSelected && children.some((filePath) => draft.sensitiveMap?.has(filePath))) draft.sensitiveAcknowledged = false;
-  updateSelectedSize(draft);
-  showExportFiles(controller, selectedIndex);
-}
-
-function selectAllReviewFiles(controller, enabled) {
-  const draft = controller.state.exportDraft;
-  draft.selectedPaths = new Set(enabled ? draft.paths : []);
-  if (enabled && draft.sensitive.length) draft.sensitiveAcknowledged = false;
-  updateSelectedSize(draft);
-  showExportFiles(controller);
 }
 
 function updateSelectedSize(draft) {
   draft.totalSize = [...draft.selectedPaths].reduce((total, filePath) => total + (draft.pathSizes.get(filePath) ?? 0), 0);
-}
-
-function dimIfExcluded(value, excluded) {
-  return excluded ? `\u001b[2m${value}\u001b[22m` : value;
 }
 
 async function openArchiveLocation(controller) {
@@ -403,11 +416,7 @@ async function createArchive(controller) {
   state.progress = { value: 0, total: 1, detail: 'Collecting files' };
   controller.invalidate();
   try {
-    const paths = state.exportDraft.selectedPaths instanceof Set ? [...state.exportDraft.selectedPaths] : state.exportDraft.paths ?? await collectExportPaths({
-      project: state.project,
-      mode: state.exportDraft.mode,
-      selectedRoots: [...state.exportDraft.selectedRoots],
-    });
+    const paths = [...state.exportDraft.selectedPaths];
     state.progress = { value: 0, total: Math.max(1, paths.length), detail: `${paths.length} files selected` };
     const result = await createProjectArchive({
       projectRoot: state.project.root,
@@ -456,7 +465,7 @@ function safeName(value) {
 function modeLabel(mode) {
   if (mode === 'tracked') return 'Git-tracked files';
   if (mode === 'nonignored') return 'Non-ignored files';
-  if (mode === 'interactive') return 'Selected top-level items';
+  if (mode === 'interactive') return 'Custom selection';
   return 'Everything, including ignored files';
 }
 
