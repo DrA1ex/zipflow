@@ -4,7 +4,7 @@ import { createInitialState } from '../src/app/state.js';
 import { ZipflowController } from '../src/app/controller.js';
 import { createRecommendedWorkflow } from '../src/workflow/defaults.js';
 
-test('configured project home shows selected defaults before fine-tuning', () => {
+test('configured project home keeps workflow details in Activity instead of the action pane', () => {
   const state = createInitialState();
   state.project = {
     name: 'fixture', root: '/tmp/fixture', labels: ['Node.js'], technologies: [{ id: 'node' }],
@@ -15,8 +15,7 @@ test('configured project home shows selected defaults before fine-tuning', () =>
   controller.showHome();
 
   assert.equal(state.screen, 'home');
-  assert.ok(state.panelIntro.some((line) => /Archive: Overlay/.test(line)));
-  assert.ok(state.panelIntro.some((line) => /Checks: Unit tests/.test(line)));
+  assert.deepEqual(state.panelIntro, []);
   assert.ok(state.menuItems.some((item) => item.id === 'fine-tune'));
   assert.equal(state.menuItems[0].id, 'start-update');
 });

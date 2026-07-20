@@ -36,7 +36,7 @@ import {
 export { showLastRun };
 
 export function handlesRunScreen(screen) {
-  return ['archive-input', 'archive-duplicate', 'applying', 'run-details', 'rollback-confirm', 'rolling-back'].includes(screen)
+  return ['archive-input', 'archive-duplicate', 'applying', 'run-details', 'run-file-groups', 'run-file-list', 'rollback-confirm', 'rolling-back'].includes(screen)
     || handlesReviewScreen(screen) || isPostCheckScreen(screen);
 }
 
@@ -72,7 +72,7 @@ export async function activateRun(controller, itemId) {
     });
   }
   if (isPostCheckScreen(state.screen)) return activatePostCheck(controller, itemId);
-  if (['run-details', 'rollback-confirm'].includes(state.screen)) {
+  if (['run-details', 'run-file-groups', 'run-file-list', 'rollback-confirm'].includes(state.screen)) {
     const result = await activateRollback(controller, itemId);
     if (result !== false) return result;
     if (itemId === 'another-archive') return beginArchiveInput(controller);
@@ -89,7 +89,7 @@ export function backRun(controller) {
   if (screen === 'archive-safety' || screen === 'plan-review' || screen === 'conflict-summary') return cancelRun(controller);
   if (handlesReviewScreen(screen)) return backReview(controller);
   if (isPostCheckScreen(screen)) return backPostCheck(controller);
-  if (['run-details', 'rollback-confirm'].includes(screen)) return backRollback(controller);
+  if (['run-details', 'run-file-groups', 'run-file-list', 'rollback-confirm'].includes(screen)) return backRollback(controller);
   return false;
 }
 

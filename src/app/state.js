@@ -7,6 +7,7 @@ export function createInitialState() {
     project: null,
     workflow: null,
     draft: null,
+    setupEditing: false,
     run: null,
     archive: null,
     archiveMetadata: null,

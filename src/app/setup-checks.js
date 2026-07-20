@@ -7,7 +7,8 @@ export function showChecksStep(controller, selectedIndex = null) {
   }));
   items.push({ id: 'add-check', label: '+ Add custom command', description: 'Define an additional project validation command' });
   items.push({ id: 'checks-continue', label: 'Continue', description: `${checks.filter((item) => item.selected).length} checks selected` });
-  controller.showMenu('setup-checks', items, 'Select checks', selectedIndex);
+  const initialIndex = selectedIndex ?? (controller.state.setupEditing && controller.state.screen !== 'setup-checks' ? items.length - 1 : null);
+  controller.showMenu('setup-checks', items, 'Select checks', initialIndex);
 }
 
 export function activateChecks(controller, itemId, onContinue) {
@@ -19,7 +20,7 @@ export function activateChecks(controller, itemId, onContinue) {
   if (itemId.startsWith('check:')) {
     const index = Number(itemId.slice(6));
     toggleCheck(controller.state, index);
-    showChecksStep(controller, index);
+    showChecksStep(controller, controller.state.setupEditing ? controller.state.draft.checks.length + 1 : index);
   }
 }
 
@@ -75,7 +76,7 @@ export function handleChecksShortcut(controller, key) {
   const selected = state.menuItems[state.selectedIndex];
   if (key.name === 'space' && selected?.id.startsWith('check:')) {
     toggleCheck(state, Number(selected.id.slice(6)));
-    showChecksStep(controller, state.selectedIndex);
+    showChecksStep(controller, state.setupEditing ? state.draft.checks.length + 1 : state.selectedIndex);
     return true;
   }
   if (key.printable && key.text.toLowerCase() === 'a') {

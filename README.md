@@ -57,9 +57,11 @@ Dotfiles and dot-directories are ordinary project paths. Zipflow synchronizes pa
 
 ## Daily project screen
 
-For an existing workflow, the project screen presents a middle-ground overview rather than hiding every setting or repeating the full setup wizard. It shows the selected archive mode, checks, conflict policy, commit behavior, and deployment policy above the main actions. **Start an update** remains the default action, while **Fine-tune workflow** opens the wizard only when one of the selected defaults needs adjustment.
+For an existing workflow, Zipflow starts directly in archive-waiting mode. The framed **Project detected** Activity block contains the selected archive mode, checks, conflict policy, commit behavior, and deployment policy without consuming vertical space in the action pane. Press `Esc` to open the compact project menu when you need **Fine-tune workflow**, history, ZIP export, or other project actions.
 
-The same screen also provides:
+Fine-tune keeps `Continue` selected when each wizard page opens, and returns focus there after a setting is changed. This makes a one-setting adjustment quick while the complete selected configuration remains visible in the final review. Rebuilding a workflow never changes the active workflow until the replacement is confirmed and saved.
+
+The project menu also provides:
 
 - **Repeat last archive** to rebuild the previous plan against the current project;
 - **Run history** to inspect earlier decisions, checks, commits, deployment, archive disposition, and rollback state;
@@ -81,7 +83,7 @@ When adding a custom check, Zipflow first asks for the exact command and then as
 
 ## Applying an archive
 
-Choose **Start an update**, then drag a ZIP file into the terminal or enter its path.
+For a configured project, drag a ZIP file into the initial archive prompt or enter its path. Press `Esc` to return to the project menu. After a completed run, **Finish and wait for next archive** returns directly to the same prompt.
 
 Zipflow performs the following sequence:
 

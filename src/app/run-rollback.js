@@ -3,6 +3,8 @@ import { displayPath } from '../utils/paths.js';
 import { loadRunRecord, runReportPath, saveRunRecord } from '../runs/store.js';
 import { compactPlanLine, compactPlanMeta, formatArchiveName, planSummary, runStatusLabel } from '../ui/format.js';
 import { restoreManagedHistory } from '../history/managed.js';
+import { loadStoredFileDiff, runChangedGroups, storedPatchActivityLines } from '../diff/stored-patch.js';
+import { setScreen } from './state.js';
 
 export async function showLastRun(controller) {
   const runId = controller.state.workflow?.lastRunId;
@@ -20,11 +22,21 @@ export async function showLastRun(controller) {
   return showRunDetails(controller, run, { origin: 'home' });
 }
 
-export function activateRollback(controller, itemId) {
+export async function activateRollback(controller, itemId) {
   if (controller.state.screen === 'run-details') {
     if (itemId === 'rollback') return confirmRollback(controller, controller.state.run);
     if (itemId === 'another-archive') return false;
+    if (itemId === 'view-run-files') return showRunFileGroups(controller);
+    if (itemId === 'view-run-diff') return showCompleteRunDiff(controller);
     if (itemId === 'back-home') return returnFromDetails(controller);
+  }
+  if (controller.state.screen === 'run-file-groups') {
+    if (itemId.startsWith('run-group:')) return showRunFileList(controller, itemId.slice(10));
+    if (itemId === 'run-files-back') return showRunDetails(controller, controller.state.run, { origin: controller.state.runDetailsOrigin });
+  }
+  if (controller.state.screen === 'run-file-list') {
+    if (itemId.startsWith('run-file:')) return openStoredRunDiff(controller, decodeURIComponent(itemId.slice(9)));
+    if (itemId === 'run-groups-back') return showRunFileGroups(controller);
   }
   if (controller.state.screen === 'rollback-confirm') {
     if (itemId === 'rollback-now') return performRollback(controller);
@@ -35,11 +47,13 @@ export function activateRollback(controller, itemId) {
 
 export function backRollback(controller) {
   if (controller.state.screen === 'run-details') return returnFromDetails(controller);
+  if (controller.state.screen === 'run-file-groups') return showRunDetails(controller, controller.state.run, { origin: controller.state.runDetailsOrigin });
+  if (controller.state.screen === 'run-file-list') return showRunFileGroups(controller);
   if (controller.state.screen === 'rollback-confirm') return showRunDetails(controller, controller.state.run, { origin: controller.state.runDetailsOrigin });
   return false;
 }
 
-export function showRunDetails(controller, run, { origin = null } = {}) {
+export function showRunDetails(controller, run, { origin = null, announce = true } = {}) {
   controller.state.runDetailsOrigin = origin ?? controller.state.runDetailsOrigin ?? 'home';
   const lines = [
     `Run: ${run.id}`,
@@ -55,8 +69,14 @@ export function showRunDetails(controller, run, { origin = null } = {}) {
     `Decisions: ${run.decisions?.length ?? 0}`,
     `Report: ${displayPath(runReportPath(run.id))}`,
   ];
-  controller.message('Run details', lines);
+  if (announce) controller.message('Run details', lines);
   const items = [];
+  if (run.plan?.counts) {
+    items.push(
+      { id: 'view-run-files', label: 'Changed files', description: 'Browse added, changed, and removed paths; Enter opens the stored diff' },
+      { id: 'view-run-diff', label: 'View complete diff in Activity', description: 'Append the stored changes.patch so it can be expanded and scrolled' },
+    );
+  }
   if (run.applied && run.rollback?.status !== 'completed') items.push({ id: 'rollback', label: 'Roll back this update' });
   items.push(
     { id: 'another-archive', label: 'Apply another archive' },
@@ -106,6 +126,63 @@ async function performRollback(controller) {
     controller.message('Rollback failed', [error.message], 'error');
     return showRunDetails(controller, state.run, { origin: controller.state.runDetailsOrigin });
   }
+}
+
+
+function showRunFileGroups(controller) {
+  const groups = runChangedGroups(controller.state.run);
+  const items = groups.map((group) => ({
+    id: `run-group:${group.id}`,
+    label: `${group.label} · ${group.paths.length}`,
+    description: 'Open the file list for this change type',
+  }));
+  if (!items.length) items.push({ id: 'run-files-empty', label: 'No changed files recorded', disabled: true });
+  items.push({ id: 'run-files-back', label: 'Back to run details' });
+  controller.showMenu('run-file-groups', items, 'Changed files', 0, [
+    `Run ${controller.state.run.id}`,
+    'Choose a group, then press Enter on a file to open its stored diff.',
+  ]);
+}
+
+function showRunFileList(controller, groupId) {
+  const group = runChangedGroups(controller.state.run).find((item) => item.id === groupId);
+  if (!group) return showRunFileGroups(controller);
+  controller.state.runFileGroup = groupId;
+  const items = group.paths.map((filePath) => ({
+    id: `run-file:${encodeURIComponent(filePath)}`,
+    label: filePath,
+    description: 'Enter to view unified or side-by-side diff',
+  }));
+  items.push({ id: 'run-groups-back', label: 'Back to change groups' });
+  controller.showMenu('run-file-list', items, `${group.label} files`, 0, [`${group.paths.length} file${group.paths.length === 1 ? '' : 's'}`]);
+}
+
+async function openStoredRunDiff(controller, filePath) {
+  const diff = await loadStoredFileDiff(controller.state.run, filePath);
+  controller.state.diffView = {
+    diff,
+    mode: 'unified',
+    scroll: 0,
+    hunkIndex: 0,
+    hunkCount: 1,
+    hunkOffsets: [0],
+    returnScreen: controller.state.screen,
+    returnItems: controller.state.menuItems,
+    returnIndex: controller.state.selectedIndex,
+    returnStatus: controller.state.status,
+    returnIntro: controller.state.panelIntro,
+  };
+  setScreen(controller.state, 'diff-view', { status: `Stored diff · ${filePath}`, intro: [] });
+  controller.invalidate();
+}
+
+async function showCompleteRunDiff(controller) {
+  const lines = await storedPatchActivityLines(controller.state.run);
+  controller.message(`Run diff · ${controller.state.run.id}`, lines, 'info');
+  const message = controller.state.messages.at(-1);
+  if (message?.collapsible) message.collapsed = false;
+  controller.setStatus('Complete diff added to Activity');
+  return showRunDetails(controller, controller.state.run, { origin: controller.state.runDetailsOrigin, announce: false });
 }
 
 async function returnFromDetails(controller) {

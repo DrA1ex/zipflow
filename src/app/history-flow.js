@@ -98,7 +98,11 @@ export async function repeatLastArchive(controller) {
   ].filter(Boolean);
   for (const candidate of candidates) {
     if (await exists(candidate)) {
-      controller.message('Repeating previous archive', [displayPath(candidate), `Previous run: ${run.id}`], 'choice');
+      controller.message('Repeating previous archive', [
+        displayPath(candidate),
+        `Previous run: ${run.id}`,
+        'The current Local LLM settings are used again. Esc skips only the LLM step and continues the update.',
+      ], 'choice');
       return controller.inspectArchivePath(candidate, { allowDuplicate: true });
     }
   }

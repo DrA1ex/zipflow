@@ -11,6 +11,7 @@ import {
 
 export async function beginSetup(controller, { fresh = false } = {}) {
   const { state } = controller;
+  state.setupEditing = Boolean(state.workflow && !fresh);
   state.draft = fresh || !state.workflow ? createRecommendedWorkflow(state.project) : structuredClone(state.workflow);
   controller.message(fresh ? 'Starting a new workflow' : 'Reviewing workflow', [
     'Zipflow inspected the project and prepared a recommended workflow.',
@@ -129,7 +130,7 @@ function showPolicyStep(controller) {
     choice('profile-practical', workflow.policy.id === 'practical', 'Practical', 'Apply safe plans automatically and ask only when local work is affected.'),
     choice('profile-trust', workflow.policy.id === 'trust', 'Trust archive', 'Back up and overwrite conflicting local files without asking each time.'),
     { id: 'policy-continue', label: 'Continue', description: `Selected: ${workflow.policy.label}` },
-  ], 'Conflict and confirmation policy');
+  ], 'Conflict and confirmation policy', setupContinueIndex(controller, 'setup-policy', 3));
 }
 
 function activatePolicy(controller, itemId) {
@@ -146,7 +147,7 @@ function showArchiveModeStep(controller) {
     choice('archive-overlay', mode === 'overlay', 'Overlay archive', 'Add and update files from the ZIP. Files missing from the ZIP stay untouched.'),
     choice('archive-snapshot', mode === 'snapshot', 'Full project snapshot', 'Treat the ZIP as the complete managed project. Missing files may be removed.'),
     { id: 'archive-continue', label: 'Continue', description: mode === 'overlay' ? 'No files are deleted because they are absent from the archive.' : 'You will choose exactly which missing files may be deleted next.' },
-  ], 'How should this archive be interpreted?');
+  ], 'How should this archive be interpreted?', setupContinueIndex(controller, 'setup-archive-mode', 2));
 }
 
 function activateArchiveMode(controller, itemId) {
@@ -166,7 +167,7 @@ function showDeletionScopeStep(controller) {
     choice('delete-managed', scope === 'managed-history', 'Only files previously managed by Zipflow', 'Delete a missing file only if an earlier Zipflow run created or updated it. The managed-file history can be reset from Ctrl+B settings.'),
     choice('delete-all', scope === 'all', 'All files in the managed scope', 'Also delete untracked files missing from the archive. Protected and excluded paths are still kept.'),
     { id: 'deletion-continue', label: 'Continue', description: deletionScopeDescription(scope) },
-  ], 'Which missing files may snapshot mode delete?');
+  ], 'Which missing files may snapshot mode delete?', setupContinueIndex(controller, 'setup-deletion-scope', 3));
 }
 
 function activateDeletionScope(controller, itemId) {
@@ -184,7 +185,7 @@ function showCheckpointStep(controller) {
     choice('checkpoint-ask', value === 'ask', 'Ask when local work would be overwritten', 'Offer a checkpoint commit only when an archive conflicts with uncommitted files.'),
     choice('checkpoint-auto', value === 'auto', 'Create checkpoint automatically when needed', 'Commit the affected local files before Zipflow replaces them with archive versions.'),
     { id: 'checkpoint-continue', label: 'Continue', description: `Selected: ${checkpointLabel(value)}` },
-  ], 'Protect conflicting local work with Git');
+  ], 'Protect conflicting local work with Git', setupContinueIndex(controller, 'setup-git-checkpoint', 3));
 }
 
 function activateCheckpoint(controller, itemId) {
@@ -203,7 +204,7 @@ function showResultCommitStep(controller) {
     choice('result-ask', value === 'ask', 'Ask after successful checks', 'Show the proposed message and let you create or skip the commit.'),
     choice('result-auto', value === 'auto', 'Commit automatically after successful checks', 'Commit only the files applied by this Zipflow run.'),
     { id: 'result-continue', label: 'Continue', description: `Selected: ${resultCommitLabel(value)}` },
-  ], 'Commit the successfully checked update');
+  ], 'Commit the successfully checked update', setupContinueIndex(controller, 'setup-git-result', 3));
 }
 
 function activateResultCommit(controller, itemId) {
@@ -226,7 +227,7 @@ function showMessageStrategyStep(controller) {
     choice('message-archive', value === 'archive', 'Archive filename', 'Example: Apply project-update.zip'),
     choice('message-fixed', value === 'fixed', 'Fixed template', controller.state.draft.git.fixedMessage),
     { id: 'message-continue', label: 'Continue', description: messageStrategyLabel(value) },
-  ], 'Choose the result commit message source');
+  ], 'Choose the result commit message source', setupContinueIndex(controller, 'setup-git-message', 5));
 }
 
 function activateMessageStrategy(controller, itemId) {
@@ -255,7 +256,7 @@ function showDeployPolicyStep(controller) {
     choice('deploy-always', value === 'always', 'Always deploy after successful checks', 'Run the configured deploy command automatically after checks and the optional commit.'),
     choice('deploy-on-demand', value === 'on-demand', 'Deploy on demand', 'Keep a Run deployment action on the successful result screen.'),
     { id: 'deploy-continue', label: 'Continue', description: deployPolicyDescription(value) },
-  ], 'Deployment after successful checks');
+  ], 'Deployment after successful checks', setupContinueIndex(controller, 'setup-deploy', 4));
 }
 
 function activateDeployPolicy(controller, itemId) {
@@ -310,7 +311,8 @@ async function activateReview(controller, itemId) {
     controller.state.workflow = await saveWorkflow(controller.state.draft);
     controller.state.draft = null;
     controller.message('Workflow saved', [controller.state.workflow.name], 'success');
-    controller.showHome();
+    const { beginArchiveInput } = await import('./run-flow.js');
+    beginArchiveInput(controller);
   }
 }
 
@@ -327,6 +329,11 @@ function showAfterArchiveSettings(controller) {
   return controller.state.project.git ? showCheckpointStep(controller) : showDeployPolicyStep(controller);
 }
 
+
+function setupContinueIndex(controller, screen, index) {
+  if (controller.state.setupEditing) return index;
+  return controller.state.screen === screen ? null : 0;
+}
 
 function choice(id, selected, label, description) {
   return { id, label: `${selected ? '●' : '○'} ${label}`, description };

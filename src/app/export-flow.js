@@ -15,6 +15,8 @@ export function beginCreateZip(controller) {
     mode: null,
     topLevel: [],
     selectedRoots: new Set(),
+    selectedPaths: new Set(),
+    pathSizes: new Map(),
     outputPath: defaultArchivePath(controller.state.project),
   };
   showExportMode(controller);
@@ -44,6 +46,10 @@ export async function activateExport(controller, itemId) {
     if (itemId === 'export-cancel') return controller.showHome();
   }
   if (state.screen === 'export-files') {
+    if (itemId.startsWith('export-file:')) return toggleReviewFile(controller, decodeURIComponent(itemId.slice(12)), state.selectedIndex);
+    if (itemId.startsWith('export-dir:')) return toggleReviewDirectory(controller, decodeURIComponent(itemId.slice(11)), state.selectedIndex);
+    if (itemId === 'export-files-all') return selectAllReviewFiles(controller, true);
+    if (itemId === 'export-files-none') return selectAllReviewFiles(controller, false);
     if (itemId === 'export-files-back') return showExportPreview(controller);
     if (itemId === 'export-choose-path') return showExportPath(controller);
   }
@@ -60,10 +66,15 @@ export async function activateExport(controller, itemId) {
 
 export function handleExportShortcut(controller, key) {
   const { state } = controller;
-  if (state.screen !== 'export-select') return false;
   const selected = state.menuItems[state.selectedIndex];
-  if (key.name === 'space' && selected?.id.startsWith('export-item:')) {
+  if (state.screen === 'export-select' && key.name === 'space' && selected?.id.startsWith('export-item:')) {
     toggleExportItem(controller, selected.id.slice(12), state.selectedIndex);
+    return true;
+  }
+  if (state.screen === 'export-files' && key.name === 'space') {
+    if (selected?.id.startsWith('export-file:')) toggleReviewFile(controller, decodeURIComponent(selected.id.slice(12)), state.selectedIndex);
+    else if (selected?.id.startsWith('export-dir:')) toggleReviewDirectory(controller, decodeURIComponent(selected.id.slice(11)), state.selectedIndex);
+    else return false;
     return true;
   }
   return false;
@@ -150,10 +161,12 @@ async function prepareExportPreview(controller) {
     mode: state.exportDraft.mode,
     selectedRoots: [...state.exportDraft.selectedRoots],
   });
-  let totalSize = 0;
-  for (const relative of paths) totalSize += (await stat(path.join(state.project.root, relative))).size;
-  state.exportDraft.paths = paths;
-  state.exportDraft.totalSize = totalSize;
+  const pathSizes = new Map();
+  for (const relative of paths) pathSizes.set(relative, (await stat(path.join(state.project.root, relative))).size);
+  state.exportDraft.paths = paths.sort((left, right) => left.localeCompare(right));
+  state.exportDraft.selectedPaths = new Set(state.exportDraft.paths);
+  state.exportDraft.pathSizes = pathSizes;
+  updateSelectedSize(state.exportDraft);
   return showExportPreview(controller);
 }
 
@@ -161,27 +174,95 @@ function showExportPreview(controller) {
   const draft = controller.state.exportDraft;
   controller.showMenu('export-preview', [
     { id: 'export-choose-path', label: 'Choose output path and create ZIP', description: draft.outputPath },
-    { id: 'export-review-files', label: 'Review included files', description: `${draft.paths.length} files selected` },
+    { id: 'export-review-files', label: 'Review included files', description: `${draft.selectedPaths.size} of ${draft.paths.length} files selected` },
     { id: 'export-change-mode', label: 'Change export mode', description: modeLabel(draft.mode) },
     { id: 'export-cancel', label: 'Cancel' },
   ], 'Review ZIP contents', 0, [
-    `${draft.paths.length} files · ${formatBytes(draft.totalSize)}`,
+    `${draft.selectedPaths.size} of ${draft.paths.length} files · ${formatBytes(draft.totalSize)}`,
     `Mode: ${modeLabel(draft.mode)}`,
     '.git/ and .zipflow/ remain protected in every export mode.',
   ]);
 }
 
-function showExportFiles(controller) {
+function showExportFiles(controller, selectedIndex = null) {
   const draft = controller.state.exportDraft;
-  const items = draft.paths.map((relative) => ({ id: `export-file:${relative}`, label: relative, description: 'Included in this ZIP' }));
+  const items = buildReviewItems(draft);
   items.push(
-    { id: 'export-files-back', label: 'Back to ZIP preview' },
-    { id: 'export-choose-path', label: 'Choose output path and create ZIP' },
+    { id: 'export-files-all', label: 'Include all files' },
+    { id: 'export-files-none', label: 'Exclude all files' },
+    { id: 'export-files-back', label: 'Back to ZIP preview', description: `${draft.selectedPaths.size} files selected` },
+    { id: 'export-choose-path', label: 'Choose output path and create ZIP', disabled: draft.selectedPaths.size === 0 },
   );
-  controller.showMenu('export-files', items, 'Included files', null, [
-    `${draft.paths.length} files · ${formatBytes(draft.totalSize)}`,
-    'This list is read-only. Return to the previous step to change the export mode or interactive selection.',
+  controller.showMenu('export-files', items, 'Choose included files', selectedIndex, [
+    `${draft.selectedPaths.size} of ${draft.paths.length} files · ${formatBytes(draft.totalSize)}`,
+    'Root files appear first. Directories follow alphabetically; Enter or Space toggles a file or an entire directory.',
   ]);
+}
+
+function buildReviewItems(draft) {
+  const rootFiles = draft.paths.filter((value) => !value.includes('/'));
+  const directories = [...new Set(draft.paths.filter((value) => value.includes('/')).map((value) => value.split('/')[0]))]
+    .sort((left, right) => left.localeCompare(right));
+  const items = rootFiles.map((filePath) => reviewFileItem(draft, filePath, false));
+  for (const directory of directories) {
+    const children = draft.paths.filter((value) => value.startsWith(`${directory}/`));
+    const selectedCount = children.filter((value) => draft.selectedPaths.has(value)).length;
+    const marker = selectedCount === children.length ? '[x]' : selectedCount ? '[-]' : '[ ]';
+    items.push({
+      id: `export-dir:${encodeURIComponent(directory)}`,
+      label: dimIfExcluded(`${marker} ${directory}/`, selectedCount === 0),
+      description: selectedCount ? `${selectedCount} of ${children.length} files included · Enter toggles the folder` : `Excluded · ${children.length} files hidden`,
+    });
+    if (selectedCount) {
+      for (const filePath of children) items.push(reviewFileItem(draft, filePath, true));
+    }
+  }
+  return items;
+}
+
+function reviewFileItem(draft, filePath, nested) {
+  const selected = draft.selectedPaths.has(filePath);
+  const label = `${selected ? '[x]' : '[ ]'} ${nested ? '  ' : ''}${filePath}`;
+  return {
+    id: `export-file:${encodeURIComponent(filePath)}`,
+    label: dimIfExcluded(label, !selected),
+    description: selected ? 'Included in ZIP' : 'Excluded from ZIP · Enter to include',
+  };
+}
+
+function toggleReviewFile(controller, filePath, selectedIndex = null) {
+  const selected = controller.state.exportDraft.selectedPaths;
+  if (selected.has(filePath)) selected.delete(filePath);
+  else selected.add(filePath);
+  updateSelectedSize(controller.state.exportDraft);
+  showExportFiles(controller, selectedIndex);
+}
+
+function toggleReviewDirectory(controller, directory, selectedIndex = null) {
+  const draft = controller.state.exportDraft;
+  const children = draft.paths.filter((value) => value.startsWith(`${directory}/`));
+  const allSelected = children.every((value) => draft.selectedPaths.has(value));
+  for (const filePath of children) {
+    if (allSelected) draft.selectedPaths.delete(filePath);
+    else draft.selectedPaths.add(filePath);
+  }
+  updateSelectedSize(draft);
+  showExportFiles(controller, selectedIndex);
+}
+
+function selectAllReviewFiles(controller, enabled) {
+  const draft = controller.state.exportDraft;
+  draft.selectedPaths = new Set(enabled ? draft.paths : []);
+  updateSelectedSize(draft);
+  showExportFiles(controller);
+}
+
+function updateSelectedSize(draft) {
+  draft.totalSize = [...draft.selectedPaths].reduce((total, filePath) => total + (draft.pathSizes.get(filePath) ?? 0), 0);
+}
+
+function dimIfExcluded(value, excluded) {
+  return excluded ? `\u001b[2m${value}\u001b[22m` : value;
 }
 
 async function openArchiveLocation(controller) {
@@ -217,7 +298,7 @@ async function createArchive(controller) {
   state.progress = { value: 0, total: 1, detail: 'Collecting files' };
   controller.invalidate();
   try {
-    const paths = state.exportDraft.paths ?? await collectExportPaths({
+    const paths = state.exportDraft.selectedPaths instanceof Set ? [...state.exportDraft.selectedPaths] : state.exportDraft.paths ?? await collectExportPaths({
       project: state.project,
       mode: state.exportDraft.mode,
       selectedRoots: [...state.exportDraft.selectedRoots],

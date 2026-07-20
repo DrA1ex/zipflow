@@ -14,7 +14,7 @@ import {
 import {
   closeSettings, handleSettingsKey, isSettingsScreen, openSettings, selectChoice, selectParameter, selectSetting,
 } from './settings-panel.js';
-import { projectSummary, workflowOverviewLines } from '../ui/format.js';
+import { projectSummary } from '../ui/format.js';
 import { toggleActivityBlockAtScroll } from '../ui/activity.js';
 import { terminateActiveProcesses } from '../utils/process.js';
 import { removeIfExists } from '../utils/fs.js';
@@ -42,7 +42,8 @@ export class ZipflowController {
       this.state.project = await discoverProject(process.cwd());
       this.state.workflow = await loadWorkflow(this.state.project.root);
       this.message('Project detected', projectSummary(this.state.project, this.state.workflow), 'project');
-      this.showHome();
+      if (this.state.workflow) beginArchiveInput(this);
+      else this.showHome();
     } catch (error) {
       this.message('Zipflow could not start', [error.message], 'error');
       this.showMenu('error', [{ id: 'exit', label: 'Exit' }], 'Startup failed');
@@ -149,9 +150,9 @@ export class ZipflowController {
         { id: 'create-zip', label: 'Create ZIP', description: 'Export tracked, non-ignored, selected, or all project files' },
         { id: 'repeat-last', label: 'Repeat last archive', description: workflow.lastRunId ? 'Rebuild the previous archive plan against the current project' : 'No previous archive', disabled: !workflow.lastRunId },
         { id: 'run-history', label: 'Run history', description: lastRun },
-        { id: 'fresh-setup', label: 'Rebuild workflow', description: 'Create a replacement while the current workflow remains active' },
+        { id: 'fresh-setup', label: 'Rebuild workflow', description: 'Your current workflow stays unchanged until you confirm and save the replacement.' },
         { id: 'exit', label: 'Exit' },
-      ], 'Ready', 0, ['Current workflow', ...workflowOverviewLines(workflow), '', 'Use Fine-tune only when one of these selected defaults does not match the project.']);
+      ], 'Ready');
     }
     return this.showMenu('new-project', [
       { id: 'setup-project', label: 'Set up this project', description: `${displayPath(project.root)} · ${project.labels.join(' · ') || 'Custom project'}` },

@@ -400,7 +400,7 @@ function screenTitle(state) {
     'conflict-summary': 'Conflict choices', 'conflict-checkpoint': 'Conflict checkpoint', 'conflict-file': 'Resolve conflict', conflicts: 'Choose files',
     applying: 'Applying update', 'checks-running': 'Checks', 'check-failed': 'Checks failed', commit: 'Commit',
     'commit-message': 'Commit message', 'deploy-prompt': 'Deployment', 'deploy-running': 'Deployment',
-    'deploy-failed': 'Deployment failed', completed: 'Completed', 'run-details': 'Last run',
+    'deploy-failed': 'Deployment failed', completed: 'Completed', 'run-details': 'Last run', 'run-file-groups': 'Changed files', 'run-file-list': 'Changed files',
     'rollback-confirm': 'Rollback', 'rolling-back': 'Rolling back',
     'export-mode': 'Create ZIP', 'export-select': 'Choose archive contents', 'export-preview': 'ZIP preview', 'export-files': 'Included files', 'export-path': 'Output archive',
     'export-running': 'Creating ZIP', 'export-complete': 'ZIP created',
@@ -430,7 +430,7 @@ function footerHints(state) {
   if (state.screen === 'setup-checks') return ['↑/↓ choose', 'Space toggle', 'A add', 'E edit', 'Del remove', 'Enter continue/open', 'Ctrl+B settings'];
   if (state.screen === 'conflict-file') return ['A archive', 'L local', 'D diff', 'Enter action', 'Esc back'];
   if (state.screen === 'conflicts') return ['↑/↓ choose', 'Space toggle decision', 'Enter action', 'Esc back', 'Ctrl+T native select'];
-  if (state.screen === 'export-select') return ['↑/↓ choose', 'Enter/Space toggle', 'Esc back', 'Ctrl+T native select'];
+  if (state.screen === 'export-select' || state.screen === 'export-files') return ['↑/↓ choose', 'Enter/Space toggle', 'Esc back', 'Ctrl+T native select'];
   return ['↑/↓ choose', 'Enter/Space select', '? help', 'Drag Activity to copy', 'PgUp/PgDn activity', 'Ctrl+T native select', 'Ctrl+B settings'];
 }
 
@@ -446,7 +446,7 @@ function headerStats(state) {
 
 function preferredPromptHeight(state) {
   if (state.screen === 'home') return 14;
-  if (['archive-safety', 'plan-review', 'plan-details', 'plan-files', 'conflict-summary', 'conflict-file', 'run-history', 'run-analytics', 'export-preview', 'export-files'].includes(state.screen)) return 17;
+  if (['archive-safety', 'plan-review', 'plan-details', 'plan-files', 'conflict-summary', 'conflict-file', 'run-history', 'run-analytics', 'run-file-groups', 'run-file-list', 'export-preview', 'export-files'].includes(state.screen)) return 17;
   if (state.screen === 'setup-checks' || state.screen === 'conflicts' || state.screen === 'export-select') return 17;
   if (['checks-running', 'deploy-running'].includes(state.screen)) return 14;
   if (isEditorScreen(state.screen)) return 13;

@@ -6,15 +6,9 @@ export function projectSummary(project, workflow = null) {
   const lines = [
     `Root: ${displayPath(project.root)}`,
     `Detected: ${labels}`,
-    `Git: ${project.git ? 'repository detected' : 'not initialized'}`,
-    `Workflow: ${workflow ? 'configured' : 'not configured'}`,
+    `Git: ${project.git ? 'repository detected' : 'not initialized'} · Workflow: ${workflow ? 'configured' : 'not configured'}`,
   ];
-  if (workflow) {
-    lines.push(`Archive: ${workflow.archive.mode === 'snapshot' ? 'Full snapshot' : 'Overlay'}`);
-    lines.push(`Checks: ${workflow.checks.filter((check) => check.selected).length} selected`);
-    lines.push(`Policy: ${workflow.policy.label}`);
-    lines.push(`Commit: ${formatCommitPolicy(workflow.git.resultCommit)} · Deploy: ${formatDeployPolicy(workflow.deploy?.policy)}`);
-  }
+  if (workflow) lines.push(...workflowOverviewLines(workflow));
   return lines;
 }
 

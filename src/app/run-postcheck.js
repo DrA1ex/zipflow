@@ -54,7 +54,8 @@ export async function activatePostCheck(controller, itemId) {
     }
     if (itemId === 'view-report') return showRunDetails(controller, state.run, { origin: 'completed' });
     if (itemId === 'rollback') return confirmRollback(controller, state.run);
-    if (itemId === 'home') return controller.showHome();
+    if (itemId === 'home') return beginAnotherArchive(controller);
+    if (itemId === 'project-menu') return controller.showHome();
     if (itemId === 'exit') return controller.exit(0);
   }
 }
@@ -316,9 +317,9 @@ function checkSummaryLine(checks) {
 function showCompleted(controller) {
   const { state } = controller;
   const items = [
-    { id: 'home', label: 'Finish and return to project', description: 'Default action; the run remains available in history' },
+    { id: 'home', label: 'Finish and wait for next archive', description: 'Keep Zipflow ready for the next ZIP; Esc returns to the project menu' },
     { id: 'copy-summary', label: 'Copy run summary', description: 'Copy a compact summary with changes, checks, commit, and deployment' },
-    { id: 'another-archive', label: 'Apply another archive', description: 'Start the next update without leaving Zipflow' },
+    { id: 'another-archive', label: 'Wait for another archive', description: 'Start the next update without leaving Zipflow' },
     { id: 'view-report', label: 'View run details', description: 'Open the stored decisions, checks, commit, deployment, and report path' },
   ];
   if (state.workflow.deploy?.policy === 'on-demand' && !state.run.deploy?.ok) {
@@ -327,6 +328,7 @@ function showCompleted(controller) {
   if (!state.run.rollback || state.run.rollback.status !== 'completed') {
     items.push({ id: 'rollback', label: 'Roll back this update', description: 'Restore the exact local state from before this run' });
   }
+  items.push({ id: 'project-menu', label: 'Return to project menu' });
   items.push({ id: 'exit', label: 'Exit' });
   controller.showMenu('completed', items, 'Run completed', 0, [
     compactPlanLine(state.plan),
