@@ -102,7 +102,9 @@ export function settingsChoices(state, parameter) {
 export function settingsPageTitle(state, definition) {
   if (definition.id === 'localLlm' && state.settingsPanel?.subpage === 'llmLanguages') return 'LLM languages';
   if (definition.id === 'localLlm' && state.settingsPanel?.subpage === 'llmModelTests') return 'Model tests';
-  if (definition.id === 'localLlm' && state.settingsPanel?.subpage === 'llmModelReplay') return 'Historical model replay';
+  if (definition.id === 'localLlm' && state.settingsPanel?.subpage === 'llmModelReplay') {
+    return state.settingsPanel?.modelTestWorkspace ? 'Model tests' : 'Historical model replay';
+  }
   return definition.label;
 }
 

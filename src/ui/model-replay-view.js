@@ -1,23 +1,25 @@
 import {
-  BottomOverlay,
   Box,
-  Modal,
   OverlayHost,
   PointerRegion,
   ScrollPane,
   SelectList,
+  Spinner,
   Text,
   color,
+  renderNode,
+  truncateVisible,
+  visibleLength,
 } from 'terlio.js';
 
-export function renderModelReplayWorkspace({ content, state, width, height, theme }) {
+export function renderModelReplayWorkspace({ content, state, width, height, theme, animationFrame = 0 }) {
   const workspace = state.settingsPanel.modelTestWorkspace;
   const overlayWidth = Math.max(48, Math.min(width - 4, Math.floor(width * 0.9)));
   const overlayHeight = Math.max(12, Math.min(height - 2, Math.floor(height * 0.88)));
   const renderWorkspace = ({ width: availableWidth = overlayWidth, height: availableHeight = overlayHeight } = {}) => (
     workspace.mode === 'preview'
       ? renderReplayPreview(state, workspace, availableWidth, availableHeight, theme)
-      : renderReplayProgress(state, workspace, availableWidth, availableHeight, theme)
+      : renderReplayProgress(state, workspace, availableWidth, availableHeight, theme, animationFrame)
   );
   const node = renderWorkspace({ width: overlayWidth, height: overlayHeight });
   const manager = {
@@ -40,10 +42,13 @@ function renderReplayPreview(state, workspace, width, height, theme) {
     { id: 'back', label: 'Back', description: 'Return to historical updates without starting a model request.' },
   ];
   const selected = items[workspace.previewIndex ?? 0];
-  return Modal({
-    title: ` HISTORICAL MODEL REPLAY · ${workspace.runId} `,
+  return replayFrame({
+    width,
+    height,
+    theme,
     children: [
-      Text(color(theme, 'title', workspace.archiveName || 'Historical archive update')),
+      Text(color(theme, 'textMuted', replayIdentity(workspace)), { wrap: false }),
+      Text(color(theme, 'title', workspace.archiveName || 'Historical archive update'), { wrap: false }),
       Text(color(theme, 'textMuted', `${counts.created ?? 0} added · ${counts.updated ?? 0} changed · ${counts.deleted ?? 0} removed`)),
       Text(''),
       Text('The current model configuration, delivery strategy, review mode, and language settings will be used.', { wrap: true }),
@@ -62,20 +67,23 @@ function renderReplayPreview(state, workspace, width, height, theme) {
   });
 }
 
-function renderReplayProgress(state, workspace, width, height, theme) {
+function renderReplayProgress(state, workspace, width, height, theme, animationFrame) {
+  const innerWidth = Math.max(20, width - 4);
+  const bodyHeight = Math.max(4, height - 7);
   const lines = replayLines(workspace, theme);
-  const bodyHeight = Math.max(5, height - 8);
-  const visibleRows = Math.max(1, bodyHeight - 3);
-  workspace.maxScroll = Math.max(0, lines.length - visibleRows);
+  workspace.maxScroll = Math.max(0, lines.length - bodyHeight);
   workspace.scroll = clamp(workspace.scroll ?? 0, 0, workspace.maxScroll);
   if (workspace.follow !== false) {
     workspace.scroll = workspace.maxScroll;
     clearReplayUnread(workspace);
   }
   const pane = ScrollPane({
-    title: ' REPLAY OUTPUT ',
-    lines, width: Math.max(28, width - 4), height: bodyHeight, scroll: workspace.scroll, theme,
-    footer: true,
+    lines,
+    width: innerWidth,
+    height: bodyHeight,
+    scroll: workspace.scroll,
+    border: false,
+    footer: false,
     pointerId: 'zipflow:model-replay-workspace',
     onWheel: (event) => {
       state.dispatch?.({ type: 'model-replay-scroll', delta: Math.sign(event.deltaY) * 3 });
@@ -83,61 +91,137 @@ function renderReplayProgress(state, workspace, width, height, theme) {
       event.stopPropagation?.();
     },
   });
-  const body = workspace.unread && workspace.follow === false
-    ? replayUnreadOverlay(state, workspace, pane, width, bodyHeight, theme)
-    : pane;
-  const statusToken = workspace.error ? 'danger'
-    : workspace.running ? 'accent'
-      : workspace.result ? 'success' : 'warning';
-  const statusMarker = workspace.error ? '×' : workspace.running ? '●' : workspace.result ? '✓' : '○';
   const footer = workspace.running
-    ? 'wheel · ↑/↓ · PgUp/PgDn · End latest · Esc cancel'
-    : 'wheel · ↑/↓ · PgUp/PgDn · C result · D diagnostics · Esc close';
-  return Modal({
-    title: ` HISTORICAL MODEL REPLAY · ${workspace.runId} `,
+    ? '↑/↓ scroll · PgUp/PgDn · End latest · Esc cancel'
+    : '↑/↓ scroll · PgUp/PgDn · C copy · D diagnostics · Esc close';
+  return replayFrame({
+    width,
+    height,
+    theme,
     children: [
-      Text(color(theme, statusToken, `${statusMarker} ${workspace.status}`), { wrap: false }),
-      Text(color(theme, 'textMuted', `${workspace.archiveName || 'Historical update'} · ${(workspace.elapsedMs / 1000).toFixed(1)}s`), { wrap: false }),
+      Text(color(theme, 'textMuted', replayIdentity(workspace)), { wrap: false }),
+      replayStatus(workspace, theme, animationFrame),
       Text(''),
-      body,
+      pane,
+      replayUnreadIndicator(state, workspace, theme),
     ],
-    footer,
+    footer: footerWithPosition(footer, workspace, innerWidth, theme),
   });
 }
 
-function replayUnreadOverlay(state, workspace, pane, width, height, theme) {
-  const indicator = PointerRegion({
-    pointerId: 'zipflow:model-replay-unread', pointerWidth: 'fill',
+function replayFrame({ width, height, theme, children, footer }) {
+  return Box({
+    border: true,
+    borderColor: theme?.borderActive ?? theme?.accent ?? theme?.border,
+    padding: { left: 1, right: 1 },
+    height,
+    title: ' HISTORICAL MODEL REPLAY ',
+  }, ...children, Text(footer, { wrap: false }));
+}
+
+function replayIdentity(workspace) {
+  const run = workspace.runId || 'historical run';
+  const archive = workspace.archiveName || 'Historical update';
+  return `${run} · ${archive}`;
+}
+
+function replayStatus(workspace, theme, animationFrame) {
+  const elapsed = `${(workspace.elapsedMs / 1000).toFixed(1)}s`;
+  if (workspace.running) {
+    const spinner = renderNode(Spinner({ frame: animationFrame, label: workspace.status }), 120)[0].trimEnd();
+    return Text(`${color(theme, 'accent', spinner)} ${color(theme, 'textMuted', `· ${elapsed}`)}`, { wrap: false });
+  }
+  const token = workspace.error ? 'danger' : workspace.result ? 'success' : 'warning';
+  const marker = workspace.error ? '×' : workspace.result ? '✓' : '○';
+  return Text(color(theme, token, `${marker} ${workspace.status} · ${elapsed}`), { wrap: false });
+}
+
+function replayUnreadIndicator(state, workspace, theme) {
+  if (!workspace.unread || workspace.follow !== false) return Text('');
+  return PointerRegion({
+    pointerId: 'zipflow:model-replay-unread',
+    pointerWidth: 'fill',
     onClick: (event) => {
       state.dispatch?.({ type: 'model-replay-follow-latest' });
       event.preventDefault();
       event.stopPropagation?.();
     },
-  }, Box({ border: true, padding: { left: 1, right: 1 } },
-    Text(color(theme, 'danger', `↓ ${workspace.unread} new replay block${workspace.unread === 1 ? '' : 's'} · click or press End`), { wrap: false }),
-  ));
-  return BottomOverlay({
-    content: pane, overlay: indicator, height, bottom: 1, left: 2, right: 2,
-    width: Math.max(28, width - 8), align: 'center', opaque: true,
-  });
+  }, Text(color(theme, 'danger', `↓ ${workspace.unread} new replay block${workspace.unread === 1 ? '' : 's'} · click or press End`), { wrap: false }));
+}
+
+function footerWithPosition(hints, workspace, width, theme) {
+  const position = `${workspace.scroll ?? 0}/${workspace.maxScroll ?? 0}`;
+  const available = Math.max(1, width - visibleLength(position) - 1);
+  const left = truncateVisible(hints, available, '…');
+  const spacing = ' '.repeat(Math.max(1, width - visibleLength(left) - visibleLength(position)));
+  return `${color(theme, 'textMuted', left)}${spacing}${color(theme, 'textMuted', position)}`;
 }
 
 function replayLines(workspace, theme) {
-  return workspace.blocks.flatMap((block) => blockLines(block, theme));
+  return workspace.blocks.flatMap((block) => blockLines(block, workspace, theme));
 }
 
-function blockLines(block, theme) {
+function blockLines(block, workspace, theme) {
+  if (block.id === 'parsed-result' && block.result) return parsedResultLines(block.result, theme);
   const token = block.status === 'error' ? 'danger'
     : block.status === 'active' || block.streaming ? 'accent'
       : block.status === 'done' ? 'success' : 'textMuted';
   const marker = block.status === 'error' ? '×' : block.status === 'done' ? '✓' : block.streaming || block.status === 'active' ? '●' : '○';
+  const compactCompletedOutput = Boolean(workspace.result && block.status === 'done' && (block.reasoning || block.content));
   return [
     color(theme, token, `${marker} ${String(block.title ?? '').toUpperCase()}`),
     ...block.lines.map((line) => `  ${color(theme, 'textMuted', line)}`),
-    ...(block.reasoning ? [color(theme, 'textMuted', '  Analysis'), ...String(block.reasoning).split('\n').map((line) => `    ${color(theme, 'textMuted', line)}`)] : []),
-    ...(block.content ? [color(theme, 'title', '  Model response'), ...String(block.content).split('\n').map((line) => `    ${line}`)] : []),
+    ...(compactCompletedOutput
+      ? [`  ${color(theme, 'textMuted', 'Model output parsed successfully · press D for full diagnostics')}`]
+      : blockOutputLines(block, theme)),
     '',
   ];
+}
+
+function blockOutputLines(block, theme) {
+  return [
+    ...(block.reasoning ? [color(theme, 'textMuted', '  Analysis'), ...String(block.reasoning).split('\n').map((line) => `    ${color(theme, 'textMuted', line)}`)] : []),
+    ...(block.content ? [color(theme, 'title', '  Model response'), ...String(block.content).split('\n').map((line) => `    ${line}`)] : []),
+  ];
+}
+
+function parsedResultLines(result, theme) {
+  const lines = [
+    color(theme, 'success', '✓ PARSED RESULT'),
+    '',
+    color(theme, 'accent', 'SUMMARY'),
+    ...(result.summary?.length
+      ? result.summary.map((line) => `  • ${line}`)
+      : [`  ${color(theme, 'textMuted', 'No summary returned.')}`]),
+    '',
+    color(theme, 'accent', 'COMMIT MESSAGE'),
+    `  ${result.commitMessage || color(theme, 'textMuted', '(none)')}`,
+  ];
+  if (result.assessment) {
+    lines.push(
+      '',
+      color(theme, 'accent', 'ASSESSMENT'),
+      `  ${color(theme, assessmentToken(result.assessment), `${titleCase(result.assessment)} · ${titleCase(result.confidence || 'unknown')} confidence`)}`,
+    );
+  }
+  if (result.reasons?.length) {
+    lines.push(
+      '',
+      color(theme, 'accent', 'REASONS'),
+      ...result.reasons.map((line) => `  • ${line}`),
+    );
+  }
+  lines.push('');
+  return lines;
+}
+
+function assessmentToken(value) {
+  return String(value).toLowerCase() === 'suitable' ? 'success' : 'warning';
+}
+
+function titleCase(value) {
+  const text = String(value ?? '');
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : '';
 }
 
 function clearReplayUnread(workspace) {

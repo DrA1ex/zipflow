@@ -195,7 +195,7 @@ Ollama:    http://127.0.0.1:11434
 LM Studio: http://127.0.0.1:1234
 ```
 
-**Test selected model** offers a quick compatibility check and a read-only historical replay. Replay first shows the selected archive update and safety scope, then opens a dimmed modal workspace only after explicit confirmation. The current status and elapsed time stay in a fixed modal header while streaming stages remain visible as separate colored blocks in the scrollable body; mouse wheel, arrows, Page Up/Page Down, Home, and End work while generation is active. When the user scrolls away from the latest output, new logical blocks are counted without forcing the view downward.
+**Test selected model** offers a quick compatibility check and a read-only historical replay. Replay first shows the selected archive update and safety scope, then opens a dimmed modal workspace only after explicit confirmation. The workspace uses one accent-colored frame: run identity and live status stay in a fixed header, controls and scroll position stay in a fixed footer, and only the central stage/output area scrolls. Parsed summaries, commit messages, assessments, and reasons are grouped into readable sections instead of exposing repeated protocol labels. Mouse wheel, arrows, Page Up/Page Down, Home, and End work while generation is active. When the user scrolls away from the latest output, new logical blocks are counted without forcing the view downward.
 
 The **Archive review** setting controls whether the model also judges archive suitability:
 

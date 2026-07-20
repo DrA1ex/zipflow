@@ -98,12 +98,7 @@ export async function beginHistoricalModelReplay(controller) {
     workspace.result = result;
     workspace.status = 'Replay completed';
     markActiveBlocksDone(workspace);
-    addBlock(workspace, 'parsed-result', 'Parsed result', [
-      ...(result.summary ?? []).map((line) => `Summary: ${line}`),
-      `Commit message: ${result.commitMessage || '(none)'}`,
-      ...(result.assessment ? [`Assessment: ${result.assessment} · ${result.confidence || 'unknown'} confidence`] : []),
-      ...(result.reasons ?? []).map((line) => `Reason: ${line}`),
-    ], { status: 'done' });
+    addBlock(workspace, 'parsed-result', 'Parsed result', [], { status: 'done', result });
     noteReplayChange(workspace, 'parsed-result');
     return true;
   } catch (error) {

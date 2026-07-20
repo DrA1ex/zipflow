@@ -8,10 +8,17 @@ import {
 import { createInitialState, appendMessage } from '../src/app/state.js';
 import { buildTranscript } from '../src/ui/activity.js';
 import { renderModelReplayWorkspace } from '../src/ui/model-replay-view.js';
+import { settingsPageTitle } from '../src/app/settings-options.js';
 import { buildUpdatePlan } from '../src/plan/build.js';
 import { createRecommendedWorkflow } from '../src/workflow/defaults.js';
 import { discoverProject } from '../src/project/detect.js';
 import { extractedFixture, initGit, tempDir, writeFiles } from '../test-support/helpers.js';
+
+const installedTerlioVersion = JSON.parse(await readFile(
+  new URL('../node_modules/terlio.js/package.json', import.meta.url),
+  'utf8',
+)).version;
+const hasVirtualScrollSource = versionAtLeast(installedTerlioVersion, '1.1.2');
 
 test('snapshot deletion always preserves gitignore and sensitive local data', async () => {
   const root = await tempDir('zipflow-delete-protected-');
@@ -43,7 +50,7 @@ test('snapshot deletion always preserves gitignore and sensitive local data', as
   }
 });
 
-test('historical replay keeps status in a fixed modal header above scrolled output', () => {
+test('historical replay keeps its header and footer fixed outside the scrolled output', () => {
   const state = createInitialState();
   state.settingsPanel = {
     modelTestWorkspace: {
@@ -56,13 +63,60 @@ test('historical replay keeps status in a fixed modal header above scrolled outp
       scroll: 80, maxScroll: 100, follow: false, unread: 0, unreadBlockIds: new Set(),
     },
   };
-  const tree = renderModelReplayWorkspace({ content: Text('BACKGROUND'), state, width: 100, height: 28, theme: themes.ocean });
+  const tree = renderModelReplayWorkspace({
+    content: Text('BACKGROUND'), state, width: 100, height: 28, theme: themes.ocean, animationFrame: 2,
+  });
   const overlay = tree.props.manager.top();
   assert.equal(typeof overlay.render, 'function');
   const output = stripAnsi(renderToString(tree, { width: 100, height: 28 }));
-  assert.ok(output.indexOf('Receiving model response') >= 0);
-  assert.ok(output.indexOf('Receiving model response') < output.indexOf('REPLAY OUTPUT'));
-  assert.match(output, /update\.zip · 2\.5s/);
+  assert.match(output, /HISTORICAL MODEL REPLAY/);
+  assert.match(output, /run-1 · update\.zip/);
+  assert.match(output, /Receiving model response · 2\.5s/);
+  assert.match(output, /Esc cancel/);
+  assert.doesNotMatch(output, /REPLAY OUTPUT/);
+  assert.equal((output.match(/HISTORICAL MODEL REPLAY/g) ?? []).length, 1);
+});
+
+test('completed replay groups parsed fields without a nested output frame', () => {
+  const result = {
+    summary: ['Updated the replay layout.', 'Kept status visible.'],
+    commitMessage: 'fix: simplify replay modal',
+    assessment: 'suitable',
+    confidence: 'high',
+    reasons: ['The result is read-only.'],
+  };
+  const state = createInitialState();
+  state.settingsPanel = {
+    subpage: 'llmModelReplay',
+    modelTestWorkspace: {
+      mode: 'progress', runId: 'run-2', archiveName: 'update.zip', running: false,
+      status: 'Replay completed', elapsedMs: 1_250, result,
+      blocks: [
+        { id: 'response', title: 'Response', lines: [], reasoning: 'Internal analysis', content: 'Raw response', status: 'done', streaming: false },
+        { id: 'parsed-result', title: 'Parsed result', lines: [], result, status: 'done', streaming: false },
+      ],
+      scroll: 0, maxScroll: 0, follow: true, unread: 0, unreadBlockIds: new Set(),
+    },
+  };
+  const tree = renderModelReplayWorkspace({
+    content: Text('BACKGROUND'), state, width: 100, height: 30, theme: themes.ocean,
+  });
+  const output = stripAnsi(renderToString(tree, { width: 100, height: 30 }));
+
+  assert.match(output, /SUMMARY/);
+  assert.match(output, /• Updated the replay layout\./);
+  assert.match(output, /COMMIT MESSAGE/);
+  assert.match(output, /fix: simplify replay modal/);
+  assert.match(output, /ASSESSMENT/);
+  assert.doesNotMatch(output, /Summary:/);
+  assert.doesNotMatch(output, /REPLAY OUTPUT/);
+  assert.doesNotMatch(output, /Raw response/);
+});
+
+test('the dimmed Settings page does not repeat the replay modal title', () => {
+  const state = createInitialState();
+  state.settingsPanel = { subpage: 'llmModelReplay', modelTestWorkspace: { mode: 'preview' } };
+  assert.equal(settingsPageTitle(state, { id: 'localLlm', label: 'Local LLM' }), 'Model tests');
 });
 
 test('expanded 10k-line Activity blocks reuse their prepared transcript between scroll renders', () => {
@@ -78,7 +132,9 @@ test('expanded 10k-line Activity blocks reuse their prepared transcript between 
   assert.ok(first.lines.length >= 10_001);
 });
 
-test('Terlio 1.1.2 ScrollPane reads only the visible window from a 10k-line source', () => {
+test('Terlio 1.1.2 ScrollPane reads only the visible window from a 10k-line source', {
+  skip: hasVirtualScrollSource ? false : `installed Terlio ${installedTerlioVersion}; run npm install to enable 1.1.2 virtualization`,
+}, () => {
   let reads = 0;
   const source = {
     length: 10_000,
@@ -93,6 +149,16 @@ test('Terlio 1.1.2 ScrollPane reads only the visible window from a 10k-line sour
   assert.match(output, /log line 9000/);
   assert.ok(reads < 50, `expected viewport-sized reads, received ${reads}`);
 });
+
+
+function versionAtLeast(actual, expected) {
+  const left = String(actual).split('.').map((part) => Number(part) || 0);
+  const right = String(expected).split('.').map((part) => Number(part) || 0);
+  for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+    if ((left[index] ?? 0) !== (right[index] ?? 0)) return (left[index] ?? 0) > (right[index] ?? 0);
+  }
+  return true;
+}
 
 function stripAnsi(value) {
   return String(value).replace(/\u001b\[[0-9;]*m/g, '');

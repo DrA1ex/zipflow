@@ -54,7 +54,7 @@ export function renderSettings(state, width, height, theme, animationFrame = 0) 
     ],
   });
   if (state.settingsPanel?.modelTestWorkspace) {
-    return renderModelReplayWorkspace({ content, state, width, height, theme });
+    return renderModelReplayWorkspace({ content, state, width, height, theme, animationFrame });
   }
   if (!view.modal && !view.choiceSearch?.active) return content;
   if (!view.modal && view.choiceSearch?.active) return renderChoiceSearch({ content, state, width, height, theme });
