@@ -1,6 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
-import { readdir, realpath } from 'node:fs/promises';
+import { readdir, realpath, stat } from 'node:fs/promises';
 import { exists } from './fs.js';
 
 export function expandHome(value) {
@@ -57,6 +57,62 @@ export async function completePath(value, { cwd = process.cwd(), directoriesOnly
   const nextName = matches.length === 1 ? names[0] : common.length > prefix.length ? common : null;
   const completed = nextName ? collapseHome(path.join(directory, nextName)) : raw;
   return { value: completed, matches: names.map((name) => path.join(directory, name)) };
+}
+
+export async function suggestPathEntries(value, {
+  cwd = process.cwd(),
+  directoriesOnly = false,
+  extension = null,
+  includeCurrentDirectory = false,
+} = {}) {
+  const raw = String(value ?? '');
+  const parsed = parseEnteredPath(raw.trim() ? raw : cwd, cwd);
+  const current = await existingDirectory(parsed).catch(() => null);
+  const endsWithSeparator = !raw.trim() || raw.endsWith('/') || raw.endsWith(path.sep);
+  const browseDirectory = Boolean(current) || endsWithSeparator;
+  const directory = browseDirectory ? parsed : path.dirname(parsed);
+  const prefix = browseDirectory ? '' : path.basename(parsed);
+  const suggestions = [];
+  if (includeCurrentDirectory) {
+    if (current) suggestions.push({
+      id: `use:${current}`,
+      path: current,
+      insert: collapseHome(current),
+      label: 'Use this directory',
+      detail: displayPath(current),
+      description: 'Select the directory currently entered.',
+      isDirectory: true,
+      submit: true,
+    });
+  }
+  if (!(await exists(directory))) return suggestions;
+  const entries = await readdir(directory, { withFileTypes: true });
+  const matches = entries.filter((entry) => {
+    if (!entry.name.toLowerCase().startsWith(prefix.toLowerCase())) return false;
+    if (directoriesOnly && !entry.isDirectory()) return false;
+    if (extension && !entry.isDirectory() && !entry.name.toLowerCase().endsWith(extension)) return false;
+    return entry.isDirectory() || entry.isFile();
+  }).sort((left, right) => Number(right.isDirectory()) - Number(left.isDirectory()) || left.name.localeCompare(right.name));
+  for (const entry of matches) {
+    const absolute = path.join(directory, entry.name);
+    const isDirectory = entry.isDirectory();
+    suggestions.push({
+      id: absolute,
+      path: absolute,
+      insert: collapseHome(`${absolute}${isDirectory ? path.sep : ''}`),
+      label: `${entry.name}${isDirectory ? path.sep : ''}`,
+      detail: isDirectory ? 'Directory' : extension ? extension.toUpperCase().slice(1) : 'File',
+      description: isDirectory ? 'Open this directory.' : 'Select this file.',
+      isDirectory,
+      submit: !isDirectory,
+    });
+  }
+  return suggestions;
+}
+
+async function existingDirectory(target) {
+  const info = await stat(target);
+  return info.isDirectory() ? target : null;
 }
 
 function commonPrefix(values) {

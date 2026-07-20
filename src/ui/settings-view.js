@@ -1,0 +1,193 @@
+import {
+  BottomOverlay,
+  Modal,
+  Row,
+  SelectList,
+  SuggestionsPanel,
+  Text,
+  TextEditorView,
+  WorkspacePane,
+  color,
+} from 'terlio.js';
+import { settingsViewModel } from '../app/settings-panel.js';
+
+export function renderSettings(state, width, height, theme) {
+  const view = settingsViewModel(state);
+  const leftWidth = Math.max(24, Math.min(34, Math.floor(width * 0.3)));
+  const rightWidth = Math.max(26, width - leftWidth - 2);
+  const categories = WorkspacePane({
+    title: ' CATEGORIES ',
+    active: view.focus === 'categories' && !view.modal,
+    height,
+    theme,
+    children: [SelectList({
+      title: 'Settings',
+      items: view.definitions,
+      selectedIndex: view.categoryIndex,
+      windowSize: Math.max(2, height - 6),
+      getLabel: (item) => item.label,
+      getDescription: () => '',
+      wrapItems: false,
+      maxItemLines: 1,
+      theme,
+      pointerId: 'zipflow:settings-categories',
+      onSelect: (_item, index) => state.dispatch?.({ type: 'settings-select-setting', index }),
+    })],
+  });
+  const right = view.modelConfig
+    ? renderModelConfigPage(state, view.modelConfig, rightWidth, height, theme)
+    : renderSettingsPage(state, view, rightWidth, height, theme);
+  const content = Row({ gap: 2, widths: [leftWidth, rightWidth], height }, categories, right);
+  if (!view.modal) return content;
+  return renderSettingsModal({ content, modal: view.modal, state, width, height, theme });
+}
+
+function renderSettingsPage(state, view, width, height, theme) {
+  const showingChoices = view.direct || view.focus === 'choices';
+  const items = showingChoices ? view.choices : view.parameters;
+  const nestedChoice = showingChoices && !view.direct;
+  const title = nestedChoice
+    ? ` ${view.activeParameter?.label?.toUpperCase() ?? 'SELECT'} `
+    : ` ${view.selectedSetting.label.toUpperCase()} `;
+  const description = nestedChoice
+    ? view.activeParameter?.description ?? ''
+    : view.selectedSetting.description;
+  return WorkspacePane({
+    title,
+    active: view.focus !== 'categories' && !view.modal,
+    height,
+    theme,
+    children: [
+      description ? Text(color(theme, 'textMuted', description), { wrap: true }) : null,
+      description ? Text('') : null,
+      SelectList({
+        title: showingChoices ? 'Options' : 'Parameters',
+        items,
+        selectedIndex: showingChoices ? view.choiceIndex : view.parameterIndex,
+        windowSize: Math.max(2, height - (description ? 8 : 5)),
+        getLabel: (item) => showingChoices ? choiceLabel(state, item) : `${item.label}: ${item.value}`,
+        getDescription: (item) => showingChoices
+          ? item.description ?? ''
+          : item.disabled ? item.disabledReason ?? '' : '',
+        getDisabled: (item) => item.disabled,
+        wrapItems: showingChoices,
+        maxItemLines: showingChoices ? 3 : 1,
+        theme,
+        pointerId: showingChoices ? 'zipflow:settings-choices' : 'zipflow:settings-parameters',
+        onSelect: (_item, index) => state.dispatch?.({
+          type: showingChoices ? 'settings-select-choice' : 'settings-select-parameter',
+          index,
+        }),
+      }),
+    ].filter(Boolean),
+  });
+}
+
+function renderModelConfigPage(state, view, width, height, theme) {
+  const choices = view.focus === 'choices';
+  const items = choices ? view.choices : view.parameters;
+  const model = view.model;
+  const info = [
+    model.paramsString ? `${model.paramsString} parameters` : null,
+    model.quantization,
+    model.loaded ? 'Loaded instance' : 'Not loaded',
+    model.maxContextLength ? `maximum context ${model.maxContextLength.toLocaleString('en-US')}` : null,
+  ].filter(Boolean).join(' · ');
+  const description = choices ? view.activeParameter?.description ?? '' : info;
+  return WorkspacePane({
+    title: ` ${model.label.toUpperCase()} `,
+    active: !state.settingsPanel?.modal,
+    height,
+    theme,
+    children: [
+      description ? Text(color(theme, 'textMuted', description), { wrap: true }) : null,
+      view.error ? Text(color(theme, 'danger', view.error), { wrap: true }) : null,
+      description || view.error ? Text('') : null,
+      SelectList({
+        title: choices ? 'Options' : 'Load configuration',
+        items,
+        selectedIndex: choices ? view.choiceIndex : view.parameterIndex,
+        windowSize: Math.max(2, height - (description || view.error ? 8 : 5)),
+        getLabel: (item) => choices
+          ? `${item.value === view.values[view.activeParameter.id] ? '●' : '○'} ${item.label}`
+          : `${item.label}${item.value ? `: ${item.value}` : ''}`,
+        getDescription: () => '',
+        getDisabled: (item) => item.disabled || view.loading,
+        wrapItems: false,
+        maxItemLines: 1,
+        theme,
+        pointerId: choices ? 'zipflow:model-config-choices' : 'zipflow:model-config-parameters',
+        onSelect: (_item, index) => state.dispatch?.({
+          type: choices ? 'settings-model-select-choice' : 'settings-model-select-parameter',
+          index,
+        }),
+      }),
+    ].filter(Boolean),
+  });
+}
+
+function choiceLabel(state, item) {
+  if (!item.settingId) return item.label;
+  const selected = item.selected || state.settings[item.settingId] === item.value;
+  return `${selected ? '●' : '○'} ${item.label}`;
+}
+
+function renderSettingsModal({ content, modal, state, width, height, theme }) {
+  const modalWidth = Math.max(40, Math.min(68, width - 10));
+  const instructions = modal.field.instructions ?? [];
+  const children = [
+    Text(modal.field.description, { wrap: true }),
+    ...instructions.map((line) => Text(color(theme, 'textMuted', line), { wrap: true })),
+    modal.field.unitHint ? Text(color(theme, 'accent', modal.field.unitHint), { wrap: true }) : null,
+    Text(''),
+    TextEditorView({
+      title: ` ${modal.field.label} `,
+      value: state.editor.value,
+      cursor: state.editor.cursor,
+      width: Math.max(26, modalWidth - 4),
+      height: 3,
+      placeholder: modal.field.placeholder ?? '',
+      lineNumbers: false,
+    }),
+    modal.error ? Text(color(theme, 'danger', modal.error), { wrap: true }) : null,
+  ].filter(Boolean);
+  const overlay = Modal({
+    title: ` Edit ${modal.field.label} `,
+    children,
+    footer: modal.field.path ? '↑/↓ choose · Tab/Enter complete · Esc cancel' : 'Enter save · Esc cancel',
+  });
+  const estimatedHeight = Math.min(height - 2, 9 + instructions.length * 2 + (modal.field.unitHint ? 2 : 0) + (modal.error ? 2 : 0));
+  const modalLayer = BottomOverlay({
+    content,
+    overlay,
+    height,
+    bottom: Math.max(1, Math.floor((height - estimatedHeight) / 2)),
+    left: 2,
+    right: 2,
+    width: modalWidth,
+    align: 'center',
+    opaque: true,
+  });
+  const completion = state.pathSuggestions;
+  if (!modal.field.path || completion?.owner !== 'settings-modal' || !completion.items?.length) return modalLayer;
+  const suggestions = SuggestionsPanel({
+    columns: Math.max(36, modalWidth),
+    height: Math.min(7, Math.max(4, completion.items.length + 2)),
+    theme,
+    suggestions: completion.items,
+    suggestionIndex: completion.selectedIndex,
+    suggestionWindowSize: 5,
+    onSuggestionSelect: (_item, index) => state.dispatch?.({ type: 'path-select', index }),
+  });
+  return BottomOverlay({
+    content: modalLayer,
+    overlay: suggestions,
+    height,
+    bottom: 1,
+    left: Math.max(2, Math.floor((width - modalWidth) / 2)),
+    right: Math.max(2, Math.floor((width - modalWidth) / 2)),
+    width: modalWidth,
+    align: 'center',
+    opaque: true,
+  });
+}

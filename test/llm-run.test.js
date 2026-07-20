@@ -43,6 +43,12 @@ test('archive inspection persists changes.patch and records the local LLM result
           '- Добавлен новый модуль.',
           'COMMIT MESSAGE:',
           'Обновить значение и добавить модуль',
+          'ASSESSMENT:',
+          'suitable',
+          'CONFIDENCE:',
+          'high',
+          'REASONS:',
+          '- Структура и маркеры проекта совпадают.',
         ].join('\n') } }],
       });
     };
@@ -60,6 +66,7 @@ test('archive inspection persists changes.patch and records the local LLM result
       llmProvider: 'ollama',
       llmModel: 'qwen-coder',
       llmLanguage: 'Russian',
+      llmArchiveReview: 'patch',
     };
     const controller = new ZipflowController(state);
 
@@ -70,8 +77,15 @@ test('archive inspection persists changes.patch and records the local LLM result
     assert.equal(state.screen, 'plan-review');
     assert.deepEqual(state.run.llm.summary, ['Обновлена логика значения.', 'Добавлен новый модуль.']);
     assert.equal(state.run.llm.commitMessage, 'Обновить значение и добавить модуль');
-    assert.equal(state.messages.some((message) => message.title === 'Local LLM summary'), false,
-      'the LLM summary is reserved for the final result block after checks');
+    const summaryMessage = state.messages.find((message) => message.title === 'Local LLM summary');
+    assert.ok(summaryMessage, 'the LLM summary should be visible before commit selection');
+    assert.deepEqual(summaryMessage.lines, ['Обновлена логика значения.', 'Добавлен новый модуль.']);
+    assert.equal(summaryMessage.tone, 'summary');
+    const suitability = state.messages.find((message) => message.title === 'Local LLM archive suitability');
+    assert.ok(suitability);
+    assert.match(suitability.lines.join(' '), /Suitable/i);
+    assert.match(suitability.lines.join(' '), /high confidence/i);
+    assert.match(suitability.lines.join(' '), /Структура и маркеры проекта совпадают/);
     assert.match(requestBody.messages[0].content, /Write both summary and commitMessage in Russian/);
     assert.equal('response_format' in requestBody, false, 'visible generation must stream readable text instead of JSON');
     assert.match(requestBody.messages[1].content, /src\/index\.js/);

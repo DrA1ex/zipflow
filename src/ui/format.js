@@ -8,7 +8,10 @@ export function projectSummary(project, workflow = null) {
     `Detected: ${labels}`,
     `Git: ${project.git ? 'repository detected' : 'not initialized'} · Workflow: ${workflow ? 'configured' : 'not configured'}`,
   ];
-  if (workflow) lines.push(...workflowOverviewLines(workflow));
+  if (workflow) {
+    lines.push(...workflowOverviewLines(workflow));
+    lines.push('Ready: waiting for a ZIP archive · press Esc to open the project menu or change the workflow.');
+  }
   return lines;
 }
 

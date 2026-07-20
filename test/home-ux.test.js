@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createInitialState } from '../src/app/state.js';
 import { ZipflowController } from '../src/app/controller.js';
 import { createRecommendedWorkflow } from '../src/workflow/defaults.js';
+import { projectSummary } from '../src/ui/format.js';
 
 test('configured project home keeps workflow details in Activity instead of the action pane', () => {
   const state = createInitialState();
@@ -18,4 +19,7 @@ test('configured project home keeps workflow details in Activity instead of the 
   assert.deepEqual(state.panelIntro, []);
   assert.ok(state.menuItems.some((item) => item.id === 'fine-tune'));
   assert.equal(state.menuItems[0].id, 'start-update');
+  const summary = projectSummary(state.project, state.workflow);
+  assert.match(summary.at(-1), /waiting for a ZIP archive/i);
+  assert.match(summary.at(-1), /Esc/i);
 });

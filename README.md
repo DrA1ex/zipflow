@@ -83,7 +83,7 @@ When adding a custom check, Zipflow first asks for the exact command and then as
 
 ## Applying an archive
 
-For a configured project, drag a ZIP file into the initial archive prompt or enter its path. Press `Esc` to return to the project menu. After a completed run, **Finish and wait for next archive** returns directly to the same prompt.
+For a configured project, drag a ZIP file into the initial archive prompt or enter its path. Path input scans the entered location while you type and shows multiple matching directories and ZIP files in an overlay without shifting the layout. Use `Up`/`Down` to select a suggestion and `Tab` or `Enter` to accept it: a directory opens its contents, while a ZIP file completes and submits the input. Existing directory paths also expose an explicit **Use this directory** action in directory pickers. Press `Esc` to return to the project menu. After a completed run, **Finish and wait for next archive** returns directly to the same prompt.
 
 Zipflow performs the following sequence:
 
@@ -173,7 +173,7 @@ Other supported message sources are the archive filename, a generated run identi
 
 ## Local LLM summaries and commit messages
 
-Zipflow supports Ollama and LM Studio with provider-specific adapters. LM Studio uses its native model catalog and streaming chat API so Zipflow can read the loaded context size and display model-load and prompt-processing progress. Ollama uses its native model metadata endpoints to discover the active or configured context size, then uses its OpenAI-compatible chat-completion stream for generation. Configure the provider, optional bearer token, model, and response language in `Ctrl+B` settings.
+Zipflow supports Ollama and LM Studio with provider-specific adapters. LM Studio uses its native model catalog and streaming chat API so Zipflow can read model parameter counts, loaded-instance configuration, context size, and model-load or prompt-processing progress. The model list keeps unloaded entries compact and marks loaded entries with their active context. Selecting an unloaded LM Studio model opens a configuration page for context length, evaluation batch size, Flash Attention, KV-cache placement, and expert count when supported, then loads and selects that exact instance. Saved load choices are shown beside the model on later visits. Ollama uses its native model metadata endpoints to discover the active or configured context size, then uses its OpenAI-compatible chat-completion stream for generation. Configure the provider, optional bearer token, model, and response language in `Ctrl+B` settings.
 
 Default local endpoints:
 
@@ -203,9 +203,10 @@ When enabled, every inspected archive with content changes produces:
 
 - `~/.zipflow/runs/<run-id>/changes.patch`;
 - an optional proposed commit message stored in the JSON and text run reports;
+- an immediate expanded Activity block with the archive-suitability verdict, confidence, reasons, and summary before commit-message selection;
 - a final Activity summary placed after checks, commit, and deployment, followed by one compact checks/deployment line.
 
-The intermediate LLM result is not left far above the completed run. If no local model is enabled or generation is cancelled, the final block still contains the concise check result.
+The first durable LLM result is available as soon as archive analysis finishes, so the proposed commit message can be judged against the visible summary. The final block repeats the useful conclusion beside the actual check and deployment outcome. If no local model is enabled or generation is cancelled, the final block still contains the concise check result.
 
 The system and user prompts are always English. The selected language applies only to generated user-facing text. Primary generation uses a readable text protocol with `SUMMARY`, `COMMIT MESSAGE`, and optional assessment sections. Activity streams only human-readable reasoning and response text, preserves model line breaks, and wraps long lines to the current Terlio pane width; internal JSON repair is hidden from Activity. The view also shows the exact transport and endpoint, model-load progress, prompt-processing progress when the provider exposes it, elapsed time, delivery mode, and current file batch. Press `Esc` during generation to cancel only the local LLM request; archive analysis then continues with the normal commit-message fallbacks.
 

@@ -158,8 +158,8 @@ async function inspectArchive(controller, archivePath, archiveHash, archiveInfo)
       `${formatArchiveName(archivePath)} · ${extracted.fileCount} files${extracted.rootPrefix ? ` · root ${extracted.rootPrefix}/` : ''}`,
       ...(metadata.commitMessageSource ? [`Commit message found: ${metadata.commitMessageSource}`] : []),
     ], 'success');
-    emitLlmResult(controller, llm);
     controller.message('Update plan', [...planActivityLines(plan), `Patch: ${displayPath(patch.path)}`], plan.conflicts.length ? 'warning' : 'info');
+    emitLlmResult(controller, llm, state.settings.llmArchiveReview);
     state.busy = false;
     if (requiresSafetyReview(state.archiveSafety)) return showArchiveSafetyReview(controller);
     return continueAfterSafety(controller);
@@ -240,7 +240,7 @@ async function generateLlmSummary(controller, { plan, patch, extracted }) {
   }
 }
 
-function emitLlmResult(controller, llm) {
+function emitLlmResult(controller, llm, reviewMode) {
   if (llm.result) {
     const attempt = llm.result.diagnostics?.attempts?.find((item) => typeof item.attempt === 'number');
     if (attempt?.patch?.truncated) controller.message('Local LLM input reduced safely', [
@@ -248,11 +248,17 @@ function emitLlmResult(controller, llm) {
       `${attempt.patch.omittedFiles} files without excerpts · ${attempt.patch.omittedHunks} hunks omitted`,
     ], 'warning');
     const assessment = llm.assessment;
-    if (assessment) controller.message('Local LLM archive assessment', [
+    if (assessment) controller.message('Local LLM archive suitability', [
       `${assessment.assessment} · ${assessment.confidence} confidence · ${assessment.mode} review`,
       ...assessment.reasons,
     ], assessment.assessment === 'suitable' ? 'success' : 'warning');
+    else controller.message('Local LLM archive suitability', [
+      reviewMode === 'disabled'
+        ? 'Not requested · Archive review is set to Summary only.'
+        : 'No suitability verdict was returned; deterministic Zipflow safety checks remain active.',
+    ], reviewMode === 'disabled' ? 'info' : 'warning');
     if (llm.result.warning) controller.message('Local LLM fallback used', [llm.result.warning], 'warning');
+    if (llm.result.summary?.length) controller.message('Local LLM summary', llm.result.summary, 'summary');
   } else if (llm.cancelled) controller.message('Local LLM generation cancelled', ['The update continues with normal commit-message fallbacks.'], 'warning');
   else if (llm.error) controller.message('Local LLM summary was not generated', [
     llm.error,

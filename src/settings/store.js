@@ -3,7 +3,7 @@ import { themes } from 'terlio.js';
 import { readJson, writeJsonAtomic } from '../utils/fs.js';
 import { ensureZipflowHome, getZipflowHome } from '../workflow/store.js';
 
-export const SETTINGS_VERSION = 6;
+export const SETTINGS_VERSION = 7;
 export const THEME_NAMES = Object.keys(themes);
 export const LLM_PROVIDERS = ['disabled', 'ollama', 'lmstudio'];
 export const LLM_LANGUAGES = ['English', 'Russian', 'German', 'French', 'Spanish', 'Chinese', 'Japanese'];
@@ -23,6 +23,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   llmArchiveReview: 'disabled',
   llmChangeDelivery: 'adaptive',
   llmFailureAnalysis: 'disabled',
+  llmModelLoadConfigs: {},
   archivePolicy: 'keep',
   archiveDirectory: '~/zipflow-archive',
   archiveRetentionDays: 30,
@@ -53,12 +54,40 @@ export function normalizeSettings(settings) {
   if (!LLM_ARCHIVE_REVIEW_MODES.includes(value.llmArchiveReview)) value.llmArchiveReview = DEFAULT_SETTINGS.llmArchiveReview;
   if (!LLM_CHANGE_DELIVERY_MODES.includes(value.llmChangeDelivery)) value.llmChangeDelivery = DEFAULT_SETTINGS.llmChangeDelivery;
   if (!LLM_FAILURE_ANALYSIS_MODES.includes(value.llmFailureAnalysis)) value.llmFailureAnalysis = DEFAULT_SETTINGS.llmFailureAnalysis;
+  value.llmModelLoadConfigs = normalizeModelLoadConfigs(value.llmModelLoadConfigs);
   if (value.llmProvider === 'disabled') value.llmModel = '';
   if (!ARCHIVE_POLICIES.includes(value.archivePolicy)) value.archivePolicy = DEFAULT_SETTINGS.archivePolicy;
   if (typeof value.archiveDirectory !== 'string' || !value.archiveDirectory.trim()) value.archiveDirectory = DEFAULT_SETTINGS.archiveDirectory;
   value.archiveRetentionDays = normalizeInteger(value.archiveRetentionDays, DEFAULT_SETTINGS.archiveRetentionDays, 0, 36_500);
   value.archiveMaxBytes = normalizeInteger(value.archiveMaxBytes, DEFAULT_SETTINGS.archiveMaxBytes, 0, Number.MAX_SAFE_INTEGER);
   return value;
+}
+
+function normalizeModelLoadConfigs(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const result = {};
+  for (const [key, config] of Object.entries(value)) {
+    if (!config || typeof config !== 'object' || Array.isArray(config)) continue;
+    result[key] = {
+      contextLength: normalizeOptionalInteger(config.contextLength, 256, 2_000_000),
+      evalBatchSize: normalizeOptionalInteger(config.evalBatchSize, 1, 65_536),
+      flashAttention: normalizeOptionalBoolean(config.flashAttention),
+      offloadKvCacheToGpu: normalizeOptionalBoolean(config.offloadKvCacheToGpu),
+      numExperts: normalizeOptionalInteger(config.numExperts, 1, 10_000),
+    };
+  }
+  return result;
+}
+
+function normalizeOptionalInteger(value, min, max) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  if (!Number.isFinite(number)) return null;
+  return Math.max(min, Math.min(max, Math.floor(number)));
+}
+
+function normalizeOptionalBoolean(value) {
+  return typeof value === 'boolean' ? value : null;
 }
 
 export function settingsPath() {

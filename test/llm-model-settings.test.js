@@ -1,0 +1,112 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { renderToString } from 'terlio.js';
+import { createInitialState } from '../src/app/state.js';
+import { ZipflowController } from '../src/app/controller.js';
+import { openModelConfiguration, selectModelChoice, selectModelParameter, settingsModelView } from '../src/app/settings-model.js';
+import { listLocalModelChoices } from '../src/llm/client.js';
+import { DEFAULT_SETTINGS } from '../src/settings/store.js';
+import { renderZipflow } from '../src/ui/render.js';
+import { tempDir } from '../test-support/helpers.js';
+
+function jsonResponse(value, status = 200) {
+  return new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
+}
+
+function catalog() {
+  return {
+    models: [
+      {
+        type: 'llm', key: 'gemma-12b', display_name: 'Gemma 12B', params_string: '12B',
+        max_context_length: 32_000, quantization: { name: 'Q4_K_M' }, loaded_instances: [],
+      },
+      {
+        type: 'llm', key: 'qwen-27b', display_name: 'Qwen 27B', params_string: '27B',
+        max_context_length: 65_536, quantization: { name: 'Q5_K_M' },
+        loaded_instances: [{
+          id: 'qwen-loaded',
+          config: { context_length: 24_000, eval_batch_size: 512, flash_attention: true, offload_kv_cache_to_gpu: true },
+        }],
+      },
+    ],
+  };
+}
+
+async function models() {
+  return listLocalModelChoices('lmstudio', { fetchImpl: async () => jsonResponse(catalog()) });
+}
+
+function settingsState(modelChoices) {
+  const state = createInitialState();
+  state.project = { name: 'fixture', root: '/tmp/fixture' };
+  state.screen = 'settings';
+  state.settings = { ...DEFAULT_SETTINGS, llmProvider: 'lmstudio', llmModel: 'qwen-loaded' };
+  state.settingsPanel = {
+    focus: 'choices', categoryIndex: 2, parameterIndices: { localLlm: 1 }, choiceIndices: {},
+    activeParameterId: 'llmModel', models: modelChoices, modelsProvider: 'lmstudio', modelError: null,
+    loadingModels: false, managedCount: 0, modal: null, modelConfig: null,
+    previous: { screen: 'home', menuItems: [], selectedIndex: 0, status: 'Ready' },
+  };
+  return state;
+}
+
+test('LM Studio model list shows parameter counts and only loaded models show runtime status', async () => {
+  const state = settingsState(await models());
+  const output = renderToString(renderZipflow({ state, width: 120, height: 32 }), { width: 120, height: 32 });
+
+  assert.match(output, /Gemma 12B · 12B · Q4_K_M/);
+  assert.match(output, /Qwen 27B · 27B · Q5_K_M/);
+  assert.match(output, /Loaded · context 24,000/);
+  assert.doesNotMatch(output, /just-in-time/i);
+});
+
+test('unloaded LM Studio models open load configuration and apply selected parameters', async () => {
+  const previousHome = process.env.ZIPFLOW_HOME;
+  const previousFetch = globalThis.fetch;
+  process.env.ZIPFLOW_HOME = await tempDir('zipflow-model-settings-home-');
+  let requestBody = null;
+  try {
+    const modelChoices = await models();
+    const state = settingsState(modelChoices);
+    state.settings.llmModel = '';
+    const controller = new ZipflowController(state);
+    controller.invalidate = () => {};
+    const model = modelChoices.find((item) => item.key === 'gemma-12b');
+    openModelConfiguration(controller, model);
+
+    let view = settingsModelView(state);
+    assert.equal(view.model.paramsString, '12B');
+    assert.equal(view.parameters[0].id, 'contextLength');
+    assert.equal(view.parameters.at(-2).id, 'use-model');
+
+    await selectModelParameter(controller, 0);
+    view = settingsModelView(state);
+    const contextIndex = view.choices.findIndex((item) => item.value === 16_384);
+    assert.notEqual(contextIndex, -1);
+    await selectModelChoice(controller, contextIndex);
+
+    globalThis.fetch = async (url, options) => {
+      assert.equal(url, 'http://127.0.0.1:1234/api/v1/models/load');
+      requestBody = JSON.parse(options.body);
+      return jsonResponse({
+        instance_id: 'gemma-custom',
+        load_time_seconds: 1.2,
+        load_config: { context_length: 16_384, eval_batch_size: 512, flash_attention: true },
+      });
+    };
+
+    view = settingsModelView(state);
+    const useIndex = view.parameters.findIndex((item) => item.id === 'use-model');
+    await selectModelParameter(controller, useIndex);
+
+    assert.equal(requestBody.model, 'gemma-12b');
+    assert.equal(requestBody.context_length, 16_384);
+    assert.equal(requestBody.echo_load_config, true);
+    assert.equal(state.settings.llmModel, 'gemma-custom');
+    assert.equal(state.settingsPanel.focus, 'choices');
+  } finally {
+    globalThis.fetch = previousFetch;
+    if (previousHome === undefined) delete process.env.ZIPFLOW_HOME;
+    else process.env.ZIPFLOW_HOME = previousHome;
+  }
+});

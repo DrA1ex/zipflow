@@ -36,6 +36,35 @@ export async function listLocalModelChoices(provider, {
     .map((id) => ({ id, key: id, label: id, loaded: null, contextLength: null }));
 }
 
+export async function loadLmStudioModel(model, config = {}, {
+  fetchImpl = fetch,
+  timeoutMs = 600_000,
+  apiToken = '',
+  signal = null,
+} = {}) {
+  const definition = requireProvider('lmstudio');
+  const body = compactObject({
+    model,
+    context_length: positiveInteger(config.contextLength),
+    eval_batch_size: positiveInteger(config.evalBatchSize),
+    flash_attention: booleanOrUndefined(config.flashAttention),
+    offload_kv_cache_to_gpu: booleanOrUndefined(config.offloadKvCacheToGpu),
+    num_experts: positiveInteger(config.numExperts),
+    echo_load_config: true,
+  });
+  const response = await request(fetchImpl, `${definition.nativeBaseUrl}/models/load`, {
+    method: 'POST', headers: headers(apiToken), body: JSON.stringify(body),
+  }, timeoutMs, { allowHttpFailure: true, provider: 'lmstudio', signal });
+  if (!response.ok) throw await responseError(response, 'lmstudio');
+  const payload = await response.json();
+  if (!payload.instance_id) throw new Error('LM Studio loaded the model but did not return an instance ID.');
+  return {
+    instanceId: payload.instance_id,
+    loadTimeSeconds: Number(payload.load_time_seconds ?? 0),
+    config: payload.load_config ?? {},
+  };
+}
+
 export async function listLocalModels(provider, options = {}) {
   return (await listLocalModelChoices(provider, options)).map((item) => item.id);
 }
@@ -319,24 +348,49 @@ function nativeMessages(messages) {
 function lmStudioChoices(models) {
   const choices = [];
   for (const item of models.filter((model) => model.type !== 'embedding')) {
+    const base = {
+      key: item.key,
+      displayName: item.display_name || item.key,
+      paramsString: item.params_string ?? null,
+      quantization: item.quantization?.name ?? null,
+      sizeBytes: Number(item.size_bytes ?? 0) || null,
+      maxContextLength: Number(item.max_context_length ?? 0) || null,
+      format: item.format ?? null,
+      reasoningOptions: item.capabilities?.reasoning?.allowed_options ?? [],
+    };
     const loaded = item.loaded_instances ?? [];
     if (loaded.length) {
       for (const instance of loaded) choices.push({
+        ...base,
         id: instance.id,
-        key: item.key,
-        label: `${item.display_name || item.key} · loaded`,
+        label: base.displayName,
         loaded: true,
         contextLength: instance.config?.context_length ?? null,
+        config: instance.config ?? {},
       });
     } else choices.push({
+      ...base,
       id: item.key,
-      key: item.key,
-      label: item.display_name || item.key,
+      label: base.displayName,
       loaded: false,
-      contextLength: item.max_context_length ?? null,
+      contextLength: null,
+      config: {},
     });
   }
   return choices.sort((left, right) => Number(right.loaded) - Number(left.loaded) || left.label.localeCompare(right.label));
+}
+
+function compactObject(value) {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined));
+}
+
+function positiveInteger(value) {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? number : undefined;
+}
+
+function booleanOrUndefined(value) {
+  return typeof value === 'boolean' ? value : undefined;
 }
 
 function parseJsonChunk(data, onEvent) {

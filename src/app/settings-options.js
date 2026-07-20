@@ -2,6 +2,7 @@ import path from 'node:path';
 import { LLM_LANGUAGES, THEME_NAMES } from '../settings/store.js';
 import { displayPath, expandHome } from '../utils/paths.js';
 import { formatByteSize } from '../utils/size.js';
+import { modelConfigSummary } from './settings-model.js';
 
 export function settingsDefinitions(state) {
   const definitions = [
@@ -89,7 +90,7 @@ function localLlmParameters(state) {
   return [
     choiceParameter('llmProvider', 'Provider', providerLabel(state.settings.llmProvider), 'Select the local LLM server implementation.'),
     {
-      ...choiceParameter('llmModel', 'Model', selected?.label ?? (state.settings.llmModel || 'Not selected'), 'Choose a model exposed by the selected provider.'),
+      ...choiceParameter('llmModel', 'Model', selected ? modelDisplayLabel(selected) : (state.settings.llmModel || 'Not selected'), 'Choose a model exposed by the selected provider.'),
       disabled,
       disabledReason: 'Enable Ollama or LM Studio first.',
     },
@@ -158,12 +159,14 @@ function modelChoices(state, parameter) {
   if (panel?.models?.length) {
     result.push(...panel.models.map((model) => ({
       id: `${parameter.settingId}:${model.id}`,
-      settingId: parameter.settingId,
+      action: state.settings.llmProvider === 'lmstudio' ? 'configure-model' : null,
+      model,
+      settingId: state.settings.llmProvider === 'lmstudio' ? null : parameter.settingId,
       value: model.id,
-      label: model.label,
+      label: modelDisplayLabel(model),
       description: model.loaded
-        ? `Already loaded${model.contextLength ? ` · context ${model.contextLength.toLocaleString('en-US')}` : ''}`
-        : 'Available for just-in-time loading',
+        ? `Loaded · ${modelConfigSummary(state, model)}`
+        : modelConfigSummary(state, model),
       selected: state.settings.llmModel === model.id || state.settings.llmModel === model.key,
     })));
   } else result.push({
@@ -171,6 +174,11 @@ function modelChoices(state, parameter) {
     description: panel?.modelError ?? 'Refresh after starting the local LLM server.', disabled: true,
   });
   return result;
+}
+
+function modelDisplayLabel(model) {
+  const details = [model.paramsString, model.quantization].filter(Boolean);
+  return details.length ? `${model.label} · ${details.join(' · ')}` : model.label;
 }
 
 function choiceParameter(settingId, label, value, description) {

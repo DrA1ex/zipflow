@@ -74,3 +74,30 @@ test('completePath completes a single matching archive file', async () => {
   assert.equal(result.value, path.join(root, 'update.zip'));
   assert.equal(result.matches.length, 1);
 });
+
+test('suggestPathEntries returns live directory and ZIP choices without hiding dot-paths', async () => {
+  const { suggestPathEntries } = await import('../src/utils/paths.js');
+  const root = await tempDir('zipflow-path-suggestions-');
+  await mkdir(path.join(root, '.archives'));
+  await mkdir(path.join(root, 'nested'));
+  await writeFile(path.join(root, 'first.zip'), 'zip');
+  await writeFile(path.join(root, 'ignored.txt'), 'text');
+
+  const result = await suggestPathEntries(`${root}${path.sep}`, { extension: '.zip' });
+
+  assert.deepEqual(result.map((item) => item.label), ['.archives/', 'nested/', 'first.zip']);
+  assert.equal(result.find((item) => item.label === 'first.zip').submit, true);
+  assert.equal(result.find((item) => item.label === 'nested/').submit, false);
+});
+
+test('directory suggestions include an explicit action for choosing the current directory', async () => {
+  const { suggestPathEntries } = await import('../src/utils/paths.js');
+  const root = await tempDir('zipflow-path-current-');
+  await mkdir(path.join(root, 'child'));
+
+  const result = await suggestPathEntries(root, { directoriesOnly: true, includeCurrentDirectory: true });
+
+  assert.equal(result[0].label, 'Use this directory');
+  assert.equal(result[0].submit, true);
+  assert.ok(result.some((item) => item.label === 'child/'));
+});

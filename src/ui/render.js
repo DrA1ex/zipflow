@@ -2,10 +2,8 @@ import {
   BottomOverlay,
   Box,
   Column,
-  Modal,
   ProgressBar,
   RequireViewport,
-  Row,
   ScrollPane,
   SelectList,
   Text,
@@ -14,17 +12,19 @@ import {
   WorkspacePane,
   WorkspaceShell,
   color,
+  SuggestionsPanel,
   copyTextToClipboard,
   resolveWorkspaceShellLayout,
   scrollBy,
   themes,
 } from 'terlio.js';
 import { displayPath } from '../utils/paths.js';
-import { settingsViewModel } from '../app/settings-panel.js';
 import { formatDuration, runStep } from './format.js';
 import { renderDiffDocument } from '../diff/hunks.js';
 import { ZIPFLOW_VERSION } from '../version.js';
 import { buildTranscript } from './activity.js';
+import { renderSettings } from './settings-view.js';
+import { settingsViewModel } from '../app/settings-panel.js';
 
 export function renderZipflow({ state, width, height }) {
   const theme = themes[state.settings?.theme] ?? themes.ocean;
@@ -73,10 +73,36 @@ export function renderZipflow({ state, width, height }) {
 function renderWorkflow(state, width, mainHeight, theme) {
   const promptHeight = Math.min(mainHeight - 4, preferredPromptHeight(state));
   const historyHeight = Math.max(4, mainHeight - promptHeight);
-  return Column({ height: mainHeight },
+  const content = Column({ height: mainHeight },
     renderTranscript(state, width, historyHeight, theme),
     renderCurrent(state, width, promptHeight, theme),
   );
+  return renderPathSuggestionsOverlay(state, content, width, mainHeight, promptHeight, theme);
+}
+
+function renderPathSuggestionsOverlay(state, content, width, height, promptHeight, theme) {
+  const completion = state.pathSuggestions;
+  if (!completion?.items?.length || completion.owner === 'settings-modal') return content;
+  const overlayHeight = Math.min(8, Math.max(4, completion.items.length + 2));
+  const suggestions = SuggestionsPanel({
+    columns: Math.max(40, width - 4),
+    height: overlayHeight,
+    theme,
+    suggestions: completion.items,
+    suggestionIndex: completion.selectedIndex,
+    suggestionWindowSize: 6,
+    onSuggestionSelect: (_item, index) => state.dispatch?.({ type: 'path-select', index }),
+  });
+  return BottomOverlay({
+    content,
+    overlay: suggestions,
+    height,
+    bottom: promptHeight,
+    left: 1,
+    right: 1,
+    align: 'stretch',
+    opaque: true,
+  });
 }
 
 function renderTranscript(state, width, height, theme) {
@@ -274,120 +300,6 @@ function formatDiffLine(line, mode, theme) {
   return line.text;
 }
 
-function renderSettings(state, width, height, theme) {
-  const view = settingsViewModel(state);
-  const leftWidth = Math.max(24, Math.min(34, Math.floor(width * 0.3)));
-  const rightWidth = Math.max(26, width - leftWidth - 2);
-  const categories = WorkspacePane({
-    title: ' CATEGORIES ',
-    active: view.focus === 'categories' && !view.modal,
-    height,
-    theme,
-    children: [SelectList({
-      title: 'Settings',
-      items: view.definitions,
-      selectedIndex: view.categoryIndex,
-      windowSize: Math.max(2, height - 6),
-      getLabel: (item) => item.label,
-      getDescription: () => '',
-      wrapItems: false,
-      maxItemLines: 1,
-      theme,
-      pointerId: 'zipflow:settings-categories',
-      onSelect: (_item, index) => state.dispatch?.({ type: 'settings-select-setting', index }),
-    })],
-  });
-  const right = renderSettingsPage(state, view, rightWidth, height, theme);
-  const content = Row({ gap: 2, widths: [leftWidth, rightWidth], height }, categories, right);
-  if (!view.modal) return content;
-  return renderSettingsModal({ content, modal: view.modal, state, width, height, theme });
-}
-
-function renderSettingsPage(state, view, width, height, theme) {
-  const showingChoices = view.direct || view.focus === 'choices';
-  const items = showingChoices ? view.choices : view.parameters;
-  const nestedChoice = showingChoices && !view.direct;
-  const title = nestedChoice
-    ? ` ${view.activeParameter?.label?.toUpperCase() ?? 'SELECT'} `
-    : ` ${view.selectedSetting.label.toUpperCase()} `;
-  const description = nestedChoice
-    ? view.activeParameter?.description ?? ''
-    : view.selectedSetting.description;
-  return WorkspacePane({
-    title,
-    active: view.focus !== 'categories' && !view.modal,
-    height,
-    theme,
-    children: [
-      description ? Text(color(theme, 'textMuted', description), { wrap: true }) : null,
-      description ? Text('') : null,
-      SelectList({
-        title: showingChoices ? 'Options' : 'Parameters',
-        items,
-        selectedIndex: showingChoices ? view.choiceIndex : view.parameterIndex,
-        windowSize: Math.max(2, height - (description ? 8 : 5)),
-        getLabel: (item) => showingChoices ? choiceLabel(state, item) : `${item.label}: ${item.value}`,
-        getDescription: (item) => showingChoices
-          ? item.description ?? ''
-          : item.disabled ? item.disabledReason ?? '' : '',
-        getDisabled: (item) => item.disabled,
-        wrapItems: showingChoices,
-        maxItemLines: showingChoices ? 3 : 1,
-        theme,
-        pointerId: showingChoices ? 'zipflow:settings-choices' : 'zipflow:settings-parameters',
-        onSelect: (_item, index) => state.dispatch?.({
-          type: showingChoices ? 'settings-select-choice' : 'settings-select-parameter',
-          index,
-        }),
-      }),
-    ].filter(Boolean),
-  });
-}
-
-function choiceLabel(state, item) {
-  if (!item.settingId) return item.label;
-  const selected = item.selected || state.settings[item.settingId] === item.value;
-  return `${selected ? '●' : '○'} ${item.label}`;
-}
-
-function renderSettingsModal({ content, modal, state, width, height, theme }) {
-  const modalWidth = Math.max(40, Math.min(68, width - 10));
-  const instructions = modal.field.instructions ?? [];
-  const children = [
-    Text(modal.field.description, { wrap: true }),
-    ...instructions.map((line) => Text(color(theme, 'textMuted', line), { wrap: true })),
-    modal.field.unitHint ? Text(color(theme, 'accent', modal.field.unitHint), { wrap: true }) : null,
-    Text(''),
-    TextEditorView({
-      title: ` ${modal.field.label} `,
-      value: state.editor.value,
-      cursor: state.editor.cursor,
-      width: Math.max(26, modalWidth - 4),
-      height: 3,
-      placeholder: modal.field.placeholder ?? '',
-      lineNumbers: false,
-    }),
-    modal.error ? Text(color(theme, 'danger', modal.error), { wrap: true }) : null,
-  ].filter(Boolean);
-  const overlay = Modal({
-    title: ` Edit ${modal.field.label} `,
-    children,
-    footer: 'Enter save · Esc cancel',
-  });
-  const estimatedHeight = Math.min(height - 2, 9 + instructions.length * 2 + (modal.field.unitHint ? 2 : 0) + (modal.error ? 2 : 0));
-  return BottomOverlay({
-    content,
-    overlay,
-    height,
-    bottom: Math.max(1, Math.floor((height - estimatedHeight) / 2)),
-    left: 2,
-    right: 2,
-    width: modalWidth,
-    align: 'center',
-    opaque: true,
-  });
-}
-
 function screenTitle(state) {
   const titles = {
     boot: 'Starting', home: 'Project', 'new-project': 'Project', 'setup-project': 'Project setup',
@@ -413,7 +325,12 @@ function screenTitle(state) {
 
 function footerHints(state) {
   if (state.screen === 'settings') {
-    if (state.settingsPanel?.modal) return ['Enter save', 'Esc cancel', 'Tab complete path', 'Ctrl+B close settings'];
+    if (state.settingsPanel?.modal) return ['Enter save', 'Esc cancel', 'Tab/Enter complete path', 'Ctrl+B close settings'];
+    if (state.settingsPanel?.focus === 'model-config') {
+      return state.settingsPanel?.modelConfig?.focus === 'choices'
+        ? ['↑/↓ choose', 'Enter apply', 'Esc return to model parameters', 'Ctrl+B close']
+        : ['↑/↓ parameter', 'Enter open/use', 'Esc return to model list', 'Ctrl+B close'];
+    }
     if (state.settingsPanel?.focus === 'choices') {
       const destination = settingsViewModel(state).direct ? 'categories' : 'parameter';
       return ['↑/↓ choose', 'Enter apply', `Esc return to ${destination}`, 'Ctrl+B close'];

@@ -3,7 +3,7 @@ import { handleInputEditorKey } from 'terlio.js';
 import { discoverProject } from '../project/detect.js';
 import { ensureZipflowHome, getZipflowHome, loadWorkflow } from '../workflow/store.js';
 import { loadSettings } from '../settings/store.js';
-import { completePath, displayPath } from '../utils/paths.js';
+import { displayPath } from '../utils/paths.js';
 import { appendMessage, setScreen } from './state.js';
 import {
   activateSetup, backSetup, beginSetup, handleSetupShortcut, handlesSetupScreen, submitSetupEditor,
@@ -12,7 +12,8 @@ import {
   activateRun, backRun, beginArchiveInput, handleRunShortcut, handlesRunScreen, inspectArchivePath, showLastRun, submitRunEditor,
 } from './run-flow.js';
 import {
-  closeSettings, handleSettingsKey, isSettingsScreen, openSettings, selectChoice, selectParameter, selectSetting,
+  closeSettings, handleSettingsKey, isSettingsScreen, openSettings, selectChoice, selectModelSettingChoice,
+  selectModelSettingParameter, selectParameter, selectSetting,
 } from './settings-panel.js';
 import { projectSummary } from '../ui/format.js';
 import { toggleActivityBlockAtScroll } from '../ui/activity.js';
@@ -22,6 +23,10 @@ import {
   activateExport, backExport, beginCreateZip, handleExportShortcut, handlesExportScreen, submitExportEditor,
 } from './export-flow.js';
 import { activateHistory, backHistory, handlesHistoryScreen, repeatLastArchive, showRunHistory } from './history-flow.js';
+import {
+  acceptPathSuggestion, clearPathSuggestions, isPathEditorScreen, movePathSuggestion,
+  refreshPathSuggestions, selectPathSuggestion,
+} from './path-suggestions.js';
 
 export class ZipflowController {
   constructor(state) {
@@ -104,6 +109,15 @@ export class ZipflowController {
     if (action.type === 'settings-select-setting') return selectSetting(this, action.index);
     if (action.type === 'settings-select-parameter') return selectParameter(this, action.index);
     if (action.type === 'settings-select-choice') return selectChoice(this, action.index);
+    if (action.type === 'settings-model-select-parameter') return selectModelSettingParameter(this, action.index);
+    if (action.type === 'settings-model-select-choice') return selectModelSettingChoice(this, action.index);
+    if (action.type === 'path-select') {
+      selectPathSuggestion(this.state, action.index);
+      if (this.state.pathSuggestions?.owner === 'settings-modal') {
+        await handleSettingsKey(this, { name: 'enter' });
+      } else await acceptPathSuggestion(this, { submit: () => this.submitCurrentEditor() });
+      return;
+    }
     if (action.type === 'activate-index') {
       this.state.selectedIndex = action.index;
       await this.activateSelected();
@@ -166,6 +180,7 @@ export class ZipflowController {
   }
 
   showMenu(screen, items, status = null, selectedIndex = null, intro = []) {
+    clearPathSuggestions(this.state);
     let nextIndex = selectedIndex;
     if (nextIndex === null && this.state.screen === screen) {
       const previousId = this.state.menuItems[this.state.selectedIndex]?.id;
@@ -182,6 +197,8 @@ export class ZipflowController {
     this.state.editorContext = context;
     setScreen(this.state, screen, { items: [], status: context.label });
     this.invalidate();
+    if (isPathEditorScreen(screen)) void refreshPathSuggestions(this);
+    else clearPathSuggestions(this.state);
   }
 
   message(title, lines = [], tone = 'info') {
@@ -254,31 +271,33 @@ export class ZipflowController {
 
   async handleEditorKey(key) {
     if (key.name === 'escape') return this.back();
-    const pathEditor = ['project-path-input', 'archive-input'].includes(this.state.screen);
-    if (key.name === 'tab' && pathEditor) {
-      const completion = await completePath(this.state.editor.value, {
-        cwd: this.state.project?.root ?? process.cwd(),
-        directoriesOnly: this.state.screen === 'project-path-input',
-        extension: this.state.screen === 'archive-input' ? '.zip' : null,
-      });
-      if (completion.matches.length) {
-        this.state.editor.set(completion.value);
-        this.setStatus(completion.matches.length === 1 ? 'Path completed' : `${completion.matches.length} matches`);
-      } else this.setStatus('No path matches');
-      return;
+    const pathEditor = isPathEditorScreen(this.state.screen);
+    if (pathEditor && (key.name === 'up' || key.name === 'down') && this.state.pathSuggestions?.items?.length) {
+      movePathSuggestion(this.state, key.name === 'up' ? -1 : 1);
+      return this.invalidate();
+    }
+    if (pathEditor && (key.name === 'tab' || key.name === 'enter') && this.state.pathSuggestions?.items?.length) {
+      await acceptPathSuggestion(this, { submit: () => this.submitCurrentEditor() });
+      return this.invalidate();
     }
     if (key.name === 'enter' && key.ctrl && this.state.editorContext?.multiline) {
       handleInputEditorKey(this.state.editor, key, { multiline: true });
       return this.invalidate();
     }
     if (key.name === 'enter') {
-      if (handlesSetupScreen(this.state.screen)) await submitSetupEditor(this);
-      else if (handlesRunScreen(this.state.screen)) await submitRunEditor(this);
-      else if (handlesExportScreen(this.state.screen)) await submitExportEditor(this);
+      await this.submitCurrentEditor();
       return this.invalidate();
     }
     handleInputEditorKey(this.state.editor, key, { multiline: Boolean(this.state.editorContext?.multiline) });
+    if (pathEditor) await refreshPathSuggestions(this);
     this.invalidate();
+  }
+
+  async submitCurrentEditor() {
+    if (handlesSetupScreen(this.state.screen)) return submitSetupEditor(this);
+    if (handlesRunScreen(this.state.screen)) return submitRunEditor(this);
+    if (handlesExportScreen(this.state.screen)) return submitExportEditor(this);
+    return false;
   }
 
   async back() {

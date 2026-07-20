@@ -4,9 +4,13 @@ import { listLocalModelChoices, providerDefinition } from '../llm/client.js';
 import { loadManagedHistory, resetManagedHistory } from '../history/managed.js';
 import { saveSettings } from '../settings/store.js';
 import { ensureDir } from '../utils/fs.js';
-import { completePath, expandHome } from '../utils/paths.js';
-import { parseByteSize } from '../utils/size.js';
+import { expandHome } from '../utils/paths.js';
 import { setScreen } from './state.js';
+import {
+  handleModelSettingsKey, openModelConfiguration, selectModelChoice, selectModelParameter, settingsModelView,
+} from './settings-model.js';
+import { clearPathSuggestions, movePathSuggestion, refreshPathSuggestions, selectPathSuggestion } from './path-suggestions.js';
+import { validateSettingValue } from './settings-validation.js';
 import {
   settingsChoices, settingsDefinitions, settingsEditorValue, settingsFieldDefinition, settingsParameters,
 } from './settings-options.js';
@@ -37,6 +41,7 @@ export async function openSettings(controller) {
     loadingModels: false,
     managedCount: history.paths.length,
     modal: null,
+    modelConfig: null,
   };
   setScreen(state, 'settings', { status: 'Global settings' });
   controller.invalidate();
@@ -49,6 +54,7 @@ export function closeSettings(controller) {
   if (!panel) return;
   const { previous } = panel;
   controller.state.settingsPanel = null;
+  clearPathSuggestions(controller.state);
   setScreen(controller.state, previous.screen, {
     items: previous.menuItems,
     selectedIndex: previous.selectedIndex,
@@ -61,6 +67,7 @@ export function backSettingsEditor(controller) {
   const panel = controller.state.settingsPanel;
   if (!panel?.modal) return;
   panel.modal = null;
+  clearPathSuggestions(controller.state);
   controller.state.status = currentDefinition(controller.state).label;
   controller.invalidate();
 }
@@ -75,6 +82,7 @@ export async function submitSettingsEditor(controller) {
     state.settings = await saveSettings({ ...state.settings, [modal.field.id]: value });
     if (modal.field.id === 'llmApiToken') resetModelCache(state.settingsPanel);
     state.settingsPanel.modal = null;
+    clearPathSuggestions(state);
     restoreParameter(state, modal.returnParameterId);
     state.status = `${modal.field.label} saved`;
     controller.invalidate();
@@ -91,6 +99,7 @@ export async function handleSettingsKey(controller, key) {
   const panel = controller.state.settingsPanel;
   if (!panel) return false;
   if (panel.modal) return handleModalKey(controller, key);
+  if (panel.focus?.startsWith('model-config')) return handleModelSettingsKey(controller, key);
   if (key.name === 'escape' || key.name === 'left') return handleBack(controller);
   if (key.name === 'up' || key.name === 'down') {
     const delta = key.name === 'up' ? -1 : 1;
@@ -133,6 +142,14 @@ export async function selectChoice(controller, index) {
   await activateChoice(controller);
 }
 
+export async function selectModelSettingParameter(controller, index) {
+  return selectModelParameter(controller, index);
+}
+
+export async function selectModelSettingChoice(controller, index) {
+  return selectModelChoice(controller, index);
+}
+
 export function settingsViewModel(state) {
   const definitions = settingsDefinitions(state);
   const selectedSetting = currentDefinition(state);
@@ -154,6 +171,7 @@ export function settingsViewModel(state) {
     parameterIndex,
     choiceIndex: currentChoiceIndex(state, choices, activeParameter),
     modal: state.settingsPanel?.modal ?? null,
+    modelConfig: settingsModelView(state),
   };
 }
 
@@ -222,6 +240,10 @@ async function activateChoice(controller) {
   const index = currentChoiceIndex(state, choices, parameter);
   const option = choices[index];
   if (!parameter || !option || option.disabled) return true;
+  if (option.action === 'configure-model') {
+    openModelConfiguration(controller, option.model);
+    return true;
+  }
   if (option.action === 'refresh-models') {
     await refreshModels(controller);
     const refreshed = currentChoices(state);
@@ -275,21 +297,23 @@ async function handleModalKey(controller, key) {
     backSettingsEditor(controller);
     return true;
   }
-  if (key.name === 'tab' && modal.field.path) {
-    const completion = await completePath(state.editor.value, {
-      cwd: state.project?.root ?? process.cwd(),
-      directoriesOnly: true,
-    });
-    if (completion.matches.length) {
-      state.editor.set(completion.value);
-      state.status = completion.matches.length === 1 ? 'Path completed' : `${completion.matches.length} matches`;
-    } else state.status = 'No path matches';
+  if (modal.field.path && (key.name === 'up' || key.name === 'down') && state.pathSuggestions?.items?.length) {
+    movePathSuggestion(state, key.name === 'up' ? -1 : 1);
     controller.invalidate();
+    return true;
+  }
+  if (modal.field.path && ['tab', 'enter'].includes(key.name) && state.pathSuggestions?.items?.length) {
+    selectPathSuggestion(state, state.pathSuggestions.selectedIndex);
+    const item = state.pathSuggestions.items[state.pathSuggestions.selectedIndex];
+    state.editor.set(item.insert);
+    if (item.submit) return submitSettingsEditor(controller);
+    await refreshPathSuggestions(controller, { settingsModal: true });
     return true;
   }
   if (key.name === 'enter') return submitSettingsEditor(controller);
   modal.error = null;
   handleInputEditorKey(state.editor, key, { multiline: false });
+  if (modal.field.path) await refreshPathSuggestions(controller, { settingsModal: true });
   controller.invalidate();
   return true;
 }
@@ -301,6 +325,7 @@ function openSettingModal(controller, fieldId, returnParameterId) {
   controller.state.editor.set(settingsEditorValue(controller.state, fieldId));
   controller.state.status = field.label;
   controller.invalidate();
+  if (field.path) void refreshPathSuggestions(controller, { settingsModal: true });
 }
 
 async function refreshModels(controller, { quiet = false } = {}) {
@@ -343,28 +368,6 @@ async function ensureModels(controller) {
   if (state.settings.llmProvider !== 'disabled'
     && panel.modelsProvider !== state.settings.llmProvider
     && !panel.loadingModels) await refreshModels(controller, { quiet: true });
-}
-
-async function validateSettingValue(field, entered) {
-  if (field.id === 'archiveDirectory') {
-    if (!entered) throw new Error('Enter an archive directory.');
-    const absolute = path.resolve(expandHome(entered));
-    await ensureDir(absolute);
-    return entered;
-  }
-  if (field.id === 'archiveRetentionDays') {
-    if (!/^\d+$/.test(entered)) throw new Error('Enter retention as a whole number of days.');
-    const value = Number(entered);
-    if (value > 36_500) throw new Error('Retention cannot exceed 36,500 days.');
-    return value;
-  }
-  if (field.id === 'archiveMaxBytes') {
-    const value = parseByteSize(entered);
-    if (value > Number.MAX_SAFE_INTEGER) throw new Error('Archive size limit is too large.');
-    return value;
-  }
-  if (field.id === 'llmApiToken') return entered;
-  throw new Error(`Unsupported setting: ${field.id}`);
 }
 
 function currentDefinition(state) {

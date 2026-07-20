@@ -47,7 +47,7 @@ Builds bounded per-file comparisons for review. Text files produce a shared line
 
 Builds declarative Terlio views from application state.
 
-Rendering does not perform project mutations. Global settings use a stable two-panel category/page layout. Direct single-choice categories render their options immediately; multi-parameter categories render compact value rows and move explanatory text into the nested choice view. Nested selection replaces only the right pane and retains category, parameter, and current-value positions. Project discovery is stored as a framed Activity message rather than a permanent project panel. Activity uses Terlio's component-level text selection; `Ctrl+T` is the explicit escape hatch for native terminal selection elsewhere. Pointer callbacks dispatch the same actions used by keyboard input. The selected Terlio semantic theme is resolved from global settings on every render, so theme changes apply immediately.
+Rendering does not perform project mutations. Global settings use a stable two-panel category/page layout. Direct single-choice categories render their options immediately; multi-parameter categories render compact value rows and move explanatory text into the nested choice view. Nested selection replaces only the right pane and retains category, parameter, and current-value positions. LM Studio model selection can enter a dedicated right-pane configuration state without replacing the category pane; loaded instances are read-only while unloaded models persist and apply explicit native load parameters. Project discovery is stored as a framed Activity message rather than a permanent project panel. Activity uses Terlio's component-level text selection; `Ctrl+T` is the explicit escape hatch for native terminal selection elsewhere. Pointer callbacks dispatch the same actions used by keyboard input. The selected Terlio semantic theme is resolved from global settings on every render, so theme changes apply immediately.
 
 ### `src/settings`
 
@@ -55,7 +55,7 @@ Persists versioned global application settings in `~/.zipflow/settings.json`. Se
 
 ### `src/llm`
 
-Uses provider-specific adapters. LM Studio model metadata comes from the native `/api/v1/models` endpoint and generation uses only the native `/api/v1/chat` stream, including model-load, prompt-processing, reasoning, message, and error events. Ollama model metadata comes from `/api/ps` and `/api/show`; generation uses its OpenAI-compatible chat-completion stream. Loaded LM Studio instances are resolved before generation and addressed by instance ID without overriding their context configuration. API tokens are applied only as authorization headers and are never emitted through Activity events. An `AbortSignal` is threaded through metadata, request, and SSE consumption so `Esc` cancels only LLM generation while the archive plan continues.
+Uses provider-specific adapters. LM Studio model metadata comes from the native `/api/v1/models` endpoint, including parameter counts and loaded-instance configuration. `settings-model.js` persists optional per-model load parameters and invokes `/api/v1/models/load` only for an unloaded selection; generation uses only the native `/api/v1/chat` stream, including model-load, prompt-processing, reasoning, message, and error events. Ollama model metadata comes from `/api/ps` and `/api/show`; generation uses its OpenAI-compatible chat-completion stream. Loaded LM Studio instances are resolved before generation and addressed by instance ID without overriding their context configuration. API tokens are applied only as authorization headers and are never emitted through Activity events. An `AbortSignal` is threaded through metadata, request, and SSE consumption so `Esc` cancels only LLM generation while the archive plan continues.
 
 `model-info.js` resolves the active or configured context size with a conservative fallback. `patch-budget.js` reserves context for instructions and output, keeps a complete changed-file manifest, and distributes available diff hunks across files. Context overflow and local compute-memory errors trigger progressively smaller-patch retries. `diagnostics.js` stores a bounded, sanitized request/result/error record in the run directory.
 
@@ -125,7 +125,7 @@ Persists JSON and copy-friendly text reports, including preserved files, archive
 
 ### `src/utils`
 
-Contains filesystem, hashing, paths, identifiers, and child-process lifecycle helpers.
+Contains filesystem, hashing, paths, identifiers, and child-process lifecycle helpers. Path suggestion discovery treats an existing entered directory as a browse root, preserves ordinary dot-paths, and returns rich file/directory actions consumed by an overlay state machine in `app/path-suggestions.js`.
 
 ## Setup lifecycle
 
@@ -182,6 +182,7 @@ archive input
   -> persisted changes.patch
   -> optional LLM structure guard or deep patch review
   -> readable streamed local LLM analysis using path, patch, or file-batch delivery
+  -> immediate durable verdict and summary in Activity before commit-message selection
   -> deterministic archive age/snapshot shrink review
   -> optional reasoning-draft formatting pass
   -> copyable Activity plan
