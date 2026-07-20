@@ -1,10 +1,13 @@
 import path from 'node:path';
+import { stat } from 'node:fs/promises';
+import { copyTextToClipboard } from 'terlio.js';
 import { collectExportPaths, listExportTopLevel } from '../export/candidates.js';
 import { createProjectArchive } from '../export/create.js';
 import { displayPath, parseEnteredPath } from '../utils/paths.js';
+import { runProcess } from '../utils/process.js';
 
 export function handlesExportScreen(screen) {
-  return ['export-mode', 'export-select', 'export-path', 'export-running', 'export-complete'].includes(screen);
+  return ['export-mode', 'export-select', 'export-preview', 'export-files', 'export-path', 'export-running', 'export-complete'].includes(screen);
 }
 
 export function beginCreateZip(controller) {
@@ -25,16 +28,31 @@ export async function activateExport(controller, itemId) {
     if (!['tracked', 'nonignored', 'interactive', 'all'].includes(mode)) return;
     state.exportDraft.mode = mode;
     if (mode === 'interactive') return prepareInteractiveSelection(controller);
-    return showExportPath(controller);
+    return prepareExportPreview(controller);
   }
   if (state.screen === 'export-select') {
     if (itemId.startsWith('export-item:')) return toggleExportItem(controller, itemId.slice(12));
     if (itemId === 'export-select-all') return selectAll(controller, true);
     if (itemId === 'export-select-none') return selectAll(controller, false);
-    if (itemId === 'export-select-continue') return showExportPath(controller);
+    if (itemId === 'export-select-continue') return prepareExportPreview(controller);
     if (itemId === 'export-cancel') return controller.showHome();
   }
+  if (state.screen === 'export-preview') {
+    if (itemId === 'export-choose-path') return showExportPath(controller);
+    if (itemId === 'export-review-files') return showExportFiles(controller);
+    if (itemId === 'export-change-mode') return showExportMode(controller);
+    if (itemId === 'export-cancel') return controller.showHome();
+  }
+  if (state.screen === 'export-files') {
+    if (itemId === 'export-files-back') return showExportPreview(controller);
+    if (itemId === 'export-choose-path') return showExportPath(controller);
+  }
   if (state.screen === 'export-complete') {
+    if (itemId === 'export-copy-path') {
+      const copied = await copyTextToClipboard(state.exportDraft.result.outputPath, { output: controller.runtime?.output });
+      return controller.setStatus(copied ? 'ZIP path copied' : 'Clipboard transfer unavailable');
+    }
+    if (itemId === 'export-open-folder') return openArchiveLocation(controller);
     if (itemId === 'export-again') return beginCreateZip(controller);
     if (itemId === 'export-home') return controller.showHome();
   }
@@ -67,9 +85,9 @@ export function backExport(controller) {
   const screen = controller.state.screen;
   if (screen === 'export-mode') return controller.showHome();
   if (screen === 'export-select') return showExportMode(controller);
-  if (screen === 'export-path') {
-    return controller.state.exportDraft.mode === 'interactive' ? showInteractiveSelection(controller) : showExportMode(controller);
-  }
+  if (screen === 'export-preview') return controller.state.exportDraft.mode === 'interactive' ? showInteractiveSelection(controller) : showExportMode(controller);
+  if (screen === 'export-files') return showExportPreview(controller);
+  if (screen === 'export-path') return showExportPreview(controller);
   if (screen === 'export-complete') return controller.showHome();
 }
 
@@ -125,6 +143,59 @@ function selectAll(controller, enabled) {
   showInteractiveSelection(controller);
 }
 
+async function prepareExportPreview(controller) {
+  const { state } = controller;
+  const paths = await collectExportPaths({
+    project: state.project,
+    mode: state.exportDraft.mode,
+    selectedRoots: [...state.exportDraft.selectedRoots],
+  });
+  let totalSize = 0;
+  for (const relative of paths) totalSize += (await stat(path.join(state.project.root, relative))).size;
+  state.exportDraft.paths = paths;
+  state.exportDraft.totalSize = totalSize;
+  return showExportPreview(controller);
+}
+
+function showExportPreview(controller) {
+  const draft = controller.state.exportDraft;
+  controller.showMenu('export-preview', [
+    { id: 'export-choose-path', label: 'Choose output path and create ZIP', description: draft.outputPath },
+    { id: 'export-review-files', label: 'Review included files', description: `${draft.paths.length} files selected` },
+    { id: 'export-change-mode', label: 'Change export mode', description: modeLabel(draft.mode) },
+    { id: 'export-cancel', label: 'Cancel' },
+  ], 'Review ZIP contents', 0, [
+    `${draft.paths.length} files · ${formatBytes(draft.totalSize)}`,
+    `Mode: ${modeLabel(draft.mode)}`,
+    '.git/ and .zipflow/ remain protected in every export mode.',
+  ]);
+}
+
+function showExportFiles(controller) {
+  const draft = controller.state.exportDraft;
+  const items = draft.paths.map((relative) => ({ id: `export-file:${relative}`, label: relative, description: 'Included in this ZIP' }));
+  items.push(
+    { id: 'export-files-back', label: 'Back to ZIP preview' },
+    { id: 'export-choose-path', label: 'Choose output path and create ZIP' },
+  );
+  controller.showMenu('export-files', items, 'Included files', null, [
+    `${draft.paths.length} files · ${formatBytes(draft.totalSize)}`,
+    'This list is read-only. Return to the previous step to change the export mode or interactive selection.',
+  ]);
+}
+
+async function openArchiveLocation(controller) {
+  const target = controller.state.exportDraft.result.outputPath;
+  try {
+    if (process.platform === 'darwin') await runProcess('open', ['-R', target]);
+    else if (process.platform === 'linux') await runProcess('xdg-open', [path.dirname(target)]);
+    else return controller.setStatus('Opening the containing folder is not supported on this platform.');
+    controller.setStatus('Opened archive location');
+  } catch (error) {
+    controller.message('Could not open archive location', [error.message], 'warning');
+  }
+}
+
 function showExportPath(controller) {
   const draft = controller.state.exportDraft;
   controller.showEditor('export-path', {
@@ -146,7 +217,7 @@ async function createArchive(controller) {
   state.progress = { value: 0, total: 1, detail: 'Collecting files' };
   controller.invalidate();
   try {
-    const paths = await collectExportPaths({
+    const paths = state.exportDraft.paths ?? await collectExportPaths({
       project: state.project,
       mode: state.exportDraft.mode,
       selectedRoots: [...state.exportDraft.selectedRoots],
@@ -169,9 +240,15 @@ async function createArchive(controller) {
       `Mode: ${modeLabel(state.exportDraft.mode)}`,
     ], 'success');
     controller.showMenu('export-complete', [
-      { id: 'export-again', label: 'Create another ZIP' },
+      { id: 'export-copy-path', label: 'Copy ZIP path', description: displayPath(result.outputPath) },
+      { id: 'export-open-folder', label: 'Open containing folder', description: 'Reveal the created archive in the system file manager' },
       { id: 'export-home', label: 'Return to project' },
-    ], 'Archive ready');
+      { id: 'export-again', label: 'Create another ZIP' },
+    ], 'Archive ready', 0, [
+      `${result.fileCount} files · ${formatBytes(result.size)}`,
+      `Mode: ${modeLabel(state.exportDraft.mode)}`,
+      displayPath(result.outputPath),
+    ]);
   } catch (error) {
     state.busy = false;
     controller.message('Could not create ZIP archive', [error.message], 'error');

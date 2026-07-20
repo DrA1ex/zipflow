@@ -14,6 +14,18 @@ const RESPONSE_SCHEMA = {
   required: ['summary', 'commitMessage'],
 };
 
+const REVIEW_RESPONSE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    ...RESPONSE_SCHEMA.properties,
+    assessment: { type: 'string', enum: ['suitable', 'suspicious', 'unsuitable'] },
+    confidence: { type: 'string', enum: ['low', 'medium', 'high'] },
+    reasons: { type: 'array', minItems: 1, maxItems: 5, items: { type: 'string' } },
+  },
+  required: ['summary', 'commitMessage', 'assessment', 'confidence', 'reasons'],
+};
+
 const MAX_REPAIR_DRAFT_CHARS = 40_000;
 const GENERATION_ATTEMPTS = 3;
 
@@ -25,14 +37,18 @@ export async function generateChangeDescription({ settings, project, plan, patch
   if (!isLocalLlmEnabled(settings)) return null;
   const notify = options.onEvent ?? (() => {});
   const language = settings.llmLanguage || 'English';
-  const system = buildSystemPrompt(language);
+  const reviewArchive = settings.llmArchiveReview === 'patch';
+  const responseSchema = reviewArchive ? REVIEW_RESPONSE_SCHEMA : RESPONSE_SCHEMA;
+  const system = buildSystemPrompt(language, reviewArchive);
   const fixedUser = buildUserPrompt(project, plan, '');
   notify({ type: 'phase', phase: 'model-info', label: 'Reading the selected model context limit' });
   const profile = await getLocalModelProfile(settings.llmProvider, settings.llmModel, {
     fetchImpl: options.fetchImpl,
     timeoutMs: options.metadataTimeoutMs ?? 10_000,
     apiToken: settings.llmApiToken,
+    signal: options.signal,
   });
+  notify({ type: 'model-profile', profile });
   const budget = createPromptBudget({
     contextLength: profile.contextLength,
     fixedPrompt: `${system}\n${fixedUser}`,
@@ -55,6 +71,8 @@ export async function generateChangeDescription({ settings, project, plan, patch
     try {
       first = await requestCompletion({
         settings,
+        model: profile.requestModel,
+        loadedModel: profile.loadedModel,
         messages: [
           { role: 'system', content: system },
           { role: 'user', content: buildUserPrompt(project, plan, fitted.content) },
@@ -62,6 +80,7 @@ export async function generateChangeDescription({ settings, project, plan, patch
         maxTokens: budget.outputTokens,
         contextLength: budget.effectiveContextTokens,
         reasoningOffSupported: profile.reasoningOffSupported,
+        responseSchema,
       }, {
         ...options,
         onEvent: (event) => notify({ ...event, stage: 'generation' }),
@@ -82,7 +101,7 @@ export async function generateChangeDescription({ settings, project, plan, patch
     throw lastError;
   }
 
-  const direct = tryStructured(first.content) ?? tryStructured(first.reasoning);
+  const direct = tryStructured(first.content, reviewArchive) ?? tryStructured(first.reasoning, reviewArchive);
   if (direct) return resultWithDiagnostics(direct, first, { profile, budget, attempts, repaired: false });
 
   notify({ type: 'phase', phase: 'repairing', label: 'Formatting the model draft as structured JSON' });
@@ -91,13 +110,16 @@ export async function generateChangeDescription({ settings, project, plan, patch
     try {
       const repaired = await requestCompletion({
         settings,
+        model: profile.requestModel,
+        loadedModel: profile.loadedModel,
         maxTokens: 512,
         contextLength: Math.min(budget.effectiveContextTokens, 8_192),
         reasoningOffSupported: profile.reasoningOffSupported,
+        responseSchema,
         messages: [
           {
             role: 'system',
-            content: repairPrompt(language),
+            content: repairPrompt(language, reviewArchive),
           },
           { role: 'user', content: `DRAFT START\n${draft}\nDRAFT END` },
         ],
@@ -105,7 +127,7 @@ export async function generateChangeDescription({ settings, project, plan, patch
         ...options,
         onEvent: (event) => notify({ ...event, stage: 'repair' }),
       });
-      const parsed = tryStructured(repaired.content) ?? tryStructured(repaired.reasoning);
+      const parsed = tryStructured(repaired.content, reviewArchive) ?? tryStructured(repaired.reasoning, reviewArchive);
       if (parsed) {
         return resultWithDiagnostics(parsed, repaired, {
           profile, budget, attempts, repaired: true, originalFinishReason: first.finishReason,
@@ -140,14 +162,16 @@ export async function generateChangeDescription({ settings, project, plan, patch
   throw error;
 }
 
-export function parseResponse(content) {
+export function parseResponse(content, { requireAssessment = false } = {}) {
   const parsed = parseJsonObject(content);
   const summary = normalizeSummary(parsed.summary ?? parsed.changeSummary ?? parsed.change_summary);
   const commitMessage = normalizeCommitMessage(
     parsed.commitMessage ?? parsed.commit_message ?? parsed.commit ?? parsed.message,
   );
   if (!summary.length || !commitMessage) throw new Error('Local LLM response is missing summary or commitMessage.');
-  return { summary, commitMessage };
+  const assessment = normalizeAssessment(parsed);
+  if (requireAssessment && !assessment) throw new Error('Local LLM response is missing archive assessment fields.');
+  return { summary, commitMessage, ...(assessment ?? {}) };
 }
 
 export function extractUnstructured(content) {
@@ -171,15 +195,23 @@ export function extractUnstructured(content) {
   return { summary: [...new Set(summary)].slice(0, 5), commitMessage: normalizeCommitMessage(commitMessage) };
 }
 
-function buildSystemPrompt(language) {
+function buildSystemPrompt(language, reviewArchive = false) {
   return [
     'You analyze source-code patches for a developer workflow tool.',
-    'Return only one JSON object with exactly these keys: {"summary":["line"],"commitMessage":"subject"}.',
+    reviewArchive
+      ? 'Return only one JSON object with exactly summary, commitMessage, assessment, confidence, and reasons.'
+      : 'Return only one JSON object with exactly summary and commitMessage.',
     'Do not use Markdown fences, commentary, or extra keys. Do not reveal internal reasoning or repeat the patch.',
     `Write both summary and commitMessage in ${language}.`,
     'The summary must contain 1-5 concise factual lines. Mention behavior, architecture, tests, or risks only when visible in the patch.',
     'The commit message must be ready for git commit: imperative subject, preferably under 72 characters, with an optional concise body separated by a blank line.',
     'Do not invent changes, test results, issue numbers, or motivations not supported by the patch.',
+    ...(reviewArchive ? [
+      'Assess whether the archive changes plausibly belong to this project. Use assessment suitable, suspicious, or unsuitable.',
+      'Use unsuitable only for strong evidence of a wrong archive or unrelated project. Use suspicious for ambiguous, destructive, or unexpectedly broad changes.',
+      'Write 1-5 concise reasons in the requested language; assessment and confidence remain English enum values.',
+      'This is advisory: do not claim that tests passed or that deterministic safety checks can be skipped.',
+    ] : []),
   ].join(' ');
 }
 
@@ -188,25 +220,56 @@ function buildUserPrompt(project, plan, patch) {
     `Project: ${project.name}`,
     `Project types: ${(project.labels ?? []).join(', ') || 'unknown'}`,
     `Plan counts: created=${plan.counts.created}, updated=${plan.counts.updated}, deleted=${plan.counts.deleted}`,
+    'Changed paths:', ...changePathLines(plan),
     '', 'PATCH START', patch, 'PATCH END',
   ].join('\n');
 }
 
-function repairPrompt(language) {
+function normalizeAssessment(parsed) {
+  const assessment = String(parsed.assessment ?? parsed.verdict ?? '').toLowerCase();
+  const confidence = String(parsed.confidence ?? '').toLowerCase();
+  const reasons = Array.isArray(parsed.reasons)
+    ? parsed.reasons.map((line) => String(line).trim()).filter(Boolean).slice(0, 5)
+    : [];
+  if (!['suitable', 'suspicious', 'unsuitable'].includes(assessment) || !reasons.length) return null;
+  return {
+    assessment,
+    confidence: ['low', 'medium', 'high'].includes(confidence) ? confidence : 'low',
+    reasons,
+  };
+}
+
+function changePathLines(plan) {
+  const values = [
+    ...(plan.created ?? []).map((item) => `CREATE ${item.path}`),
+    ...(plan.updated ?? []).map((item) => `UPDATE ${item.path}`),
+    ...(plan.deleted ?? []).map((item) => `DELETE ${item.path}`),
+  ];
+  const limit = 5_000;
+  const selected = values.slice(0, limit);
+  if (values.length > limit) selected.push(`… ${values.length - limit} additional changed paths omitted`);
+  return selected.length ? selected : ['(none)'];
+}
+
+function repairPrompt(language, reviewArchive = false) {
   return [
-    'Convert the supplied draft into one JSON object with exactly summary and commitMessage.',
+    reviewArchive
+      ? 'Convert the supplied draft into one JSON object with exactly summary, commitMessage, assessment, confidence, and reasons.'
+      : 'Convert the supplied draft into one JSON object with exactly summary and commitMessage.',
     'Return JSON only. Do not add analysis, Markdown, or extra keys.',
     `Write summary and commitMessage in ${language}.`,
     'Keep the summary factual and concise. The commit message must be ready for git commit.',
+    ...(reviewArchive ? ['Preserve the draft archive verdict using assessment suitable, suspicious, or unsuitable, confidence low/medium/high, and 1-5 reasons.'] : []),
   ].join(' ');
 }
 
-function requestCompletion({ settings, messages, maxTokens, contextLength, reasoningOffSupported }, options) {
+function requestCompletion({ settings, model, loadedModel, messages, maxTokens, contextLength, reasoningOffSupported, responseSchema }, options) {
   return createLocalCompletion({
     provider: settings.llmProvider,
-    model: settings.llmModel,
+    model: model || settings.llmModel,
+    loadedModel: Boolean(loadedModel),
     messages,
-    responseSchema: RESPONSE_SCHEMA,
+    responseSchema: responseSchema ?? RESPONSE_SCHEMA,
     maxTokens,
     apiToken: settings.llmApiToken,
     contextLength,
@@ -214,9 +277,9 @@ function requestCompletion({ settings, messages, maxTokens, contextLength, reaso
   }, options);
 }
 
-function tryStructured(content) {
+function tryStructured(content, requireAssessment = false) {
   try {
-    return parseResponse(content);
+    return parseResponse(content, { requireAssessment });
   } catch {
     return null;
   }

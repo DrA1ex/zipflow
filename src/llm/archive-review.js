@@ -1,0 +1,219 @@
+import path from 'node:path';
+import { walkFiles } from '../utils/fs.js';
+import { createPathMatcher, normalizeRelativePath } from '../plan/matcher.js';
+import { createRootGitignoreMatcher } from '../git/ignore.js';
+import { listIgnoredPaths } from '../git/repository.js';
+import { isProtectedProjectPath } from '../archive/protected.js';
+import { createLocalCompletion } from './client.js';
+import { getLocalModelProfile } from './model-info.js';
+
+const REVIEW_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    assessment: { type: 'string', enum: ['suitable', 'suspicious', 'unsuitable'] },
+    confidence: { type: 'string', enum: ['low', 'medium', 'high'] },
+    reasons: { type: 'array', minItems: 1, maxItems: 5, items: { type: 'string' } },
+  },
+  required: ['assessment', 'confidence', 'reasons'],
+};
+
+const MAX_TREE_ENTRIES = 6_000;
+
+export async function reviewArchiveStructure({ settings, project, workflow, extracted, plan }, options = {}) {
+  const notify = options.onEvent ?? (() => {});
+  notify({ type: 'phase', phase: 'tree-scan', label: 'Comparing project and archive structure' });
+  const comparison = await createTreeComparison({ project, workflow, extracted });
+  const profile = await getLocalModelProfile(settings.llmProvider, settings.llmModel, {
+    fetchImpl: options.fetchImpl,
+    timeoutMs: options.metadataTimeoutMs ?? 10_000,
+    apiToken: settings.llmApiToken,
+    signal: options.signal,
+  });
+  notify({ type: 'model-profile', profile });
+  const prompt = fitComparison(comparison, profile.contextLength);
+  notify({
+    type: 'tree-budget',
+    originalEntries: comparison.project.entries.length + comparison.archive.entries.length,
+    sentEntries: prompt.sentEntries,
+    truncated: prompt.truncated,
+  });
+  const completion = await createLocalCompletion({
+    provider: settings.llmProvider,
+    model: profile.requestModel,
+    loadedModel: profile.loadedModel,
+    messages: [
+      { role: 'system', content: systemPrompt(settings.llmLanguage || 'English') },
+      { role: 'user', content: userPrompt(project, plan, prompt.text) },
+    ],
+    responseSchema: REVIEW_SCHEMA,
+    maxTokens: 512,
+    apiToken: settings.llmApiToken,
+    contextLength: Math.min(profile.contextLength, 16_384),
+    reasoningOffSupported: profile.reasoningOffSupported,
+  }, {
+    ...options,
+    onEvent: (event) => notify({ ...event, stage: 'structure-review' }),
+  });
+  const parsed = parseArchiveAssessment(completion.content) ?? parseArchiveAssessment(completion.reasoning);
+  if (!parsed) {
+    const error = new Error('The local model did not return a usable archive-structure assessment.');
+    error.code = 'no_archive_assessment';
+    error.diagnostics = { completion, profile, tree: prompt };
+    throw error;
+  }
+  return {
+    ...parsed,
+    diagnostics: {
+      profile,
+      tree: {
+        projectFiles: comparison.project.fileCount,
+        archiveFiles: comparison.archive.fileCount,
+        originalEntries: comparison.project.entries.length + comparison.archive.entries.length,
+        sentEntries: prompt.sentEntries,
+        truncated: prompt.truncated,
+      },
+      finishReason: completion.finishReason,
+      usage: completion.usage,
+      chunks: completion.chunks,
+    },
+  };
+}
+
+export async function createTreeComparison({ project, workflow, extracted }) {
+  const excluded = createPathMatcher(workflow.exclude);
+  const projectFiles = (await walkFiles(project.root, {
+    include: (relative) => !excluded(relative) && !isProtectedProjectPath(relative),
+    descend: (relative) => !excluded(relative) && !isProtectedProjectPath(relative),
+  })).map(normalizeRelativePath).filter(Boolean);
+  const ignored = await ignoredProjectPaths(project, projectFiles);
+  const visibleProjectFiles = projectFiles.filter((relative) => !ignored.has(relative));
+  const archiveFiles = extracted.entries
+    .map((entry) => normalizeRelativePath(entry.relativePath))
+    .filter((relative) => relative && !excluded(relative) && !isProtectedProjectPath(relative));
+  return {
+    project: treeRecord(visibleProjectFiles),
+    archive: treeRecord(archiveFiles),
+  };
+}
+
+export function parseArchiveAssessment(content) {
+  const source = String(content ?? '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+  if (!source) return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(source);
+  } catch {
+    const start = source.indexOf('{');
+    const end = source.lastIndexOf('}');
+    if (start < 0 || end <= start) return null;
+    try { parsed = JSON.parse(source.slice(start, end + 1)); } catch { return null; }
+  }
+  const assessment = String(parsed.assessment ?? parsed.verdict ?? '').toLowerCase();
+  const confidence = String(parsed.confidence ?? 'low').toLowerCase();
+  const reasons = Array.isArray(parsed.reasons) ? parsed.reasons.map(clean).filter(Boolean).slice(0, 5) : [];
+  if (!['suitable', 'suspicious', 'unsuitable'].includes(assessment) || !reasons.length) return null;
+  return {
+    assessment,
+    confidence: ['low', 'medium', 'high'].includes(confidence) ? confidence : 'low',
+    reasons,
+  };
+}
+
+function treeRecord(files) {
+  const normalized = [...new Set(files)].sort();
+  const directories = new Set();
+  for (const file of normalized) {
+    let current = path.posix.dirname(file);
+    while (current && current !== '.') {
+      directories.add(current);
+      current = path.posix.dirname(current);
+    }
+  }
+  const entries = [
+    ...[...directories].sort().map((value) => `D ${value}/`),
+    ...normalized.map((value) => `F ${value}`),
+  ];
+  return {
+    fileCount: normalized.length,
+    directoryCount: directories.size,
+    topLevel: [...new Set(normalized.map((value) => value.split('/')[0]))].sort(),
+    entries,
+  };
+}
+
+async function ignoredProjectPaths(project, files) {
+  if (!files.length) return new Set();
+  if (project.git) return listIgnoredPaths(project.root, files, { includeTracked: true });
+  const matcher = await createRootGitignoreMatcher(project.root);
+  return new Set(files.filter((relative) => matcher(relative)));
+}
+
+function fitComparison(comparison, contextLength) {
+  const maxChars = Math.max(12_000, Math.min(180_000, Math.floor(contextLength * 2.7)));
+  const projectHeader = treeHeader('CURRENT PROJECT', comparison.project);
+  const archiveHeader = treeHeader('ARCHIVE', comparison.archive);
+  const available = Math.max(2_000, maxChars - projectHeader.length - archiveHeader.length - 200);
+  const projectBudget = Math.floor(available / 2);
+  const archiveBudget = available - projectBudget;
+  const project = fitEntries(comparison.project.entries, projectBudget);
+  const archive = fitEntries(comparison.archive.entries, archiveBudget);
+  return {
+    text: [projectHeader, ...project.lines, '', archiveHeader, ...archive.lines].join('\n'),
+    sentEntries: project.lines.length + archive.lines.length,
+    truncated: project.truncated || archive.truncated,
+  };
+}
+
+function fitEntries(entries, maxChars) {
+  const source = entries.slice(0, MAX_TREE_ENTRIES);
+  const lines = [];
+  let size = 0;
+  for (const entry of prioritize(source)) {
+    const next = entry.length + 1;
+    if (size + next > maxChars) break;
+    lines.push(entry);
+    size += next;
+  }
+  const includedCount = lines.length;
+  const truncated = includedCount < entries.length;
+  if (truncated) lines.push(`… ${entries.length - includedCount} additional entries omitted`);
+  return { lines, truncated };
+}
+
+function prioritize(entries) {
+  return [...entries].sort((left, right) => depth(left) - depth(right) || left.localeCompare(right));
+}
+
+function depth(entry) {
+  return String(entry).replace(/^[DF]\s+/, '').split('/').filter(Boolean).length;
+}
+
+function treeHeader(label, record) {
+  return `${label}: ${record.fileCount} files · ${record.directoryCount} directories\nTop level: ${record.topLevel.join(', ') || '(empty)'}`;
+}
+
+function systemPrompt(language) {
+  return [
+    'You are a conservative archive-suitability reviewer for a local source-code update tool.',
+    'Compare the current project tree with the incoming archive tree and decide whether the archive plausibly belongs to this project.',
+    'Do not reject an archive merely because generated, ignored, cache, environment, build, or dependency files are missing.',
+    'Use unsuitable only for a strong mismatch such as unrelated project markers, a different product layout, or a snapshot missing most expected source areas.',
+    'Use suspicious when the evidence is ambiguous or the archive may be partial in a risky way.',
+    'Return only JSON with assessment, confidence, and reasons. Do not include Markdown or internal reasoning.',
+    `Write reasons in ${language}; assessment and confidence must remain the English enum values from the schema.`,
+  ].join(' ');
+}
+
+function userPrompt(project, plan, treeText) {
+  return [
+    `Expected project: ${project.name}`,
+    `Detected technologies: ${(project.labels ?? []).join(', ') || 'unknown'}`,
+    `Planned changes: created=${plan.counts.created}, updated=${plan.counts.updated}, deleted=${plan.counts.deleted}, unchanged=${plan.counts.unchanged}`,
+    '', treeText,
+  ].join('\n');
+}
+
+function clean(value) {
+  return String(value ?? '').trim().replace(/^[-*•]\s+/, '');
+}

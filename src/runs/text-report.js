@@ -9,14 +9,24 @@ export function formatRunReport(run) {
   ];
   if (run.archiveMetadata?.source) lines.push(`Commit message source: ${run.archiveMetadata.source}`);
   if (run.archiveDisposition) lines.push(`Source archive: ${formatArchiveDisposition(run.archiveDisposition)}`);
+  if (run.archiveInfo) lines.push(`Archive files: ${run.archiveInfo.fileCount ?? 'unknown'} · modified ${run.archiveInfo.modifiedAt ?? 'unknown'}`);
   if (run.patch?.path) lines.push(`Patch: ${run.patch.path}`);
+  if (run.archiveSafety?.warnings?.length || run.archiveSafety?.llm) {
+    lines.push('', 'Archive safety:');
+    for (const warning of run.archiveSafety.warnings ?? []) lines.push(`- ${warning.severity.toUpperCase()} ${warning.title}: ${warning.detail}`);
+    if (run.archiveSafety.llm) {
+      lines.push(`- LLM ${run.archiveSafety.llm.assessment} (${run.archiveSafety.llm.confidence} confidence, ${run.archiveSafety.llm.mode})`);
+      for (const reason of run.archiveSafety.llm.reasons ?? []) lines.push(`  - ${reason}`);
+    }
+  }
   if (run.llm) {
-    lines.push('', `Local LLM: ${run.llm.provider ?? 'unknown'} · ${run.llm.model ?? 'unknown'}`);
+    lines.push('', `Local LLM: ${run.llm.provider ?? 'unknown'} · ${run.llm.model ?? 'unknown'}${run.llm.durationMs ? ` · ${formatDuration(run.llm.durationMs)}` : ''}`);
     if (run.llm.error) lines.push(`LLM error: ${run.llm.error}`);
     else {
       lines.push('Summary:', ...(run.llm.summary ?? []).map((line) => `- ${line}`));
       if (run.llm.commitMessage) lines.push('', 'Proposed commit message:', run.llm.commitMessage);
       if (run.llm.warning) lines.push('', `LLM warning: ${run.llm.warning}`);
+      if (run.llm.assessment) lines.push(`Archive assessment: ${run.llm.assessment} · ${run.llm.confidence ?? 'low'} confidence`);
     }
     if (run.llm.diagnosticsPath) lines.push(`LLM diagnostics: ${run.llm.diagnosticsPath}`);
   }
@@ -43,9 +53,33 @@ export function formatRunReport(run) {
     if (run.deploy.commandText) lines.push(`Command: ${run.deploy.commandText}`);
     if (!run.deploy.ok && !run.deploy.skipped) appendCommandOutput(lines, run.deploy);
   }
+  if (run.decisions?.length) {
+    lines.push('', 'User decisions:');
+    for (const decision of run.decisions) lines.push(`- ${decision.label} [${decision.screen}]`);
+  }
   if (run.rollback) lines.push('', `Rollback: ${run.rollback.status}`);
   if (run.error) lines.push('', `Error: ${run.error.message ?? run.error}`);
   return `${lines.join('\n').trimEnd()}\n`;
+}
+
+
+export function formatCompletionForClipboard(run) {
+  const counts = run.plan?.counts ?? {};
+  const lines = [
+    `ZIPFLOW RUN ${run.id}`,
+    '',
+    `Project: ${run.projectPath}`,
+    `Archive: ${run.archivePath}`,
+    `Status: ${run.status}`,
+    '',
+    `Changes: ${counts.created ?? 0} added · ${counts.updated ?? 0} changed · ${counts.deleted ?? 0} removed`,
+    `Unchanged: ${counts.unchanged ?? 0} · Ignored: ${counts.skipped ?? 0} · Preserved: ${counts.preserved ?? 0}`,
+    `Checks: ${run.checks ? `${run.checks.passed} passed · ${run.checks.failed} failed` : 'not run'}`,
+    `Commit: ${run.commit ? `${run.commit.revision} ${firstLine(run.commit.message)}` : 'none'}`,
+    `Deploy: ${run.deploy ? (run.deploy.ok ? 'passed' : run.deploy.skipped ? 'skipped' : 'failed') : 'not run'}`,
+  ];
+  if (run.llm?.summary?.length) lines.push('', 'Summary:', ...run.llm.summary.map((line) => `- ${line}`));
+  return lines.join('\n');
 }
 
 export function formatFailureForClipboard(run) {
@@ -97,4 +131,8 @@ function formatArchiveDisposition(disposition) {
 
 function formatDuration(milliseconds = 0) {
   return `${(milliseconds / 1000).toFixed(1)}s`;
+}
+
+function firstLine(value) {
+  return String(value ?? '').split(/\r?\n/, 1)[0];
 }

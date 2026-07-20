@@ -3,11 +3,12 @@ import { themes } from 'terlio.js';
 import { readJson, writeJsonAtomic } from '../utils/fs.js';
 import { ensureZipflowHome, getZipflowHome } from '../workflow/store.js';
 
-export const SETTINGS_VERSION = 4;
+export const SETTINGS_VERSION = 5;
 export const THEME_NAMES = Object.keys(themes);
 export const LLM_PROVIDERS = ['disabled', 'ollama', 'lmstudio'];
 export const LLM_LANGUAGES = ['English', 'Russian', 'German', 'French', 'Spanish', 'Chinese', 'Japanese'];
 export const ARCHIVE_POLICIES = ['keep', 'move', 'delete'];
+export const LLM_ARCHIVE_REVIEW_MODES = ['disabled', 'structure', 'patch'];
 
 export const DEFAULT_SETTINGS = Object.freeze({
   version: SETTINGS_VERSION,
@@ -17,6 +18,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   llmModel: '',
   llmLanguage: 'English',
   llmApiToken: '',
+  llmArchiveReview: 'disabled',
   archivePolicy: 'keep',
   archiveDirectory: '~/zipflow-archive',
   archiveRetentionDays: 30,
@@ -44,6 +46,7 @@ export function normalizeSettings(settings) {
   if (typeof value.llmModel !== 'string') value.llmModel = '';
   if (!LLM_LANGUAGES.includes(value.llmLanguage)) value.llmLanguage = DEFAULT_SETTINGS.llmLanguage;
   if (typeof value.llmApiToken !== 'string') value.llmApiToken = '';
+  if (!LLM_ARCHIVE_REVIEW_MODES.includes(value.llmArchiveReview)) value.llmArchiveReview = DEFAULT_SETTINGS.llmArchiveReview;
   if (value.llmProvider === 'disabled') value.llmModel = '';
   if (!ARCHIVE_POLICIES.includes(value.archivePolicy)) value.archivePolicy = DEFAULT_SETTINGS.archivePolicy;
   if (typeof value.archiveDirectory !== 'string' || !value.archiveDirectory.trim()) value.archiveDirectory = DEFAULT_SETTINGS.archiveDirectory;

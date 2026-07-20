@@ -1,4 +1,4 @@
-export function beginLlmProgress(controller) {
+export function beginLlmProgress(controller, { expectedMs = 0 } = {}) {
   const { state } = controller;
   const startedAt = Date.now();
   state.llmRuntime = {
@@ -14,6 +14,12 @@ export function beginLlmProgress(controller) {
     promptProgress: null,
     modelLoadProgress: null,
     patchBudget: null,
+    transport: null,
+    endpoint: null,
+    requestModel: null,
+    loadedModel: false,
+    cancellationRequested: false,
+    expectedMs,
   };
   const timer = setInterval(() => {
     if (!state.llmRuntime) return;
@@ -45,8 +51,24 @@ export function updateLlmProgress(controller, event) {
     runtime.label = event.patch.truncated
       ? `Patch reduced to about ${formatNumber(event.patch.sentEstimatedTokens)} tokens`
       : `Patch fits the model context at about ${formatNumber(event.patch.sentEstimatedTokens)} tokens`;
+  } else if (event.type === 'tree-budget') {
+    runtime.treeBudget = event;
+    runtime.label = event.truncated
+      ? `Project/archive tree reduced to ${formatNumber(event.sentEntries)} entries`
+      : `Project/archive tree includes ${formatNumber(event.sentEntries)} entries`;
+  } else if (event.type === 'model-profile') {
+    runtime.contextProfile = event.profile;
+    runtime.requestModel = event.profile?.requestModel ?? runtime.model;
+    runtime.loadedModel = Boolean(event.profile?.loadedModel);
+    runtime.label = runtime.loadedModel
+      ? 'Using the already loaded model instance'
+      : 'The selected model will be loaded by the provider if needed';
   } else if (event.type === 'request') {
     runtime.phase = 'waiting';
+    runtime.transport = event.transport ?? runtime.transport;
+    runtime.endpoint = event.endpoint ?? runtime.endpoint;
+    runtime.requestModel = event.model ?? runtime.requestModel;
+    runtime.loadedModel = Boolean(event.loadedModel ?? runtime.loadedModel);
     runtime.promptProgress = null;
     runtime.label = event.attempt > 1
       ? 'Retrying with a simpler JSON response format'
@@ -89,6 +111,10 @@ export function updateLlmProgress(controller, event) {
       runtime.phase = 'reasoning';
       runtime.label = 'The model is analyzing the patch';
     }
+  } else if (event.type === 'cancel-requested') {
+    runtime.phase = 'cancelling';
+    runtime.cancellationRequested = true;
+    runtime.label = 'Cancelling local LLM generation';
   } else if (event.type === 'complete') {
     runtime.phase = 'parsing';
     runtime.label = event.finishReason === 'length'
@@ -102,8 +128,13 @@ export function llmActivityLines(runtime) {
   if (!runtime) return [];
   const lines = [
     `Local LLM · ${runtime.provider} · ${runtime.model}`,
-    `  ${runtime.label} · ${formatElapsed(runtime.elapsedMs)} · ${runtime.chunks} chunks`,
+    runtime.transport ? `  Transport: ${runtime.transport} · POST ${runtime.endpoint}` : null,
+    runtime.loadedModel ? `  Model instance: ${runtime.requestModel} · already loaded` : null,
+    `  ${runtime.label} · ${formatElapsed(runtime.elapsedMs)}${runtime.expectedMs ? ` / median ${formatElapsed(runtime.expectedMs)}` : ''} · ${runtime.chunks} chunks`,
   ];
+  const compact = lines.filter(Boolean);
+  lines.length = 0;
+  lines.push(...compact);
   if (runtime.patchBudget?.truncated) {
     lines.push(
       `  Patch: ~${formatNumber(runtime.patchBudget.originalEstimatedTokens)} → ~${formatNumber(runtime.patchBudget.sentEstimatedTokens)} tokens`,

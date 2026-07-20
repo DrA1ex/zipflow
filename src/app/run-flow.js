@@ -2,8 +2,10 @@ import path from 'node:path';
 import { stat } from 'node:fs/promises';
 import { extractArchive } from '../archive/extract.js';
 import { readArchiveMetadata } from '../archive/metadata.js';
+import { evaluateArchiveRisks } from '../archive/risk.js';
 import { createPlanPatch } from '../patch/create.js';
 import { generateChangeDescription, isLocalLlmEnabled } from '../llm/generate.js';
+import { reviewArchiveStructure } from '../llm/archive-review.js';
 import { saveLlmDiagnostics } from '../llm/diagnostics.js';
 import { beginLlmProgress } from './llm-progress.js';
 import { updateManagedHistory } from '../history/managed.js';
@@ -13,10 +15,12 @@ import { acquireProjectLock } from '../apply/lock.js';
 import { createCommit } from '../git/repository.js';
 import { createRunId } from '../utils/id.js';
 import { exists } from '../utils/fs.js';
+import { hashFile } from '../utils/hash.js';
 import { displayPath, parseEnteredPath } from '../utils/paths.js';
 import { getZipflowHome } from '../workflow/store.js';
-import { createRunRecord, saveRunRecord } from '../runs/store.js';
-import { formatArchiveName, planActivityLines, planDetailLines, planSummary } from '../ui/format.js';
+import { createRunRecord, findAppliedArchiveRun, listProjectRuns, saveRunRecord } from '../runs/store.js';
+import { buildRunAnalytics } from '../history/analytics.js';
+import { compactPlanLine, formatArchiveName, planActivityLines } from '../ui/format.js';
 import {
   activatePostCheck, backPostCheck, isPostCheckScreen, startChecks, submitPostCheckEditor,
 } from './run-postcheck.js';
@@ -24,45 +28,49 @@ import {
   activateRollback, backRollback, confirmRollback, showLastRun, showRunDetails,
 } from './run-rollback.js';
 import { cancelRun, failRun } from './run-lifecycle.js';
+import {
+  activateReview, archiveConflictPaths, backReview, handleReviewKey, handlesReviewScreen,
+  showArchiveSafetyReview, showConflictCheckpoint, showConflictSummary, showPlanReview,
+} from './run-review.js';
 
 export { showLastRun };
 
 export function handlesRunScreen(screen) {
-  return [
-    'archive-input', 'plan-review', 'plan-details', 'conflict-summary', 'conflict-checkpoint', 'conflicts', 'applying',
-    'run-details', 'rollback-confirm', 'rolling-back',
-  ].includes(screen) || isPostCheckScreen(screen);
+  return ['archive-input', 'archive-duplicate', 'applying', 'run-details', 'rollback-confirm', 'rolling-back'].includes(screen)
+    || handlesReviewScreen(screen) || isPostCheckScreen(screen);
 }
 
 export function beginArchiveInput(controller) {
+  controller.state.pendingArchive = null;
   controller.showEditor('archive-input', {
     label: 'ZIP archive path',
     placeholder: '~/Downloads/project-update.zip',
     purpose: 'archive-path',
-    instructions: ['Drop a ZIP file into the terminal or enter its path. Tab completes ZIP paths.'],
+    instructions: [
+      'Drop a ZIP file into the terminal or enter its path. Tab completes ZIP paths.',
+      'Next: Zipflow compares it with the project, creates changes.patch, and shows a compact review before any files change.',
+    ],
   }, '');
-  controller.setStatus('Waiting for archive');
+  controller.setStatus('Step 1 of 5 · Choose archive');
 }
 
 export async function submitRunEditor(controller) {
-  if (controller.state.editorContext?.purpose === 'archive-path') {
-    return inspectArchive(controller, controller.state.editor.value);
-  }
+  if (controller.state.editorContext?.purpose === 'archive-path') return inspectArchivePath(controller, controller.state.editor.value);
   return submitPostCheckEditor(controller);
 }
 
 export async function activateRun(controller, itemId) {
   const { state } = controller;
-  if (state.screen === 'plan-review') {
-    if (itemId === 'view-plan') return showPlanDetails(controller);
-    if (itemId === 'apply-plan') return startApply(controller);
-    if (itemId === 'cancel-run') return cancelRun(controller);
+  if (state.screen === 'archive-duplicate') return activateDuplicate(controller, itemId);
+  if (handlesReviewScreen(state.screen)) {
+    return activateReview(controller, itemId, {
+      startApply,
+      cancelRun,
+      retryArchive,
+      createCheckpoint,
+      continueAfterSafety,
+    });
   }
-  if (state.screen === 'plan-details') {
-    if (itemId === 'back-to-plan') return showPlanReview(controller);
-    if (itemId === 'apply-plan') return startApply(controller);
-  }
-  if (['conflict-summary', 'conflict-checkpoint', 'conflicts'].includes(state.screen)) return activateConflict(controller, itemId);
   if (isPostCheckScreen(state.screen)) return activatePostCheck(controller, itemId);
   if (['run-details', 'rollback-confirm'].includes(state.screen)) {
     const result = await activateRollback(controller, itemId);
@@ -71,280 +79,194 @@ export async function activateRun(controller, itemId) {
   }
 }
 
-export function handleConflictShortcut(controller, key) {
-  const { state } = controller;
-  if (state.screen !== 'conflicts') return false;
-  const selected = state.menuItems[state.selectedIndex];
-  if (key.name === 'space' && selected?.id.startsWith('conflict:')) {
-    const conflict = state.plan.conflicts[Number(selected.id.slice(9))];
-    const current = state.decisions.get(conflict.path) ?? 'keep';
-    state.decisions.set(conflict.path, current === 'keep' ? 'archive' : 'keep');
-    showConflicts(controller, state.selectedIndex);
-    return true;
-  }
-  return false;
+export function handleRunShortcut(controller, key) {
+  return handleReviewKey(controller, key);
 }
 
 export function backRun(controller) {
   const screen = controller.state.screen;
-  if (screen === 'archive-input') return controller.showHome();
-  if (screen === 'plan-review') return cancelRun(controller);
-  if (screen === 'plan-details') return showPlanReview(controller);
-  if (screen === 'conflict-summary') return cancelRun(controller);
-  if (screen === 'conflict-checkpoint' || screen === 'conflicts') return showConflictSummary(controller);
+  if (screen === 'archive-input' || screen === 'archive-duplicate') return controller.showHome();
+  if (screen === 'archive-safety' || screen === 'plan-review' || screen === 'conflict-summary') return cancelRun(controller);
+  if (handlesReviewScreen(screen)) return backReview(controller);
   if (isPostCheckScreen(screen)) return backPostCheck(controller);
   if (['run-details', 'rollback-confirm'].includes(screen)) return backRollback(controller);
+  return false;
 }
 
-async function inspectArchive(controller, enteredPath) {
+export async function inspectArchivePath(controller, enteredPath, { allowDuplicate = false, archiveHash = null } = {}) {
   const { state } = controller;
   const archivePath = parseEnteredPath(enteredPath, state.project.root);
   if (!(await exists(archivePath))) return controller.message('Archive not found', [displayPath(archivePath)], 'error');
   if (!archivePath.toLowerCase().endsWith('.zip')) return controller.message('Unsupported archive', ['Zipflow currently accepts .zip files only.'], 'error');
   const archiveStat = await stat(archivePath);
   if (!archiveStat.isFile()) return controller.message('Archive path is not a file', [displayPath(archivePath)], 'error');
+  const archiveInfo = { size: archiveStat.size, modifiedAt: archiveStat.mtime.toISOString() };
+  const digest = archiveHash ?? await hashFile(archivePath);
+  if (!allowDuplicate) {
+    const previous = await findAppliedArchiveRun(state.project.root, digest);
+    if (previous) return showDuplicateWarning(controller, archivePath, digest, previous);
+  }
+  return inspectArchive(controller, archivePath, digest, archiveInfo);
+}
+
+async function inspectArchive(controller, archivePath, archiveHash, archiveInfo) {
+  const { state } = controller;
   const runId = createRunId();
-  state.run = await createRunRecord({ id: runId, project: state.project, workflow: state.workflow, archivePath });
+  state.pendingArchive = null;
+  state.run = await createRunRecord({ id: runId, project: state.project, workflow: state.workflow, archivePath, archiveHash, archiveInfo });
   controller.activeLock = await acquireProjectLock(state.project.root, runId);
   const temp = path.join(getZipflowHome(), 'tmp', runId);
-  state.busy = true;
-  state.screen = 'applying';
-  state.busyLabel = 'Inspecting archive';
-  state.progress = { value: 1, total: 5, detail: 'Reading ZIP entries' };
-  controller.invalidate();
+  setBusy(controller, 'Inspecting archive', 1, 7, 'Reading ZIP entries');
   try {
     const extracted = await extractArchive(archivePath, temp);
-    state.progress = { value: 2, total: 7, detail: 'Reading archive metadata' };
-    controller.invalidate();
+    setProgress(controller, 2, 7, 'Reading archive metadata');
     const metadata = await readArchiveMetadata(extracted);
-    state.progress = { value: 3, total: 7, detail: 'Comparing project files' };
-    controller.invalidate();
+    setProgress(controller, 3, 7, 'Comparing project files');
     const plan = await buildUpdatePlan({ project: state.project, workflow: state.workflow, extracted });
-    state.progress = { value: 4, total: 7, detail: 'Creating changes.patch' };
-    controller.invalidate();
+    setProgress(controller, 4, 7, 'Creating changes.patch');
     const patch = await createPlanPatch(runId, plan);
-    let llmResult = null;
-    let llmError = null;
-    let llmDiagnosticsPath = null;
-    if (isLocalLlmEnabled(state.settings) && changedCount(plan) > 0) {
-      state.progress = { value: 5, total: 7, detail: `Streaming summary from ${state.settings.llmModel}` };
-      const progress = beginLlmProgress(controller);
-      controller.invalidate();
-      try {
-        llmResult = await generateChangeDescription(
-          { settings: state.settings, project: state.project, plan, patchContent: patch.content },
-          { onEvent: progress.onEvent },
-        );
-        llmDiagnosticsPath = await saveLlmDiagnostics(runId, {
-          status: 'completed',
-          provider: state.settings.llmProvider,
-          model: state.settings.llmModel,
-          diagnostics: llmResult.diagnostics ?? null,
-          raw: llmResult.raw ?? null,
-        }).catch(() => null);
-      } catch (error) {
-        llmError = error.message;
-        llmDiagnosticsPath = await saveLlmDiagnostics(runId, {
-          status: 'failed',
-          provider: state.settings.llmProvider,
-          model: state.settings.llmModel,
-          error,
-        }).catch(() => null);
-      } finally {
-        progress.stop();
-      }
-    }
-    state.progress = { value: 7, total: 7, detail: 'Plan ready' };
+    const llm = await generateLlmSummary(controller, { plan, patch, extracted });
+    const archiveRisk = await evaluateArchiveRisks({
+      projectPath: state.project.root,
+      workflow: state.workflow,
+      archiveInfo,
+      extracted,
+      plan,
+    });
+    setProgress(controller, 7, 7, 'Plan ready');
     state.archive = extracted;
     state.archiveMetadata = metadata;
     state.plan = plan;
     state.decisions = new Map(plan.conflicts.map((item) => [
       item.path,
-      state.workflow.policy.conflictPolicy === 'overwrite' ? 'archive' : 'keep',
+      state.workflow.policy.conflictPolicy === 'overwrite' ? 'archive' : null,
     ]));
     state.run.plan = serializePlan(plan);
     state.run.patch = { path: patch.path, omitted: patch.omitted };
-    state.run.llm = llmResult ? {
-      provider: state.settings.llmProvider,
-      model: state.settings.llmModel,
-      language: state.settings.llmLanguage,
-      summary: llmResult.summary,
-      commitMessage: llmResult.commitMessage || null,
-      warning: llmResult.warning || null,
-      diagnostics: llmResult.diagnostics || null,
-      diagnosticsPath: llmDiagnosticsPath,
-    } : llmError ? {
-      provider: state.settings.llmProvider,
-      model: state.settings.llmModel,
-      language: state.settings.llmLanguage,
-      error: llmError,
-      diagnosticsPath: llmDiagnosticsPath,
-    } : null;
-    state.run.archiveMetadata = metadata.commitMessage ? {
-      commitMessage: metadata.commitMessage,
-      source: metadata.commitMessageSource,
-    } : null;
+    state.run.archiveInfo = { ...archiveInfo, fileCount: extracted.fileCount, totalSize: extracted.totalSize, rootPrefix: extracted.rootPrefix };
+    state.run.llm = llm.record;
+    state.archiveSafety = {
+      warnings: archiveRisk.warnings,
+      llm: llm.assessment ?? null,
+      acknowledged: false,
+    };
+    state.run.archiveSafety = state.archiveSafety;
+    state.run.archiveMetadata = metadata.commitMessage ? { commitMessage: metadata.commitMessage, source: metadata.commitMessageSource } : null;
     state.run.status = 'planned';
     state.run = await saveRunRecord(state.run);
     controller.message('Archive inspected', [
       `${formatArchiveName(archivePath)} · ${extracted.fileCount} files${extracted.rootPrefix ? ` · root ${extracted.rootPrefix}/` : ''}`,
       ...(metadata.commitMessageSource ? [`Commit message found: ${metadata.commitMessageSource}`] : []),
     ], 'success');
-    if (llmResult) {
-      const firstAttempt = llmResult.diagnostics?.attempts?.find((item) => typeof item.attempt === 'number');
-      if (firstAttempt?.patch?.truncated) {
-        controller.message('Local LLM input was reduced safely', [
-          `Estimated patch size: ${firstAttempt.patch.originalEstimatedTokens.toLocaleString('en-US')} tokens`,
-          `Sent to model: ${firstAttempt.patch.sentEstimatedTokens.toLocaleString('en-US')} tokens`,
-          `${firstAttempt.patch.omittedFiles} files had no diff excerpt · ${firstAttempt.patch.omittedHunks} hunks omitted`,
-        ], 'warning');
-      }
-      controller.message('Local LLM summary', llmResult.summary, 'info');
-      if (llmResult.warning) controller.message('Local LLM response needed fallback handling', [llmResult.warning], 'warning');
-    }
-    if (llmError) controller.message('Local LLM summary was not generated', [
-      llmError,
-      ...(llmDiagnosticsPath ? [`Diagnostics: ${displayPath(llmDiagnosticsPath)}`] : []),
-      'The update can continue; commit message fallbacks remain available.',
-    ], 'warning');
+    emitLlmResult(controller, llm);
     controller.message('Update plan', [...planActivityLines(plan), `Patch: ${displayPath(patch.path)}`], plan.conflicts.length ? 'warning' : 'info');
     state.busy = false;
-    if (plan.conflicts.length && state.workflow.policy.conflictPolicy !== 'overwrite') return showConflictSummary(controller);
-    if (plan.conflicts.length) controller.message('Conflicts handled by saved policy', [`${plan.conflicts.length} local files will be backed up and overwritten.`], 'warning');
-    const needsReview = state.workflow.policy.confirmPlan || plan.skipped.length > 0;
-    if (needsReview) return showPlanReview(controller);
-    return startApply(controller);
+    if (requiresSafetyReview(state.archiveSafety)) return showArchiveSafetyReview(controller);
+    return continueAfterSafety(controller);
   } catch (error) {
     await failRun(controller, error);
   }
 }
 
-function showPlanReview(controller) {
-  const plan = controller.state.plan;
-  const notes = [];
-  if (plan.ignoredIncoming.length) notes.push(`${plan.ignoredIncoming.length} incoming files are ignored by Git`);
-  if (plan.preserved.length) notes.push(`${plan.preserved.length} local files are outside the selected deletion scope and will be kept`);
-  if (!notes.length) notes.push('No conflicts found');
-  controller.showMenu('plan-review', [
-    { id: 'apply-plan', label: 'Apply update', description: notes.join(' · ') },
-    { id: 'view-plan', label: 'View changed and preserved files', description: planSummary(plan).join(' · ') },
-    { id: 'cancel-run', label: 'Cancel', description: 'The project has not been changed' },
-  ], 'Review update plan');
-}
-
-function showPlanDetails(controller) {
-  controller.message('Changed and preserved files', planDetailLines(controller.state.plan));
-  controller.showMenu('plan-details', [
-    { id: 'apply-plan', label: 'Apply update' },
-    { id: 'back-to-plan', label: 'Back' },
-  ], 'Changed files');
-}
-
-function showConflictSummary(controller) {
-  const count = controller.state.plan.conflicts.length;
-  controller.showMenu('conflict-summary', [
-    {
-      id: 'replace-all-conflicts',
-      label: 'Replace all conflicting files',
-      description: `Use archive versions for all ${count} conflicts after creating the normal Zipflow backup.`,
-    },
-    {
-      id: 'keep-all-conflicts',
-      label: 'Keep all local versions',
-      description: 'Apply created and non-conflicting files, but leave every conflicting local file untouched.',
-    },
-    {
-      id: 'choose-conflicts',
-      label: 'Choose files manually',
-      description: 'Review each conflicting path and decide whether the local or archive version wins.',
-    },
-    {
-      id: 'retry-archive',
-      label: 'Cancel and choose the archive again',
-      description: 'Discard this plan without changing the project and return to ZIP selection.',
-    },
-  ], `${count} conflicts need a decision`);
-}
-
-function showConflicts(controller, selectedIndex = null) {
+async function generateLlmSummary(controller, { plan, patch, extracted }) {
   const { state } = controller;
-  const items = state.plan.conflicts.map((conflict, index) => ({
-    id: `conflict:${index}`,
-    label: `[${state.decisions.get(conflict.path) === 'archive' ? 'use archive' : 'keep local'}] ${conflict.path}`,
-    description: conflict.reason,
-  }));
-  items.push(
-    { id: 'continue-conflicts', label: 'Apply with these file decisions' },
-    { id: 'back-conflict-summary', label: 'Back to conflict choices' },
-    { id: 'retry-archive', label: 'Cancel and choose the archive again' },
-  );
-  controller.showMenu('conflicts', items, 'Choose conflicting files', selectedIndex);
-}
-
-function showConflictCheckpoint(controller) {
-  controller.showMenu('conflict-checkpoint', [
-    {
-      id: 'checkpoint-replace',
-      label: 'Create a checkpoint commit, then apply archive choices',
-      description: 'Commit affected local files before applying archive versions.',
-    },
-    {
-      id: 'replace-without-checkpoint',
-      label: 'Apply archive choices without a checkpoint commit',
-      description: 'The Zipflow file backup is still created and can restore the overwritten files.',
-    },
-    { id: 'back-conflict-summary', label: 'Back' },
-  ], 'Protect local conflict changes with Git');
-}
-
-async function activateConflict(controller, itemId) {
-  const { state } = controller;
-  if (state.screen === 'conflict-summary') {
-    if (itemId === 'replace-all-conflicts') {
-      for (const conflict of state.plan.conflicts) state.decisions.set(conflict.path, 'archive');
-      return state.workflow.git.checkpoint === 'ask' ? showConflictCheckpoint(controller) : startApply(controller);
+  if (!isLocalLlmEnabled(state.settings)) return { record: null, assessment: null };
+  if (changedCount(plan) === 0 && state.settings.llmArchiveReview !== 'structure') return { record: null, assessment: null };
+  setProgress(controller, 5, 7, `Streaming summary from ${state.settings.llmModel}`);
+  const llmEstimate = await previousLlmEstimate(state);
+  controller.message('Local LLM analysis starting', [
+    `${changedCount(plan)} changed paths will be analyzed${state.settings.llmArchiveReview === 'structure' ? ' after a project/archive tree comparison' : ' from changes.patch'}${llmEstimate ? ` · historical median ${formatEstimate(llmEstimate)}` : ''}.`,
+    'The full patch remains in the run report even if the model input must be reduced. Esc cancels only this summary.',
+  ], 'process');
+  const progress = beginLlmProgress(controller, { expectedMs: llmEstimate });
+  const abortController = new AbortController();
+  state.llmAbortController = abortController;
+  controller.invalidate();
+  const startedAt = Date.now();
+  try {
+    let structureAssessment = null;
+    if (state.settings.llmArchiveReview === 'structure') {
+      structureAssessment = await reviewArchiveStructure(
+        { settings: state.settings, project: state.project, workflow: state.workflow, extracted, plan },
+        { onEvent: progress.onEvent, signal: abortController.signal },
+      );
+      if (structureAssessment.assessment === 'unsuitable') {
+        const result = { summary: structureAssessment.reasons, commitMessage: '', assessment: structureAssessment.assessment, confidence: structureAssessment.confidence, reasons: structureAssessment.reasons, diagnostics: { structure: structureAssessment.diagnostics } };
+        const durationMs = Date.now() - startedAt;
+        const diagnosticsPath = await saveLlmDiagnostics(state.run.id, {
+          status: 'completed', provider: state.settings.llmProvider, model: state.settings.llmModel,
+          diagnostics: result.diagnostics,
+        }).catch(() => null);
+        return { result, assessment: assessmentRecord(result, 'structure'), diagnosticsPath, record: llmRecord(state, result, diagnosticsPath, durationMs) };
+      }
     }
-    if (itemId === 'keep-all-conflicts') {
-      for (const conflict of state.plan.conflicts) state.decisions.set(conflict.path, 'keep');
-      return startApply(controller);
+    const result = await generateChangeDescription(
+      { settings: state.settings, project: state.project, plan, patchContent: patch.content },
+      { onEvent: progress.onEvent, signal: abortController.signal },
+    );
+    if (structureAssessment) {
+      result.structureAssessment = structureAssessment;
+      result.diagnostics = { ...(result.diagnostics ?? {}), structure: structureAssessment.diagnostics };
     }
-    if (itemId === 'choose-conflicts') return showConflicts(controller);
-    if (itemId === 'retry-archive') return retryArchive(controller);
+    const durationMs = Date.now() - startedAt;
+    const diagnosticsPath = await saveLlmDiagnostics(state.run.id, {
+      status: 'completed', provider: state.settings.llmProvider, model: state.settings.llmModel,
+      diagnostics: result.diagnostics ?? null, raw: result.raw ?? null,
+    }).catch(() => null);
+    const assessment = result.assessment
+      ? assessmentRecord(result, 'patch')
+      : result.structureAssessment
+        ? assessmentRecord(result.structureAssessment, 'structure')
+        : null;
+    return { result, assessment, diagnosticsPath, record: llmRecord(state, result, diagnosticsPath, durationMs) };
+  } catch (error) {
+    const cancelled = error.code === 'cancelled';
+    const diagnosticsPath = await saveLlmDiagnostics(state.run.id, {
+      status: cancelled ? 'cancelled' : 'failed', provider: state.settings.llmProvider,
+      model: state.settings.llmModel, ...(cancelled ? {} : { error }),
+    }).catch(() => null);
+    return {
+      cancelled,
+      error: cancelled ? null : error.message,
+      diagnosticsPath,
+      assessment: null,
+      record: cancelled
+        ? { durationMs: Date.now() - startedAt, provider: state.settings.llmProvider, model: state.settings.llmModel, language: state.settings.llmLanguage, cancelled: true, diagnosticsPath }
+        : { durationMs: Date.now() - startedAt, provider: state.settings.llmProvider, model: state.settings.llmModel, language: state.settings.llmLanguage, error: error.message, diagnosticsPath },
+    };
+  } finally {
+    if (state.llmAbortController === abortController) state.llmAbortController = null;
+    progress.stop();
   }
-  if (state.screen === 'conflict-checkpoint') {
-    if (itemId === 'checkpoint-replace') {
-      await createCheckpoint(controller);
-      return startApply(controller, { checkpointCreated: true });
-    }
-    if (itemId === 'replace-without-checkpoint') return startApply(controller);
-    if (itemId === 'back-conflict-summary') return showConflictSummary(controller);
-  }
-  if (itemId.startsWith('conflict:')) {
-    const index = Number(itemId.slice(9));
-    const conflict = state.plan.conflicts[index];
-    state.decisions.set(conflict.path, state.decisions.get(conflict.path) === 'archive' ? 'keep' : 'archive');
-    return showConflicts(controller, index);
-  }
-  if (itemId === 'continue-conflicts') {
-    const archiveSelected = archiveConflictPaths(state).length > 0;
-    return archiveSelected && state.workflow.git.checkpoint === 'ask' ? showConflictCheckpoint(controller) : startApply(controller);
-  }
-  if (itemId === 'back-conflict-summary') return showConflictSummary(controller);
-  if (itemId === 'retry-archive') return retryArchive(controller);
 }
 
-async function retryArchive(controller) {
-  await cancelRun(controller);
-  controller.message('Ready for another archive', ['Choose the corrected or rebuilt ZIP file.']);
-  return beginArchiveInput(controller);
+function emitLlmResult(controller, llm) {
+  if (llm.result) {
+    const attempt = llm.result.diagnostics?.attempts?.find((item) => typeof item.attempt === 'number');
+    if (attempt?.patch?.truncated) controller.message('Local LLM input reduced safely', [
+      `Estimated ${attempt.patch.originalEstimatedTokens.toLocaleString('en-US')} tokens · sent ${attempt.patch.sentEstimatedTokens.toLocaleString('en-US')}`,
+      `${attempt.patch.omittedFiles} files without excerpts · ${attempt.patch.omittedHunks} hunks omitted`,
+    ], 'warning');
+    controller.message('Local LLM summary', llm.result.summary, 'info');
+    const assessment = llm.assessment;
+    if (assessment) controller.message('Local LLM archive assessment', [
+      `${assessment.assessment} · ${assessment.confidence} confidence · ${assessment.mode} review`,
+      ...assessment.reasons,
+    ], assessment.assessment === 'suitable' ? 'success' : 'warning');
+    if (llm.result.warning) controller.message('Local LLM fallback used', [llm.result.warning], 'warning');
+  } else if (llm.cancelled) controller.message('Local LLM generation cancelled', ['The update continues with normal commit-message fallbacks.'], 'warning');
+  else if (llm.error) controller.message('Local LLM summary was not generated', [
+    llm.error,
+    ...(llm.diagnosticsPath ? [`Diagnostics: ${displayPath(llm.diagnosticsPath)}`] : []),
+    'The update can continue and project files have not been affected by this error.',
+  ], 'warning');
 }
 
-async function startApply(controller, { checkpointCreated = false } = {}) {
+export async function startApply(controller, { checkpointCreated = false } = {}) {
   const { state } = controller;
   try {
-    if (!checkpointCreated && state.workflow.git.checkpoint === 'auto' && archiveConflictPaths(state).length) {
-      await createCheckpoint(controller);
-    }
+    if (!checkpointCreated && state.workflow.git.checkpoint === 'ask' && archiveConflictPaths(state).length) return showConflictCheckpoint(controller);
+    if (!checkpointCreated && state.workflow.git.checkpoint === 'auto' && archiveConflictPaths(state).length) await createCheckpoint(controller);
     if (changedCount(state.plan) === 0) {
       state.run.applied = { paths: [], changedPaths: [], backupPath: null, skippedConflicts: [] };
       state.run.status = 'applied';
@@ -352,20 +274,10 @@ async function startApply(controller, { checkpointCreated = false } = {}) {
       controller.message('Nothing to apply', [`${state.plan.counts.unchanged} files already match the archive.`], 'success');
       return startChecks(controller);
     }
-    state.busy = true;
-    state.screen = 'applying';
-    state.busyLabel = 'Applying update';
-    state.progress = { value: 0, total: Math.max(1, changedCount(state.plan)), detail: 'Creating backup' };
-    controller.invalidate();
+    setBusy(controller, 'Applying update', 0, Math.max(1, changedCount(state.plan)), 'Creating backup');
     const applied = await applyUpdatePlan({
-      runId: state.run.id,
-      projectPath: state.project.root,
-      plan: state.plan,
-      decisions: state.decisions,
-      onProgress: (progress) => {
-        state.progress = { value: progress.current, total: progress.total, detail: `${progress.stage}${progress.path ? ` · ${progress.path}` : ''}` };
-        controller.invalidate();
-      },
+      runId: state.run.id, projectPath: state.project.root, plan: state.plan, decisions: state.decisions,
+      onProgress: (progress) => setProgress(controller, progress.current, progress.total, `${progress.stage}${progress.path ? ` · ${progress.path}` : ''}`),
     });
     const managedHistory = await updateManagedHistory(state.project.root, applied.applied);
     state.run.applied = {
@@ -379,10 +291,8 @@ async function startApply(controller, { checkpointCreated = false } = {}) {
     state.run.status = 'applied';
     state.run = await saveRunRecord(state.run);
     controller.message('Update applied', [
-      `${applied.applied.length} files changed`,
-      `${applied.skippedConflicts.length} conflicting files kept locally`,
-      `${state.plan.preserved.length} snapshot files preserved locally`,
-      `Backup: ${displayPath(applied.backup.root)}`,
+      `${applied.applied.length} paths changed · ${applied.skippedConflicts.length} conflicts kept locally`,
+      `${state.plan.preserved.length} snapshot paths preserved · Backup: ${displayPath(applied.backup.root)}`,
     ], 'success');
     state.busy = false;
     return startChecks(controller);
@@ -391,7 +301,7 @@ async function startApply(controller, { checkpointCreated = false } = {}) {
   }
 }
 
-async function createCheckpoint(controller) {
+export async function createCheckpoint(controller) {
   const paths = archiveConflictPaths(controller.state);
   if (!paths.length) return;
   const message = `zipflow: checkpoint ${controller.state.run.id}`;
@@ -402,10 +312,39 @@ async function createCheckpoint(controller) {
   controller.message('Checkpoint created', [`${commit.revision} ${message}`], 'success');
 }
 
-function archiveConflictPaths(state) {
-  return state.plan.conflicts
-    .filter((item) => state.decisions.get(item.path) === 'archive')
-    .map((item) => item.path);
+export async function retryArchive(controller) {
+  await cancelRun(controller);
+  controller.message('Ready for another archive', ['Choose the corrected or rebuilt ZIP file.']);
+  return beginArchiveInput(controller);
+}
+
+function showDuplicateWarning(controller, archivePath, archiveHash, previous) {
+  controller.state.pendingArchive = { archivePath, archiveHash, previous };
+  controller.showMenu('archive-duplicate', [
+    { id: 'duplicate-choose-another', label: 'Choose another archive', description: 'Recommended when this ZIP was selected accidentally' },
+    { id: 'duplicate-apply-again', label: 'Apply this archive again', description: 'Rebuild the plan against the current project state' },
+    { id: 'duplicate-view-run', label: 'Show previous result', description: `Run ${previous.id} · ${previous.status}` },
+  ], 'Archive was used before', 0, [
+    formatArchiveName(archivePath),
+    `Previously used: ${new Date(previous.createdAt).toLocaleString('en-GB')}`,
+    previous.plan?.counts ? compactPlanLine({ counts: previous.plan.counts }) : 'Previous plan unavailable',
+  ]);
+}
+
+async function activateDuplicate(controller, itemId) {
+  const pending = controller.state.pendingArchive;
+  if (!pending) return beginArchiveInput(controller);
+  if (itemId === 'duplicate-choose-another') return beginArchiveInput(controller);
+  if (itemId === 'duplicate-apply-again') return inspectArchivePath(controller, pending.archivePath, { allowDuplicate: true, archiveHash: pending.archiveHash });
+  if (itemId === 'duplicate-view-run') {
+    const run = pending.previous;
+    controller.message('Previous archive result', [
+      `Run: ${run.id} · ${run.status}`,
+      ...(run.plan?.counts ? [compactPlanLine({ counts: run.plan.counts })] : []),
+      `Commit: ${run.commit ? `${run.commit.revision} ${firstLine(run.commit.message)}` : 'none'}`,
+    ]);
+    return showDuplicateWarning(controller, pending.archivePath, pending.archiveHash, run);
+  }
 }
 
 function serializePlan(plan) {
@@ -420,6 +359,72 @@ function serializePlan(plan) {
   };
 }
 
+function llmRecord(state, result, diagnosticsPath, durationMs = 0) {
+  return {
+    durationMs, provider: state.settings.llmProvider, model: state.settings.llmModel, language: state.settings.llmLanguage,
+    summary: result.summary, commitMessage: result.commitMessage || null, warning: result.warning || null,
+    assessment: result.assessment ?? result.structureAssessment?.assessment ?? null,
+    confidence: result.confidence ?? result.structureAssessment?.confidence ?? null,
+    reasons: result.reasons ?? result.structureAssessment?.reasons ?? null,
+    diagnostics: result.diagnostics || null, diagnosticsPath,
+  };
+}
+
+export function continueAfterSafety(controller) {
+  const { state } = controller;
+  const plan = state.plan;
+  if (plan.conflicts.length && state.workflow.policy.conflictPolicy !== 'overwrite') return showConflictSummary(controller);
+  if (plan.conflicts.length) controller.message('Saved conflict policy applied', [`Archive versions selected for ${plan.conflicts.length} conflicts; each file will be backed up.`], 'warning');
+  if (state.workflow.policy.confirmPlan || plan.skipped.length > 0 || (state.archiveSafety?.warnings?.length && !state.archiveSafety.acknowledged)) return showPlanReview(controller);
+  controller.message('Safe plan accepted automatically', [compactPlanLine(plan), 'The saved workflow allows conflict-free plans to continue after the normal backup.'], 'choice');
+  return startApply(controller);
+}
+
+function requiresSafetyReview(safety) {
+  if (!safety) return false;
+  if (safety.warnings?.length) return true;
+  return ['suspicious', 'unsuitable'].includes(safety.llm?.assessment);
+}
+
+function assessmentRecord(value, mode) {
+  if (!value?.assessment) return null;
+  return {
+    mode,
+    assessment: value.assessment,
+    confidence: value.confidence ?? 'low',
+    reasons: value.reasons ?? value.summary ?? [],
+  };
+}
+
+function setBusy(controller, label, value, total, detail) {
+  controller.state.busy = true;
+  controller.state.screen = 'applying';
+  controller.state.busyLabel = label;
+  controller.state.progress = { value, total, detail };
+  controller.invalidate();
+}
+
+function setProgress(controller, value, total, detail) {
+  controller.state.progress = { value, total: Math.max(1, total), detail };
+  controller.invalidate();
+}
+
+async function previousLlmEstimate(state) {
+  const runs = (await listProjectRuns(state.project.root, { limit: 40 })).filter((run) => run.id !== state.run.id);
+  const analytics = buildRunAnalytics(runs);
+  const sameModel = analytics.llm.byModel.find((item) => item.name === `${state.settings.llmProvider} · ${state.settings.llmModel}`);
+  return sameModel?.medianMs || analytics.llm.total.medianMs || 0;
+}
+
+function formatEstimate(milliseconds) {
+  if (milliseconds >= 60_000) return `${Math.max(1, Math.round(milliseconds / 60_000))} min`;
+  return `${Math.max(1, Math.round(milliseconds / 1000))} sec`;
+}
+
 function changedCount(plan) {
   return plan.created.length + plan.updated.length + plan.deleted.length;
+}
+
+function firstLine(value) {
+  return String(value ?? '').split(/\r?\n/, 1)[0];
 }

@@ -20,6 +20,8 @@ test('LM Studio profile uses the loaded instance context and reasoning capabilit
   assert.equal(profile.maxContextLength, 131_072);
   assert.equal(profile.reasoningOffSupported, true);
   assert.equal(profile.source, 'loaded-instance');
+  assert.equal(profile.requestModel, 'custom-instance');
+  assert.equal(profile.loadedModel, true);
 });
 
 test('LM Studio profile falls back to maximum context for an unloaded model', async () => {
@@ -30,6 +32,8 @@ test('LM Studio profile falls back to maximum context for an unloaded model', as
   const profile = await getLocalModelProfile('lmstudio', 'gemma', { fetchImpl });
   assert.equal(profile.contextLength, 65_536);
   assert.equal(profile.source, 'model-metadata');
+  assert.equal(profile.requestModel, 'gemma');
+  assert.equal(profile.loadedModel, false);
 });
 
 test('Ollama profile prefers the actually allocated running context', async () => {

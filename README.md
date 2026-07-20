@@ -53,6 +53,24 @@ Recommended choices are already selected. The wizard saves the workflow only aft
 
 Dotfiles and dot-directories are ordinary project paths. Zipflow synchronizes paths such as `.github/`, `.config/`, and other dot-prefixed files unless the project's existing `.gitignore` excludes them. A small permanent safety set remains enabled for every workflow: `.env`, `.env.*`, `.venv/**`, and `.DS_Store`. Protected `.git/`, `.zipflow/`, and supported archive control files are also never applied.
 
+## Daily project screen
+
+For an existing workflow, the project screen presents a middle-ground overview rather than hiding every setting or repeating the full setup wizard. It shows the selected archive mode, checks, conflict policy, commit behavior, and deployment policy above the main actions. **Start an update** remains the default action, while **Fine-tune workflow** opens the wizard only when one of the selected defaults needs adjustment.
+
+The same screen also provides:
+
+- **Repeat last archive** to rebuild the previous plan against the current project;
+- **Run history** to inspect earlier decisions, checks, commits, deployment, archive disposition, and rollback state;
+- **Create ZIP** with a preview before writing the archive.
+
+During an update, the header shows the current five-stage progression:
+
+```text
+Archive -> Review -> Apply -> Checks -> Finish
+```
+
+Activity entries use stable `INFO`, `RUN`, `DONE`, `WARN`, `FAIL`, and `YOU` roles so current work, completed work, problems, and user decisions remain distinguishable. Long-running LLM and check steps explain what result is expected before they start.
+
 ## Checks and custom commands
 
 Detected checks are shown as a multi-select list. `Space` or `Enter` toggles a check.
@@ -71,14 +89,15 @@ Zipflow performs the following sequence:
 4. Reads optional archive metadata such as the result commit message.
 5. Compares archive files with the current project by content hash.
 6. Writes a unified `changes.patch` representing the archive against the pre-apply local snapshot.
-7. Optionally sends that patch to the configured local LLM for a concise summary and proposed commit message.
-8. Writes a copyable Activity summary with every created, updated, deleted, preserved, and skipped path.
-9. Creates a path-specific backup before changing the project.
-10. Verifies that files have not changed since the plan was shown.
-11. Applies the selected changes as a recoverable transaction.
-12. Runs the configured checks.
-13. Optionally creates a result commit and runs deployment.
-14. Offers a report or rollback when appropriate.
+7. Optionally asks the configured local LLM to validate the archive structure or deeply review the patch while generating a concise summary and proposed commit message.
+8. Evaluates deterministic archive-age and snapshot-shrink warnings before application.
+9. Writes a copyable Activity summary with every created, updated, deleted, preserved, and skipped path.
+10. Creates a path-specific backup before changing the project.
+11. Verifies that files have not changed since the plan was shown.
+12. Applies the selected changes as a recoverable transaction.
+13. Runs the configured checks.
+14. Optionally creates a result commit and runs deployment.
+15. Offers a report or rollback when appropriate.
 
 If application fails after touching files, Zipflow restores every affected path from the backup before reporting the error.
 
@@ -88,7 +107,21 @@ Uncommitted changes do not block an update by themselves.
 
 A conflict is reported only when the archive would update or delete a path that currently has a Git change. Unrelated local changes are left alone. If the current file already has exactly the same content as the archive, it is classified as unchanged rather than conflicting.
 
-When conflicts exist, Zipflow first presents bulk choices: replace every conflict, keep every local conflict, choose files manually, or cancel and select the archive again. Per-file decisions appear only after **Choose files manually**. An optional checkpoint commit can preserve affected local files immediately before archive versions are used.
+When conflicts exist, Zipflow first presents bulk choices: replace every conflict, keep every local conflict, choose files manually, or cancel and select the archive again. Manual review then advances one file at a time. Each file can keep the local version, use the archive version, apply the same decision to the remaining conflicts, or open a diff before deciding. An optional checkpoint commit can preserve affected local files immediately before archive versions are used.
+
+The normal plan screen stays compact: counts for added, changed, removed, unchanged, ignored, preserved, and conflicting paths. **Review changes** opens grouped details with explicit reasons for skipped and preserved files. Text changes can be viewed as either a unified diff or, when the terminal is wide enough, a side-by-side diff. Distant changes are split into hunks; `N`/`]` and `P`/`[` move between them without losing the current file or diff mode. Binary and oversized files receive a safe informational comparison instead of being rendered as terminal text.
+
+
+
+## Archive safety review
+
+Zipflow compares the source ZIP with recent successful runs for the same project. Before any project file changes, it warns when:
+
+- the ZIP modification time is materially older than the last applied archive;
+- snapshot mode would delete at least ten paths and a large fraction of the existing managed scope;
+- a snapshot contains far fewer files than the previous applied archive.
+
+Warnings show the measured counts and ratios. The user can review changed files and diffs, continue explicitly, or choose another archive. A local LLM `suspicious` or `unsuitable` verdict appears on the same screen with its reasons, clearly marked as advisory.
 
 ## Archive modes
 
@@ -145,15 +178,23 @@ Ollama:    http://127.0.0.1:11434
 LM Studio: http://127.0.0.1:1234
 ```
 
+The **Archive review** setting controls how the local model participates:
+
+- **Summary only** sends the bounded patch for summary and commit-message generation;
+- **Structure guard** first compares the current project and archive directory/file trees, then labels the archive `suitable`, `suspicious`, or `unsuitable`;
+- **Deep patch review** uses one structured patch request to return the archive assessment, reasons, summary, and commit message together.
+
+The verdict is advisory. It can force an explicit safety-review screen but never replaces deterministic path validation, `.gitignore`, Git conflict detection, backups, or tests. A strongly unsuitable structure verdict stops further patch summarization for that request and explains why the archive appears unrelated.
+
 When enabled, every inspected archive with content changes produces:
 
 - `~/.zipflow/runs/<run-id>/changes.patch`;
 - a short Activity summary;
 - a proposed commit message stored in the JSON and text run reports.
 
-The system and user prompts are always English. The selected language applies only to the generated summary and commit message. Activity shows the current transport phase, model-load progress, prompt-processing progress when the provider exposes it, elapsed time, reasoning, and final content as the stream arrives.
+The system and user prompts are always English. The selected language applies only to the generated summary and commit message. Activity shows the exact transport and endpoint, model-load progress, prompt-processing progress when the provider exposes it, elapsed time, reasoning, and final content as the stream arrives. Press `Esc` during generation to cancel only the local LLM request; archive analysis then continues with the normal commit-message fallbacks.
 
-Before generation, Zipflow discovers the model context size when possible and calculates a conservative prompt budget with space reserved for instructions and output. The complete `changes.patch` remains stored in the run, while the model receives a structurally shortened patch when necessary: the complete changed-file manifest is retained and diff hunks are distributed across files instead of cutting text at an arbitrary byte boundary. Zipflow also caps the effective prompt context conservatively to reduce local GPU-memory pressure. Context-overflow and out-of-memory responses trigger a smaller-patch retry and are reported explicitly rather than as `No usable output`.
+Before generation, Zipflow discovers the model context size and loaded instances when possible and calculates a conservative prompt budget. For LM Studio, an already loaded instance ID is used directly and its context configuration is left unchanged, so Zipflow does not intentionally load a duplicate model. The prompt budget reserves space for instructions and output. The complete `changes.patch` remains stored in the run, while the model receives a structurally shortened patch when necessary: the complete changed-file manifest is retained and diff hunks are distributed across files instead of cutting text at an arbitrary byte boundary. Zipflow also caps the effective prompt context conservatively to reduce local GPU-memory pressure. Context-overflow and out-of-memory responses trigger a smaller-patch retry and are reported explicitly rather than as `No usable output`.
 
 Zipflow requests structured JSON and validates both fields before using them. If a reasoning model consumes its output budget before producing JSON, Zipflow performs a second compact formatting request against the generated draft. If only a useful summary can be recovered, that summary is kept while the commit message uses the configured fallback. Provider errors and sanitized raw diagnostics are saved in `~/.zipflow/runs/<run-id>/llm-diagnostics.json`. Local LLM failures never block archive application.
 
@@ -185,7 +226,7 @@ Deployment stdout, stderr, exit code, and duration are saved in the run report. 
 
 ## Global settings
 
-Press `Ctrl+B` to open global settings. The first screen contains only categories. `Enter`, `Space`, `Right`, or `Tab` opens the selected category; the category screen contains its settings and a **Back to categories** item. `Esc` or `Left` also returns to the category list. Zipflow remembers both the selected category and the selected item inside every category, so navigating back never resets the cursor. Text, secret, path, and numeric values are edited in compact modal dialogs over the settings screen.
+Press `Ctrl+B` to open global settings. The two-panel layout remains visible at every level: categories stay on the left and the selected category page stays on the right. `Enter` moves from a category into its concise parameter list. Selecting a value parameter temporarily replaces only the right panel with its choices, focused on the current value. `Enter` applies the value and `Esc` cancels it; both return to the originating parameter without moving the cursor. `Esc` from the parameter page returns focus to the category list, and another `Esc` closes settings. Text, secret, path, and numeric values open in compact modal dialogs over both panels, with placeholders, validation, and unit hints where applicable.
 
 Current settings include:
 
@@ -235,6 +276,14 @@ Zipflow detects CMake projects and suggests configure, build, and test commands 
 Zipflow suggests formatting, vet, test, and build checks.
 
 
+## Run history and repeated archives
+
+Every run stores its archive hash, archive metadata, safety warnings, LLM assessment, user decisions, plan, checks, commit, deployment, archive disposition, and rollback status. The project home exposes a compact history list and allows opening the full run details.
+
+**Performance analytics** aggregates recent history with medians, averages, success rates, minimum/maximum duration, and a recent trend for each check and each provider/model pair. It also reports how often LLM inputs were reduced and the average number of generation attempts. Previous medians are used as estimates while checks and LLM analysis are running.
+
+If the same archive hash has already been applied, Zipflow shows the previous result before continuing. **Repeat last archive** deliberately bypasses that duplicate guard and rebuilds the plan against the current working tree, which is useful after changing workflow settings or resolving an external problem.
+
 ## Creating a ZIP
 
 The project home includes **Create ZIP** with four modes:
@@ -272,6 +321,9 @@ Zipflow stores user data under:
 Set `ZIPFLOW_HOME` to use a different location, for example in tests or an isolated environment.
 
 ## Controls
+
+Context-sensitive `?` help adds a short explanation for the currently selected action to Activity. Diff review also exposes direct local shortcuts for archive/local decisions, while every action remains available through the normal menu.
+
 
 ```text
 ↑ / ↓       move through choices

@@ -81,8 +81,10 @@ test('optional LLM API token is sent to native model discovery', async () => {
 
 test('LM Studio generation uses native streaming settings and a safe context length', async () => {
   let chatBody;
+  let chatUrl;
   const fetchImpl = async (url, options) => {
     if (url.endsWith('/api/v1/models')) return jsonResponse(lmModels(32_000));
+    chatUrl = url;
     chatBody = JSON.parse(options.body);
     return nativeCompletion(JSON.stringify({
       summary: ['Добавлена проверка конфигурации.'],
@@ -97,13 +99,16 @@ test('LM Studio generation uses native streaming settings and a safe context len
     patchContent: 'diff --git a/a.js b/a.js\n@@ -1 +1 @@\n-old\n+new\n',
   }, { fetchImpl });
 
+  assert.equal(chatUrl, 'http://127.0.0.1:1234/api/v1/chat');
   assert.deepEqual(result.summary, ['Добавлена проверка конфигурации.']);
   assert.equal(result.commitMessage, 'Добавить проверку конфигурации');
-  assert.match(chatBody.input, /SYSTEM:\nYou analyze source-code patches/);
-  assert.match(chatBody.input, /Write both summary and commitMessage in Russian/);
+  assert.match(chatBody.system_prompt, /You analyze source-code patches/);
+  assert.match(chatBody.system_prompt, /Write both summary and commitMessage in Russian/);
+  assert.match(chatBody.input, /Project: fixture/);
   assert.equal(chatBody.stream, true);
   assert.equal(chatBody.reasoning, 'off');
-  assert.ok(chatBody.context_length <= 16_384);
+  assert.equal(chatBody.model, 'gemma-loaded');
+  assert.equal('context_length' in chatBody, false, 'loaded instances must not be reconfigured or loaded again');
 });
 
 test('LM Studio native stream exposes model loading, prompt progress, reasoning, and answer chunks', async () => {
@@ -232,4 +237,43 @@ test('unstructured reasoning can preserve a summary when no JSON is available', 
 
   assert.deepEqual(result.summary, ['Добавлена нормализация путей.', 'Обновлена блокировка проектов.']);
   assert.equal(result.commitMessage, 'Исправить идентификацию проекта');
+});
+
+test('LM Studio reuses a loaded instance when the saved model is the catalog key', async () => {
+  const requests = [];
+  const fetchImpl = async (url, options = {}) => {
+    requests.push({ url, body: options.body ? JSON.parse(options.body) : null });
+    if (url.endsWith('/api/v1/models')) return jsonResponse(lmModels(24_000));
+    return nativeCompletion('{"summary":["Updated files"],"commitMessage":"Update files"}');
+  };
+
+  const result = await generateChangeDescription({
+    settings: { llmProvider: 'lmstudio', llmModel: 'gemma', llmLanguage: 'English', llmApiToken: '' },
+    project: { name: 'fixture', labels: ['Node.js'] },
+    plan: { counts: { created: 0, updated: 1, deleted: 0 } },
+    patchContent: 'diff --git a/a.js b/a.js\n@@ -1 +1 @@\n-old\n+new\n',
+  }, { fetchImpl });
+
+  const chat = requests.find((item) => item.url.endsWith('/api/v1/chat'));
+  assert.ok(chat);
+  assert.equal(chat.body.model, 'gemma-loaded');
+  assert.equal('context_length' in chat.body, false);
+  assert.equal(result.diagnostics.profile.loadedModel, true);
+});
+
+test('Escape cancellation aborts a local LLM stream with a dedicated error', async () => {
+  const abortController = new AbortController();
+  const fetchImpl = async (_url, options) => new Promise((_resolve, reject) => {
+    options.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), { once: true });
+  });
+  const pending = createLocalCompletion({
+    provider: 'lmstudio', model: 'fixture', messages: [], responseSchema: { type: 'object' },
+  }, { fetchImpl, signal: abortController.signal });
+  abortController.abort();
+
+  await assert.rejects(pending, (error) => {
+    assert.equal(error.code, 'cancelled');
+    assert.match(error.message, /cancelled/i);
+    return true;
+  });
 });

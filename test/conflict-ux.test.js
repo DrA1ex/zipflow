@@ -9,7 +9,7 @@ import { createRecommendedWorkflow } from '../src/workflow/defaults.js';
 import { discoverProject } from '../src/project/detect.js';
 import { createZip, initGit, tempDir, writeFiles } from '../test-support/helpers.js';
 
-test('conflicts first show an Activity summary and bulk choices before per-file selection', async () => {
+test('conflicts show a compact summary before a one-file-at-a-time review queue', async () => {
   const home = await tempDir('zipflow-conflict-home-');
   const root = await tempDir('zipflow-conflict-project-');
   const archive = path.join(await tempDir('zipflow-conflict-archive-'), 'update.zip');
@@ -39,7 +39,7 @@ test('conflicts first show an Activity summary and bulk choices before per-file 
     await submitRunEditor(controller);
 
     assert.equal(state.screen, 'conflict-summary');
-    assert.ok(state.messages.some((message) => message.title === 'Update plan' && message.lines.some((line) => /src\/index\.js/.test(line))));
+    assert.ok(state.messages.some((message) => message.title === 'Update plan' && message.lines.some((line) => /1 added · 1 changed/.test(line))));
     assert.deepEqual(state.menuItems.map((item) => item.id), [
       'replace-all-conflicts',
       'keep-all-conflicts',
@@ -48,8 +48,13 @@ test('conflicts first show an Activity summary and bulk choices before per-file 
     ]);
 
     await activateRun(controller, 'choose-conflicts');
-    assert.equal(state.screen, 'conflicts');
-    assert.ok(state.menuItems.some((item) => item.id === 'conflict:0'));
+    assert.equal(state.screen, 'conflict-file');
+    assert.match(state.panelIntro.join(' '), /src\/index\.js/);
+    assert.ok(state.menuItems.some((item) => item.id === 'conflict-view-diff'));
+
+    await activateRun(controller, 'conflict-use-archive');
+    assert.equal(state.screen, 'plan-review');
+    assert.equal(state.decisions.get('src/index.js'), 'archive');
     await controller.cleanup();
   } finally {
     delete process.env.ZIPFLOW_HOME;

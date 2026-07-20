@@ -4,6 +4,7 @@ import { renderToString } from 'terlio.js';
 import { createInitialState, appendMessage, setScreen } from '../src/app/state.js';
 import { renderZipflow } from '../src/ui/render.js';
 import { ZipflowController } from '../src/app/controller.js';
+import { ZIPFLOW_VERSION } from '../src/version.js';
 
 test('renders the interactive project home without layout errors', () => {
   const state = createInitialState();
@@ -20,7 +21,7 @@ test('renders the interactive project home without layout errors', () => {
 
   const output = renderToString(renderZipflow({ state, width: 100, height: 30 }), { width: 100, height: 30 });
 
-  assert.match(output, /Zipflow/);
+  assert.match(output, new RegExp(`Zipflow ${ZIPFLOW_VERSION.replaceAll('.', '\\.')}`));
   assert.match(output, /Start an update/);
   assert.match(output, /Project detected/);
 });
@@ -54,12 +55,38 @@ test('Activity renders incremental local LLM progress and streamed text', () => 
   state.llmRuntime = {
     provider: 'lmstudio', model: 'gemma', label: 'The model is analyzing the patch',
     elapsedMs: 12_000, chunks: 8, reasoning: 'Inspecting changed files\nChecking tests', content: '',
+    transport: 'LM Studio native', endpoint: '/api/v1/chat', requestModel: 'gemma-loaded', loadedModel: true,
   };
 
   const output = renderToString(renderZipflow({ state, width: 110, height: 32 }), { width: 110, height: 32 });
 
   assert.match(output, /Local LLM · lmstudio · gemma/);
+  assert.match(output, /LM Studio native · POST \/api\/v1\/chat/);
+  assert.match(output, /gemma-loaded · already loaded/);
   assert.match(output, /The model is analyzing the patch/);
   assert.match(output, /Checking tests/);
   assert.match(output, /8 chunks/);
+});
+
+test('run screens show the current five-step stage and typed Activity entries', () => {
+  const state = createInitialState();
+  state.project = { name: 'fixture', root: '/tmp/fixture', labels: ['Node.js'], git: true };
+  state.workflow = { policy: { label: 'Practical' } };
+  state.run = { id: 'run-1' };
+  appendMessage(state, 'Archive inspected', ['fixture.zip'], 'success');
+  appendMessage(state, 'Conflict decision', ['Keep local'], 'choice');
+  setScreen(state, 'plan-review', { items: [{ id: 'apply', label: 'Apply update' }], status: 'Review' });
+
+  const output = renderToString(renderZipflow({ state, width: 100, height: 30 }), { width: 100, height: 30 });
+  assert.match(output, /Stage: 2\/5 Review/);
+  assert.match(output, /\[YOU \] Conflict decision/);
+
+  const completedState = createInitialState();
+  completedState.project = state.project;
+  completedState.workflow = state.workflow;
+  completedState.run = state.run;
+  appendMessage(completedState, 'Archive inspected', ['fixture.zip'], 'success');
+  setScreen(completedState, 'plan-review', { items: [{ id: 'apply', label: 'Apply update' }], status: 'Review' });
+  const completedOutput = renderToString(renderZipflow({ state: completedState, width: 100, height: 30 }), { width: 100, height: 30 });
+  assert.match(completedOutput, /\[DONE\] Archive inspected/);
 });

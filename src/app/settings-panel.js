@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { handleInputEditorKey } from 'terlio.js';
-import { listLocalModels, providerDefinition } from '../llm/client.js';
+import { listLocalModelChoices, providerDefinition } from '../llm/client.js';
 import { loadManagedHistory, resetManagedHistory } from '../history/managed.js';
 import { saveSettings } from '../settings/store.js';
 import { ensureDir } from '../utils/fs.js';
@@ -8,7 +8,7 @@ import { completePath, expandHome } from '../utils/paths.js';
 import { parseByteSize } from '../utils/size.js';
 import { setScreen } from './state.js';
 import {
-  settingsDefinitions, settingsEditorValue, settingsFieldDefinition, settingsOptions,
+  settingsChoices, settingsDefinitions, settingsEditorValue, settingsFieldDefinition, settingsParameters,
 } from './settings-options.js';
 
 export function isSettingsScreen(screen) {
@@ -26,16 +26,16 @@ export async function openSettings(controller) {
       selectedIndex: state.selectedIndex,
       status: state.status,
     },
-    mode: 'categories',
-    settingIndex: 0,
-    optionIndex: 0,
-    optionIndices: {},
+    focus: 'categories',
+    categoryIndex: 0,
+    parameterIndices: {},
+    choiceIndices: {},
+    activeParameterId: null,
     models: [],
     modelsProvider: null,
     modelError: null,
     loadingModels: false,
     managedCount: history.paths.length,
-    confirmHistoryReset: false,
     modal: null,
   };
   setScreen(state, 'settings', { status: 'Global settings' });
@@ -75,7 +75,7 @@ export async function submitSettingsEditor(controller) {
     state.settings = await saveSettings({ ...state.settings, [modal.field.id]: value });
     if (modal.field.id === 'llmApiToken') resetModelCache(state.settingsPanel);
     state.settingsPanel.modal = null;
-    restoreOptionById(state, modal.returnOptionId);
+    restoreParameter(state, modal.returnParameterId);
     state.status = `${modal.field.label} saved`;
     controller.invalidate();
     return true;
@@ -91,26 +91,19 @@ export async function handleSettingsKey(controller, key) {
   const panel = controller.state.settingsPanel;
   if (!panel) return false;
   if (panel.modal) return handleModalKey(controller, key);
-  if (key.name === 'escape' || key.name === 'left') {
-    if (panel.mode === 'options') return showCategories(controller);
-    closeSettings(controller);
-    return true;
-  }
+  if (key.name === 'escape' || key.name === 'left') return handleBack(controller);
   if (key.name === 'up' || key.name === 'down') {
     const delta = key.name === 'up' ? -1 : 1;
-    if (panel.mode === 'categories') {
-      panel.settingIndex = wrap(panel.settingIndex + delta, settingsDefinitions(controller.state).length);
-    } else {
-      panel.optionIndex = moveOption(controller.state, panel.optionIndex, delta);
-      rememberOptionIndex(controller.state);
-    }
+    if (panel.focus === 'categories') await moveCategory(controller, delta);
+    else if (panel.focus === 'parameters') moveParameter(controller.state, delta);
+    else moveChoice(controller.state, delta);
     controller.invalidate();
     return true;
   }
   if (['enter', 'space', 'right', 'tab'].includes(key.name)) {
-    if (panel.mode === 'categories') return openSelectedCategory(controller);
-    await activateOption(controller, panel.optionIndex);
-    return true;
+    if (panel.focus === 'categories') return enterParameters(controller);
+    if (panel.focus === 'parameters') return activateParameter(controller);
+    return activateChoice(controller);
   }
   return true;
 }
@@ -118,52 +111,152 @@ export async function handleSettingsKey(controller, key) {
 export async function selectSetting(controller, index) {
   const panel = controller.state.settingsPanel;
   if (!panel) return;
-  panel.settingIndex = clamp(index, 0, settingsDefinitions(controller.state).length - 1);
-  await openSelectedCategory(controller);
+  panel.categoryIndex = clamp(index, 0, settingsDefinitions(controller.state).length - 1);
+  await ensureDefinitionData(controller, currentDefinition(controller.state));
+  panel.focus = 'parameters';
+  restoreParameter(controller.state);
+  controller.state.status = currentDefinition(controller.state).label;
+  controller.invalidate();
 }
 
-export async function selectOption(controller, index) {
+export async function selectParameter(controller, index) {
   const panel = controller.state.settingsPanel;
   if (!panel) return;
-  panel.optionIndex = clamp(index, 0, optionsFor(controller.state).length - 1);
-  rememberOptionIndex(controller.state);
-  await activateOption(controller, panel.optionIndex);
+  panel.focus = 'parameters';
+  setParameterIndex(controller.state, index);
+  await activateParameter(controller);
+}
+
+export async function selectChoice(controller, index) {
+  const panel = controller.state.settingsPanel;
+  if (!panel || panel.focus !== 'choices') return;
+  panel.choiceIndices[panel.activeParameterId] = clamp(index, 0, currentChoices(controller.state).length - 1);
+  await activateChoice(controller);
 }
 
 export function settingsViewModel(state) {
   const definitions = settingsDefinitions(state);
   const selectedSetting = currentDefinition(state);
-  const mode = state.settingsPanel?.mode ?? 'categories';
+  const parameters = settingsParameters(state, selectedSetting);
+  const parameterIndex = currentParameterIndex(state, parameters);
+  const activeParameter = panelParameter(state, parameters);
+  const choices = state.settingsPanel?.focus === 'choices' && activeParameter
+    ? settingsChoices(state, activeParameter)
+    : [];
   return {
-    mode,
+    focus: state.settingsPanel?.focus ?? 'categories',
     definitions,
     selectedSetting,
-    options: mode === 'options' ? optionsFor(state) : [],
-    selectedIndex: mode === 'categories'
-      ? state.settingsPanel?.settingIndex ?? 0
-      : state.settingsPanel?.optionIndex ?? 0,
-    settingIndex: state.settingsPanel?.settingIndex ?? 0,
-    optionIndex: state.settingsPanel?.optionIndex ?? 0,
+    parameters,
+    choices,
+    activeParameter,
+    categoryIndex: state.settingsPanel?.categoryIndex ?? 0,
+    parameterIndex,
+    choiceIndex: currentChoiceIndex(state, choices, activeParameter),
     modal: state.settingsPanel?.modal ?? null,
   };
 }
 
-async function openSelectedCategory(controller) {
+async function handleBack(controller) {
+  const panel = controller.state.settingsPanel;
+  if (panel.focus === 'choices') {
+    panel.focus = 'parameters';
+    panel.activeParameterId = null;
+    controller.state.status = currentDefinition(controller.state).label;
+    controller.invalidate();
+    return true;
+  }
+  if (panel.focus === 'parameters') {
+    panel.focus = 'categories';
+    controller.state.status = 'Global settings';
+    controller.invalidate();
+    return true;
+  }
+  closeSettings(controller);
+  return true;
+}
+
+async function moveCategory(controller, delta) {
   const { state } = controller;
-  const panel = state.settingsPanel;
-  panel.mode = 'options';
+  const definitions = settingsDefinitions(state);
+  state.settingsPanel.categoryIndex = wrap(state.settingsPanel.categoryIndex + delta, definitions.length);
   await ensureDefinitionData(controller, currentDefinition(state));
-  panel.optionIndex = savedOptionIndex(state);
+  restoreParameter(state);
+  state.status = currentDefinition(state).label;
+}
+
+async function enterParameters(controller) {
+  const { state } = controller;
+  await ensureDefinitionData(controller, currentDefinition(state));
+  state.settingsPanel.focus = 'parameters';
+  restoreParameter(state);
   state.status = currentDefinition(state).label;
   controller.invalidate();
   return true;
 }
 
-function showCategories(controller) {
+async function activateParameter(controller) {
   const { state } = controller;
-  rememberOptionIndex(state);
-  state.settingsPanel.mode = 'categories';
-  state.status = 'Global settings';
+  const parameter = panelParameter(state);
+  if (!parameter || parameter.disabled) return true;
+  rememberParameter(state, parameter.id);
+  if (parameter.type === 'input') {
+    openSettingModal(controller, parameter.fieldId, parameter.id);
+    return true;
+  }
+  state.settingsPanel.focus = 'choices';
+  state.settingsPanel.activeParameterId = parameter.id;
+  if (parameter.settingId === 'llmModel' && state.settings.llmProvider !== 'disabled') {
+    await ensureModels(controller);
+  }
+  const choices = settingsChoices(state, parameter);
+  state.settingsPanel.choiceIndices[parameter.id] = selectedChoiceIndex(state, choices, parameter);
+  state.status = parameter.label;
+  controller.invalidate();
+  return true;
+}
+
+async function activateChoice(controller) {
+  const { state } = controller;
+  const parameter = panelParameter(state);
+  const choices = currentChoices(state);
+  const index = currentChoiceIndex(state, choices, parameter);
+  const option = choices[index];
+  if (!parameter || !option || option.disabled) return true;
+  if (option.action === 'refresh-models') {
+    await refreshModels(controller);
+    const refreshed = currentChoices(state);
+    state.settingsPanel.choiceIndices[parameter.id] = selectedChoiceIndex(state, refreshed, parameter);
+    controller.invalidate();
+    return true;
+  }
+  if (option.action === 'history-cancel') return returnToParameters(controller, parameter.id, 'Managed-file history was not changed');
+  if (option.action === 'history-reset-confirm') {
+    const result = await resetManagedHistory(state.project.root);
+    state.settingsPanel.managedCount = 0;
+    controller.message('Managed-file history reset', [`${result.removed} recorded paths removed.`], 'warning');
+    return returnToParameters(controller, parameter.id, 'Managed-file history reset');
+  }
+  if (option.settingId) {
+    state.settings = await saveSettings({ ...state.settings, [option.settingId]: option.value });
+    if (option.settingId === 'archivePolicy' && option.value === 'move') {
+      await ensureDir(path.resolve(expandHome(state.settings.archiveDirectory)));
+    }
+    if (option.settingId === 'llmProvider') {
+      resetModelCache(state.settingsPanel);
+      if (option.value !== 'disabled') await refreshModels(controller, { quiet: true });
+    }
+    return returnToParameters(controller, parameter.id, `${option.label} selected`);
+  }
+  return true;
+}
+
+function returnToParameters(controller, parameterId, status) {
+  const { state } = controller;
+  state.settingsPanel.focus = 'parameters';
+  state.settingsPanel.activeParameterId = null;
+  restoreParameter(state, parameterId);
+  state.status = status;
   controller.invalidate();
   return true;
 }
@@ -194,66 +287,10 @@ async function handleModalKey(controller, key) {
   return true;
 }
 
-async function activateOption(controller, index) {
-  const { state } = controller;
-  const option = optionsFor(state)[index];
-  if (!option || option.disabled) return;
-  if (option.action === 'back-categories') return showCategories(controller);
-  if (option.action === 'refresh-models') return refreshModels(controller);
-  if (option.action === 'edit-setting') return openSettingModal(controller, option.fieldId, option.id);
-  if (option.action === 'clear-token') {
-    state.settings = await saveSettings({ ...state.settings, llmApiToken: '' });
-    resetModelCache(state.settingsPanel);
-    state.status = 'LLM API token cleared';
-    controller.invalidate();
-    return;
-  }
-  if (option.action === 'reset-history') {
-    state.settingsPanel.confirmHistoryReset = true;
-    restoreOptionById(state, 'confirm-history-reset');
-    state.status = 'Confirm managed-file history reset';
-    controller.invalidate();
-    return;
-  }
-  if (option.action === 'cancel-history-reset') {
-    state.settingsPanel.confirmHistoryReset = false;
-    restoreOptionById(state, 'reset-history');
-    state.status = 'Managed-file history was not changed';
-    controller.invalidate();
-    return;
-  }
-  if (option.action === 'confirm-history-reset') {
-    const result = await resetManagedHistory(state.project.root);
-    state.settingsPanel.managedCount = 0;
-    state.settingsPanel.confirmHistoryReset = false;
-    controller.message('Managed-file history reset', [`${result.removed} recorded paths removed.`], 'warning');
-    state.status = 'Managed-file history reset';
-    restoreOptionById(state, 'reset-history');
-    controller.invalidate();
-    return;
-  }
-  if (option.settingId) await applyChoice(controller, option);
-}
-
-async function applyChoice(controller, option) {
-  const { state } = controller;
-  state.settings = await saveSettings({ ...state.settings, [option.settingId]: option.value });
-  if (option.settingId === 'archivePolicy' && option.value === 'move') {
-    await ensureDir(path.resolve(expandHome(state.settings.archiveDirectory)));
-  }
-  if (option.settingId === 'llmProvider') {
-    resetModelCache(state.settingsPanel);
-    if (option.value !== 'disabled') await refreshModels(controller, { quiet: true });
-  }
-  restoreOptionById(state, option.id);
-  state.status = `${option.label} selected`;
-  controller.invalidate();
-}
-
-function openSettingModal(controller, fieldId, returnOptionId) {
+function openSettingModal(controller, fieldId, returnParameterId) {
   const field = settingsFieldDefinition(fieldId);
   if (!field) return;
-  controller.state.settingsPanel.modal = { field, error: null, returnOptionId };
+  controller.state.settingsPanel.modal = { field, error: null, returnParameterId };
   controller.state.editor.set(settingsEditorValue(controller.state, fieldId));
   controller.state.status = field.label;
   controller.invalidate();
@@ -268,9 +305,15 @@ async function refreshModels(controller, { quiet = false } = {}) {
   panel.modelError = null;
   controller.invalidate();
   try {
-    panel.models = await listLocalModels(provider, { apiToken: state.settings.llmApiToken });
+    panel.models = await listLocalModelChoices(provider, { apiToken: state.settings.llmApiToken });
     panel.modelsProvider = provider;
-    if (!panel.models.includes(state.settings.llmModel)) state.settings = await saveSettings({ ...state.settings, llmModel: '' });
+    const current = panel.models.find((item) => item.id === state.settings.llmModel)
+      ?? panel.models.find((item) => item.key === state.settings.llmModel);
+    if (current && current.id !== state.settings.llmModel) {
+      state.settings = await saveSettings({ ...state.settings, llmModel: current.id });
+    } else if (!current && state.settings.llmModel) {
+      state.settings = await saveSettings({ ...state.settings, llmModel: '' });
+    }
     if (!quiet) state.status = `${panel.models.length} ${providerDefinition(provider).label} models available`;
   } catch (error) {
     panel.models = [];
@@ -279,16 +322,19 @@ async function refreshModels(controller, { quiet = false } = {}) {
     if (!quiet) state.status = error.message;
   } finally {
     panel.loadingModels = false;
-    panel.optionIndex = savedOptionIndex(state);
     controller.invalidate();
   }
 }
 
 async function ensureDefinitionData(controller, definition) {
-  const panel = controller.state.settingsPanel;
-  if (definition.id === 'localLlm'
-    && controller.state.settings.llmProvider !== 'disabled'
-    && panel.modelsProvider !== controller.state.settings.llmProvider
+  if (definition.id === 'localLlm') await ensureModels(controller);
+}
+
+async function ensureModels(controller) {
+  const { state } = controller;
+  const panel = state.settingsPanel;
+  if (state.settings.llmProvider !== 'disabled'
+    && panel.modelsProvider !== state.settings.llmProvider
     && !panel.loadingModels) await refreshModels(controller, { quiet: true });
 }
 
@@ -316,49 +362,84 @@ async function validateSettingValue(field, entered) {
 
 function currentDefinition(state) {
   const definitions = settingsDefinitions(state);
-  const index = clamp(state.settingsPanel?.settingIndex ?? 0, 0, Math.max(0, definitions.length - 1));
-  if (state.settingsPanel) state.settingsPanel.settingIndex = index;
+  const index = clamp(state.settingsPanel?.categoryIndex ?? 0, 0, Math.max(0, definitions.length - 1));
+  if (state.settingsPanel) state.settingsPanel.categoryIndex = index;
   return definitions[index];
 }
 
-function optionsFor(state) {
-  return [
-    { id: 'back-categories', action: 'back-categories', label: '← Back to categories', description: 'Return without losing this category position.' },
-    ...settingsOptions(state, currentDefinition(state)),
-  ];
+function panelParameter(state, parameters = null) {
+  const items = parameters ?? settingsParameters(state, currentDefinition(state));
+  if (!items.length) return null;
+  return items[currentParameterIndex(state, items)] ?? items[0];
 }
 
-function savedOptionIndex(state) {
-  const panel = state.settingsPanel;
-  const definition = currentDefinition(state);
-  const options = optionsFor(state);
-  const saved = panel.optionIndices?.[definition.id];
-  if (Number.isInteger(saved) && options[saved] && !options[saved].disabled) return saved;
-  const selected = options.findIndex((option) => option.settingId === definition.primarySetting && option.selected);
-  return selected >= 0 ? selected : moveOption(state, -1, 1);
+function currentParameterIndex(state, parameters = null) {
+  const items = parameters ?? settingsParameters(state, currentDefinition(state));
+  const categoryId = currentDefinition(state).id;
+  const index = clamp(state.settingsPanel?.parameterIndices?.[categoryId] ?? 0, 0, Math.max(0, items.length - 1));
+  if (state.settingsPanel) state.settingsPanel.parameterIndices[categoryId] = index;
+  return index;
 }
 
-function rememberOptionIndex(state) {
-  const panel = state.settingsPanel;
-  if (!panel || panel.mode !== 'options') return;
-  panel.optionIndices[currentDefinition(state).id] = panel.optionIndex;
+function setParameterIndex(state, index) {
+  const items = settingsParameters(state, currentDefinition(state));
+  state.settingsPanel.parameterIndices[currentDefinition(state).id] = clamp(index, 0, Math.max(0, items.length - 1));
 }
 
-function restoreOptionById(state, optionId) {
-  const index = optionsFor(state).findIndex((option) => option.id === optionId);
-  state.settingsPanel.optionIndex = index >= 0 ? index : savedOptionIndex(state);
-  rememberOptionIndex(state);
-}
-
-function moveOption(state, current, delta) {
-  const options = optionsFor(state);
-  if (!options.length) return 0;
-  let next = current;
-  for (let attempts = 0; attempts < options.length; attempts += 1) {
-    next = wrap(next + delta, options.length);
-    if (!options[next].disabled) return next;
+function moveParameter(state, delta) {
+  const items = settingsParameters(state, currentDefinition(state));
+  if (!items.length) return;
+  let index = currentParameterIndex(state, items);
+  for (let attempts = 0; attempts < items.length; attempts += 1) {
+    index = wrap(index + delta, items.length);
+    if (!items[index].disabled) break;
   }
-  return 0;
+  setParameterIndex(state, index);
+}
+
+function moveChoice(state, delta) {
+  const choices = currentChoices(state);
+  if (!choices.length) return;
+  const parameter = panelParameter(state);
+  let index = currentChoiceIndex(state, choices, parameter);
+  for (let attempts = 0; attempts < choices.length; attempts += 1) {
+    index = wrap(index + delta, choices.length);
+    if (!choices[index].disabled) break;
+  }
+  state.settingsPanel.choiceIndices[parameter.id] = index;
+}
+
+function currentChoices(state) {
+  const parameter = panelParameter(state);
+  return parameter ? settingsChoices(state, parameter) : [];
+}
+
+function currentChoiceIndex(state, choices, parameter) {
+  if (!parameter || !choices.length) return 0;
+  const saved = state.settingsPanel?.choiceIndices?.[parameter.id];
+  if (Number.isInteger(saved) && choices[saved] && !choices[saved].disabled) return saved;
+  return selectedChoiceIndex(state, choices, parameter);
+}
+
+function selectedChoiceIndex(state, choices, parameter) {
+  const selected = choices.findIndex((item) => item.settingId === parameter.settingId
+    && (item.value === state.settings[parameter.settingId] || item.selected));
+  if (selected >= 0) return selected;
+  return choices.findIndex((item) => !item.disabled) >= 0 ? choices.findIndex((item) => !item.disabled) : 0;
+}
+
+function rememberParameter(state, parameterId) {
+  restoreParameter(state, parameterId);
+}
+
+function restoreParameter(state, parameterId = null) {
+  const items = settingsParameters(state, currentDefinition(state));
+  const categoryId = currentDefinition(state).id;
+  if (parameterId) {
+    const index = items.findIndex((item) => item.id === parameterId);
+    if (index >= 0) state.settingsPanel.parameterIndices[categoryId] = index;
+  }
+  currentParameterIndex(state, items);
 }
 
 function resetModelCache(panel) {

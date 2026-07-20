@@ -10,6 +10,7 @@ export function createInitialState() {
     run: null,
     archive: null,
     archiveMetadata: null,
+    archiveSafety: null,
     plan: null,
     decisions: new Map(),
     messages: [],
@@ -23,10 +24,20 @@ export function createInitialState() {
     checkRuntime: null,
     deployRuntime: null,
     llmRuntime: null,
+    llmAbortController: null,
     exportDraft: null,
     transcriptScroll: 0,
     transcriptSticky: true,
     activitySelection: createTextSelectionState(),
+    diffSelection: createTextSelectionState(),
+    panelIntro: [],
+    diffView: null,
+    planReview: null,
+    conflictReview: null,
+    reviewActions: null,
+    historyRuns: [],
+    runDetailsOrigin: null,
+    pendingArchive: null,
     status: 'Starting',
     settings: { ...DEFAULT_SETTINGS },
     settingsPanel: null,
@@ -34,10 +45,11 @@ export function createInitialState() {
   };
 }
 
-export function setScreen(state, screen, { items = [], selectedIndex = 0, status = null } = {}) {
+export function setScreen(state, screen, { items = [], selectedIndex = 0, status = null, intro = [] } = {}) {
   state.screen = screen;
   state.menuItems = items;
   state.selectedIndex = Math.max(0, Math.min(selectedIndex, Math.max(0, items.length - 1)));
+  state.panelIntro = Array.isArray(intro) ? intro : [String(intro ?? '')].filter(Boolean);
   if (status) state.status = status;
 }
 

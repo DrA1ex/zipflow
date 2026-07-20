@@ -39,23 +39,27 @@ Owns the interactive state machine.
 
 Flow modules call domain services but do not implement ZIP parsing, hashing, Git parsing, or filesystem transactions.
 
+### `src/diff`
+
+Builds bounded per-file comparisons for review. Text files produce a shared line model rendered as unified or side-by-side views. `hunks.js` groups distant changes with bounded context and exposes stable offsets for cyclic N/P navigation. Binary and oversized inputs return explicit informational records. Diff computation is independent of Terlio so it can be regression-tested without a terminal.
+
 ### `src/ui`
 
 Builds declarative Terlio views from application state.
 
-Rendering does not perform project mutations. Activity uses Terlio's component-level text selection; `Ctrl+T` is the explicit escape hatch for native terminal selection elsewhere. Pointer callbacks dispatch the same actions used by keyboard input. The selected Terlio semantic theme is resolved from global settings on every render, so theme changes apply immediately.
+Rendering does not perform project mutations. Global settings use a stable two-panel category/page layout; nested value selection replaces only the right pane and retains category, parameter, and current-value positions. Activity uses Terlio's component-level text selection; `Ctrl+T` is the explicit escape hatch for native terminal selection elsewhere. Pointer callbacks dispatch the same actions used by keyboard input. The selected Terlio semantic theme is resolved from global settings on every render, so theme changes apply immediately.
 
 ### `src/settings`
 
-Persists versioned global application settings in `~/.zipflow/settings.json`. Settings are deliberately separate from project workflows. They include the local LLM provider, optional bearer token, selected model, response language, and source-ZIP disposition policy.
+Persists versioned global application settings in `~/.zipflow/settings.json`. Settings are deliberately separate from project workflows. They include the local LLM provider, optional bearer token, selected model, response language, archive-review mode, and source-ZIP disposition policy.
 
 ### `src/llm`
 
-Uses provider-specific adapters. LM Studio model metadata comes from the native `/api/v1/models` endpoint and generation uses the native `/api/v1/chat` stream, including model-load, prompt-processing, reasoning, message, and error events. Ollama model metadata comes from `/api/ps` and `/api/show`; generation uses its OpenAI-compatible chat-completion stream. API tokens are applied only as authorization headers and are never emitted through Activity events.
+Uses provider-specific adapters. LM Studio model metadata comes from the native `/api/v1/models` endpoint and generation uses only the native `/api/v1/chat` stream, including model-load, prompt-processing, reasoning, message, and error events. Ollama model metadata comes from `/api/ps` and `/api/show`; generation uses its OpenAI-compatible chat-completion stream. Loaded LM Studio instances are resolved before generation and addressed by instance ID without overriding their context configuration. API tokens are applied only as authorization headers and are never emitted through Activity events. An `AbortSignal` is threaded through metadata, request, and SSE consumption so `Esc` cancels only LLM generation while the archive plan continues.
 
 `model-info.js` resolves the active or configured context size with a conservative fallback. `patch-budget.js` reserves context for instructions and output, keeps a complete changed-file manifest, and distributes available diff hunks across files. Context overflow and local compute-memory errors trigger progressively smaller-patch retries. `diagnostics.js` stores a bounded, sanitized request/result/error record in the run directory.
 
-Generation validates structured summary and commit-message JSON. Schema rejection retries with JSON mode where supported. A reasoning-only or length-limited response triggers a second formatting pass over the model draft, followed by a conservative unstructured-summary fallback. LLM errors remain non-fatal to archive application.
+`archive-review.js` can compare bounded project/archive trees before patch generation. Deep review extends the main structured response with `assessment`, `confidence`, and concise reasons, allowing the same request to produce the advisory verdict, summary, and commit message. Generation validates structured summary and commit-message JSON. Schema rejection retries with JSON mode where supported. A reasoning-only or length-limited response triggers a second formatting pass over the model draft, followed by a conservative unstructured-summary fallback. LLM errors remain non-fatal to archive application.
 
 ### `src/patch`
 
@@ -63,7 +67,7 @@ Builds and persists `changes.patch` from the pre-apply project snapshot and extr
 
 ### `src/history`
 
-Persists per-project paths previously created or updated by Zipflow. Managed-history snapshot deletion intersects missing local paths with this set. Applying updates advances the set; rollback restores its previous state; global settings can reset it explicitly.
+Persists per-project paths previously created or updated by Zipflow. `analytics.js` aggregates recent check and provider/model timing samples into medians, averages, success rates, retry/truncation counts, and recent trends. Managed-history snapshot deletion intersects missing local paths with this set. Applying updates advances the set; rollback restores its previous state; global settings can reset it explicitly.
 
 ### `src/project`
 
@@ -82,6 +86,8 @@ Collects source paths for tracked, non-ignored, interactive, and all-file export
 Validates and extracts ZIP archives into an isolated temporary directory. It rejects traversal, absolute paths, `.git`, symbolic links, duplicate or case-colliding paths, and configured size-limit violations.
 
 `disposition.js` owns the global post-run policy for the source ZIP. Move mode records only Zipflow-managed archives in `archive-index.json`; retention and size pruning can therefore never delete unrelated files from the selected directory.
+
+`risk.js` compares archive metadata and snapshot scope with recent successful project runs, producing explicit old-archive, large-deletion, and file-count shrink warnings.
 
 `metadata.js` reads supported archive control files, preferring `.zipflow/commit-message.txt`. Control files can provide a commit message but never become project files or snapshot deletion targets.
 
@@ -144,6 +150,26 @@ project
 
 Global settings use a category/detail state machine. The category screen contains only stable top-level categories. Opening a category replaces it with that category's options and an explicit back item; returning restores the previous category selection, and reopening restores the last selected option for that category. Dependent controls are omitted when their parent feature is disabled, and input-like values open in a modal without replacing the current settings level.
 
+## Interactive review model
+
+The main project screen exposes the selected workflow parameters before offering a fast update path. Fine-tuning remains a separate action rather than an unavoidable part of every run.
+
+Run UI state is layered without changing the underlying transaction model:
+
+```text
+compact plan
+  -> grouped plan review
+  -> file list
+  -> unified or side-by-side diff
+  -> return to the same file and selection
+```
+
+Conflict review uses a queue over the plan's conflicting items. A decision removes one item from the queue and advances to the next; bulk choices populate the same decision map without duplicating application logic. Diff views store their originating screen, item list, selected index, and introduction text so returning never loses the user's position.
+
+Activity messages are typed as information, running state, success, warning, error, or user choice. Completed live blocks collapse into a durable message, while the current five-stage run position is derived from application state and displayed separately in the header.
+
+Run history is persisted in existing run records rather than a second event database. Archive hashes support duplicate warnings, and workflow `lastRunId` resolves the deliberate repeat-last action.
+
 ## Run lifecycle
 
 A normal run follows this order:
@@ -154,7 +180,9 @@ archive input
   -> isolated extraction
   -> archive metadata
   -> persisted changes.patch
-  -> optional streamed local LLM summary and commit message
+  -> optional LLM structure guard or deep patch review
+  -> streamed local LLM summary and commit message
+  -> deterministic archive age/snapshot shrink review
   -> optional reasoning-draft formatting pass
   -> copyable Activity plan
   -> bulk conflict policy
@@ -189,6 +217,8 @@ The following rules are enforced below the UI layer:
 - dotfiles and dot-directories are synchronized normally unless protected, ignored, or part of the permanent safety set (`.env`, `.env.*`, `.venv/**`, `.DS_Store`);
 - protected and untracked ignored paths are removed from result-commit staging;
 - local LLM failures are recorded but cannot block planning or application;
+- local LLM archive verdicts are advisory and cannot disable deterministic protections;
+- suspicious archive age or snapshot shrink requires an explicit review decision;
 - API tokens are used only in request headers and are not copied into Activity or run reports;
 - source archive retention removes only files recorded in Zipflow's archive index;
 - files changed after plan review abort application;
@@ -246,5 +276,8 @@ Unit and integration tests use temporary projects and Git repositories. Regressi
 - Git initialization, ignore generation, and first commit;
 - all four ZIP export modes;
 - copyable Activity and native-selection fallback;
-- bulk-before-manual conflict UX;
-- TUI rendering.
+- bulk-before-manual conflict UX and one-file conflict queues;
+- unified and side-by-side file diff rendering with hunk navigation;
+- compact workflow home, five-stage run progress, duplicate/old/shrinking archive warnings, performance analytics, and persisted run history;
+- ZIP preview and post-create actions;
+- typed Activity and TUI rendering.

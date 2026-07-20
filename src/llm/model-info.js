@@ -6,28 +6,44 @@ export async function getLocalModelProfile(provider, model, {
   fetchImpl = fetch,
   timeoutMs = 10_000,
   apiToken = '',
+  signal = null,
 } = {}) {
-  if (!model) return fallbackProfile(provider);
+  if (!model) return fallbackProfile(provider, model);
   try {
-    if (provider === 'lmstudio') return await lmStudioProfile(model, { fetchImpl, timeoutMs, apiToken });
-    if (provider === 'ollama') return await ollamaProfile(model, { fetchImpl, timeoutMs, apiToken });
-  } catch {
-    return fallbackProfile(provider);
+    if (provider === 'lmstudio') return await lmStudioProfile(model, {
+      fetchImpl, timeoutMs, apiToken, signal,
+    });
+    if (provider === 'ollama') return await ollamaProfile(model, {
+      fetchImpl, timeoutMs, apiToken, signal,
+    });
+  } catch (error) {
+    if (error?.code === 'cancelled' || signal?.aborted) throw error;
+    return fallbackProfile(provider, model);
   }
-  return fallbackProfile(provider);
+  return fallbackProfile(provider, model);
 }
 
-export async function listLmStudioModelRecords({ fetchImpl = fetch, timeoutMs = 10_000, apiToken = '' } = {}) {
+export async function listLmStudioModelRecords({
+  fetchImpl = fetch,
+  timeoutMs = 10_000,
+  apiToken = '',
+  signal = null,
+} = {}) {
   const definition = providerDefinition('lmstudio');
   const payload = await requestJson(fetchImpl, `${definition.nativeBaseUrl}/models`, {
     method: 'GET', headers: authHeaders(apiToken),
-  }, timeoutMs);
+  }, timeoutMs, signal);
   return (payload.models ?? []).filter((item) => item.type === 'llm').map((item) => {
-    const loaded = item.loaded_instances ?? [];
+    const loadedInstances = (item.loaded_instances ?? []).map((entry) => ({
+      id: entry.id,
+      contextLength: numberOrNull(entry.config?.context_length),
+      config: entry.config ?? {},
+    }));
     return {
       key: item.key,
-      ids: [...new Set([item.key, ...loaded.map((entry) => entry.id)].filter(Boolean))],
-      contextLength: maxNumber(loaded.map((entry) => entry.config?.context_length)),
+      displayName: item.display_name ?? item.key,
+      ids: [...new Set([item.key, ...loadedInstances.map((entry) => entry.id)].filter(Boolean))],
+      loadedInstances,
       maxContextLength: numberOrNull(item.max_context_length),
       reasoningOptions: item.capabilities?.reasoning?.allowed_options ?? [],
       reasoningDefault: item.capabilities?.reasoning?.default ?? null,
@@ -38,26 +54,32 @@ export async function listLmStudioModelRecords({ fetchImpl = fetch, timeoutMs = 
 async function lmStudioProfile(model, options) {
   const records = await listLmStudioModelRecords(options);
   const record = records.find((item) => item.ids.includes(model) || item.key === model);
-  if (!record) return fallbackProfile('lmstudio');
-  const contextLength = record.contextLength ?? record.maxContextLength ?? FALLBACK_CONTEXT;
+  if (!record) return fallbackProfile('lmstudio', model);
+  const loaded = chooseLoadedInstance(record, model);
+  const contextLength = loaded?.contextLength ?? record.maxContextLength ?? FALLBACK_CONTEXT;
   return {
     provider: 'lmstudio',
     contextLength,
     maxContextLength: record.maxContextLength ?? contextLength,
-    source: record.contextLength ? 'loaded-instance' : 'model-metadata',
+    source: loaded ? 'loaded-instance' : 'model-metadata',
     reasoningOffSupported: record.reasoningOptions.includes('off'),
+    requestModel: loaded?.id ?? record.key,
+    configuredModel: model,
+    loadedModel: Boolean(loaded),
+    loadedInstanceId: loaded?.id ?? null,
+    displayName: record.displayName,
   };
 }
 
-async function ollamaProfile(model, { fetchImpl, timeoutMs, apiToken }) {
+async function ollamaProfile(model, { fetchImpl, timeoutMs, apiToken, signal }) {
   const definition = providerDefinition('ollama');
   const [running, details] = await Promise.all([
     requestJson(fetchImpl, `${definition.nativeBaseUrl}/ps`, {
       method: 'GET', headers: authHeaders(apiToken),
-    }, timeoutMs).catch(() => ({ models: [] })),
+    }, timeoutMs, signal).catch(() => ({ models: [] })),
     requestJson(fetchImpl, `${definition.nativeBaseUrl}/show`, {
       method: 'POST', headers: jsonHeaders(apiToken), body: JSON.stringify({ model, verbose: false }),
-    }, timeoutMs),
+    }, timeoutMs, signal),
   ]);
   const active = (running.models ?? []).find((item) => item.model === model || item.name === model);
   const configured = parseNumCtx(details.parameters);
@@ -71,28 +93,49 @@ async function ollamaProfile(model, { fetchImpl, timeoutMs, apiToken }) {
     maxContextLength: maximum ?? contextLength,
     source: active?.context_length ? 'running-model' : configured ? 'model-parameters' : maximum ? 'conservative-default' : 'fallback',
     reasoningOffSupported: true,
+    requestModel: model,
+    configuredModel: model,
+    loadedModel: Boolean(active),
+    loadedInstanceId: active?.model ?? active?.name ?? null,
+    displayName: model,
   };
 }
 
-function fallbackProfile(provider) {
+function chooseLoadedInstance(record, model) {
+  const exact = record.loadedInstances.find((item) => item.id === model);
+  if (exact) return exact;
+  if (model !== record.key || !record.loadedInstances.length) return null;
+  return [...record.loadedInstances].sort((left, right) => (right.contextLength ?? 0) - (left.contextLength ?? 0))[0];
+}
+
+function fallbackProfile(provider, model = '') {
   return {
     provider,
     contextLength: FALLBACK_CONTEXT,
     maxContextLength: FALLBACK_CONTEXT,
     source: 'fallback',
     reasoningOffSupported: false,
+    requestModel: model,
+    configuredModel: model,
+    loadedModel: false,
+    loadedInstanceId: null,
+    displayName: model,
   };
 }
 
-async function requestJson(fetchImpl, url, options, timeoutMs) {
+async function requestJson(fetchImpl, url, options, timeoutMs, signal) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const abort = () => controller.abort();
+  signal?.addEventListener('abort', abort, { once: true });
   try {
+    if (signal?.aborted) throw Object.assign(new Error('Local LLM generation was cancelled.'), { code: 'cancelled' });
     const response = await fetchImpl(url, { ...options, signal: controller.signal });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return response.json();
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener('abort', abort);
   }
 }
 

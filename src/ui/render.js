@@ -5,6 +5,7 @@ import {
   Modal,
   ProgressBar,
   RequireViewport,
+  Row,
   ScrollPane,
   SelectList,
   Text,
@@ -21,11 +22,13 @@ import {
 import { displayPath } from '../utils/paths.js';
 import { settingsViewModel } from '../app/settings-panel.js';
 import { llmActivityLines } from '../app/llm-progress.js';
-import { formatDuration } from './format.js';
+import { formatDuration, runStep } from './format.js';
+import { renderDiffDocument } from '../diff/hunks.js';
+import { ZIPFLOW_VERSION } from '../version.js';
 
 export function renderZipflow({ state, width, height }) {
   const theme = themes[state.settings?.theme] ?? themes.ocean;
-  const title = state.project?.name ? `Zipflow · ${state.project.name}` : 'Zipflow';
+  const title = state.project?.name ? `Zipflow ${ZIPFLOW_VERSION} · ${state.project.name}` : `Zipflow ${ZIPFLOW_VERSION}`;
   const subtitle = state.project ? displayPath(state.project.root) : 'Safe source archive updates';
   const footer = WorkspaceFooter({ left: footerHints(state), right: [state.status], theme });
   const { mainHeight } = resolveWorkspaceShellLayout({
@@ -43,7 +46,9 @@ export function renderZipflow({ state, width, height }) {
   });
   const main = state.screen === 'settings'
     ? renderSettings(state, width, mainHeight, theme)
-    : renderWorkflow(state, width, mainHeight, theme);
+    : state.screen === 'diff-view'
+      ? renderDiffView(state, width, mainHeight, theme)
+      : renderWorkflow(state, width, mainHeight, theme);
   return RequireViewport({
     width,
     height,
@@ -107,30 +112,35 @@ function renderCurrent(state, width, height, theme) {
   if (isEditorScreen(state.screen)) return renderEditor(state, width, height, theme);
   if (state.screen === 'checks-running') return renderChecksRunning(state, height, theme);
   if (state.screen === 'deploy-running') return renderDeployRunning(state, height, theme);
+  const intro = state.panelIntro ?? [];
   return WorkspacePane({
     title: ` ${screenTitle(state)} `,
     active: true,
     height,
     theme,
-    children: [SelectList({
-      title: 'Choose',
-      items: state.menuItems,
-      selectedIndex: state.selectedIndex,
-      windowSize: Math.max(2, height - 6),
-      getLabel: (item) => item.label,
-      getDescription: (item) => item.description ?? '',
-      getDisabled: (item) => item.disabled,
-      wrapItems: true,
-      maxItemLines: 3,
-      theme,
-      pointerId: 'zipflow:menu',
-      onSelect: (_item, index) => state.dispatch?.({ type: 'activate-index', index }),
-      onWheel: (event) => {
-        const delta = event.deltaY < 0 ? -1 : 1;
-        state.selectedIndex = clamp(state.selectedIndex + delta, 0, state.menuItems.length - 1);
-        event.preventDefault();
-      },
-    })],
+    children: [
+      ...intro.map((line, index) => Text(index === 0 ? color(theme, 'title', line) : color(theme, 'textMuted', line), { wrap: true })),
+      intro.length ? Text('') : null,
+      SelectList({
+        title: 'Choose',
+        items: state.menuItems,
+        selectedIndex: state.selectedIndex,
+        windowSize: Math.max(2, height - 6 - Math.min(6, intro.length)),
+        getLabel: (item) => item.label,
+        getDescription: (item) => item.description ?? '',
+        getDisabled: (item) => item.disabled,
+        wrapItems: true,
+        maxItemLines: 3,
+        theme,
+        pointerId: 'zipflow:menu',
+        onSelect: (_item, index) => state.dispatch?.({ type: 'activate-index', index }),
+        onWheel: (event) => {
+          const delta = event.deltaY < 0 ? -1 : 1;
+          state.selectedIndex = clamp(state.selectedIndex + delta, 0, state.menuItems.length - 1);
+          event.preventDefault();
+        },
+      }),
+    ].filter(Boolean),
   });
 }
 
@@ -178,7 +188,8 @@ function renderChecksRunning(state, height, theme) {
   const lines = runtime.checks.map((check, index) => {
     const result = runtime.results?.find((item) => item.id === check.id);
     const status = result ? (result.ok ? 'PASS' : 'FAIL') : index === runtime.activeIndex ? 'RUN ' : 'WAIT';
-    const duration = result ? ` ${formatDuration(result.durationMs)}` : '';
+    const estimate = runtime.estimates?.[check.name];
+    const duration = result ? ` ${formatDuration(result.durationMs)}` : estimate ? ` ~${formatDuration(estimate)}` : '';
     return `${status.padEnd(5)} ${check.name}${duration}`;
   });
   if (state.settings.checkOutput === 'last-line' && runtime.lastLine) lines.push('', runtime.lastLine);
@@ -205,46 +216,130 @@ function runtimePane(title, lines, height, theme) {
   });
 }
 
+function renderDiffView(state, width, height, theme) {
+  const view = state.diffView;
+  if (!view?.diff) return WorkspacePane({ title: ' DIFF ', active: true, height, theme, children: [Text('Diff is unavailable.')] });
+  const contentWidth = Math.max(40, width - 4);
+  const document = renderDiffDocument(view.diff, view.mode, contentWidth);
+  view.hunkOffsets = document.hunkOffsets;
+  view.hunkCount = document.hunkCount;
+  view.hunkIndex = clamp(view.hunkIndex ?? 0, 0, Math.max(0, document.hunkCount - 1));
+  if (view.pendingHunkJump) {
+    view.scroll = document.hunkOffsets[view.hunkIndex] ?? 0;
+    view.pendingHunkJump = false;
+  }
+  const lines = document.lines.map((line) => formatDiffLine(line, view.mode, theme));
+  const visibleRows = Math.max(1, height - 4);
+  const maxScroll = Math.max(0, lines.length - visibleRows);
+  view.scroll = clamp(view.scroll, 0, maxScroll);
+  const hunkLabel = document.hunkCount ? ` · HUNK ${view.hunkIndex + 1}/${document.hunkCount}` : '';
+  return ScrollPane({
+    title: ` ${view.diff.path} · ${view.mode === 'unified' ? 'UNIFIED' : 'SIDE BY SIDE'}${hunkLabel} `,
+    lines,
+    width,
+    height,
+    scroll: view.scroll,
+    footer: `${view.scroll + 1}-${Math.min(lines.length, view.scroll + visibleRows)} of ${Math.max(1, lines.length)} · N/P hunk · M mode · Esc back`,
+    theme,
+    pointerId: 'zipflow:diff',
+    selection: state.diffSelection,
+    onWheel: (event) => {
+      view.scroll = scrollBy(view.scroll, event.deltaY, maxScroll);
+      event.preventDefault();
+    },
+    onCopy: (text, _selection, _event, context) => copyTextToClipboard(text, { output: context.runtime.output }).copied,
+  });
+}
+
+function formatDiffLine(line, mode, theme) {
+  if (typeof line === 'string') return line;
+  if (mode === 'side-by-side') {
+    const separator = color(theme, 'textMuted', ' │ ');
+    if (line.type === 'hunk') return `${color(theme, 'accent', line.left)}${separator}${color(theme, 'accent', line.right)}`;
+    if (line.type === 'separator') return `${color(theme, 'textMuted', line.left)}${separator}${color(theme, 'textMuted', line.right)}`;
+    if (line.type === 'add') return `${color(theme, 'textMuted', line.left)}${separator}${color(theme, 'success', line.right)}`;
+    if (line.type === 'remove') return `${color(theme, 'danger', line.left)}${separator}${color(theme, 'textMuted', line.right)}`;
+    if (line.type === 'change') return `${color(theme, 'danger', line.left)}${separator}${color(theme, 'success', line.right)}`;
+    return `${line.left}${separator}${line.right}`;
+  }
+  if (line.type === 'hunk') return color(theme, 'accent', line.text);
+  if (line.type === 'separator') return color(theme, 'textMuted', line.text);
+  if (line.type === 'add') return color(theme, 'success', line.text);
+  if (line.type === 'remove') return color(theme, 'danger', line.text);
+  return line.text;
+}
+
 function renderSettings(state, width, height, theme) {
   const view = settingsViewModel(state);
-  const categories = view.mode === 'categories';
-  const items = categories ? view.definitions : view.options;
-  const title = categories ? ' SETTINGS ' : ` ${view.selectedSetting.label.toUpperCase()} `;
-  const description = categories
-    ? 'Choose a settings category. Enter opens it; Esc closes settings.'
+  const leftWidth = Math.max(24, Math.min(34, Math.floor(width * 0.3)));
+  const rightWidth = Math.max(26, width - leftWidth - 2);
+  const categories = WorkspacePane({
+    title: ' CATEGORIES ',
+    active: view.focus === 'categories' && !view.modal,
+    height,
+    theme,
+    children: [SelectList({
+      title: 'Settings',
+      items: view.definitions,
+      selectedIndex: view.categoryIndex,
+      windowSize: Math.max(2, height - 6),
+      getLabel: (item) => item.label,
+      getDescription: (item) => item.description ?? '',
+      wrapItems: true,
+      maxItemLines: 3,
+      theme,
+      pointerId: 'zipflow:settings-categories',
+      onSelect: (_item, index) => state.dispatch?.({ type: 'settings-select-setting', index }),
+    })],
+  });
+  const right = renderSettingsPage(state, view, rightWidth, height, theme);
+  const content = Row({ gap: 2, widths: [leftWidth, rightWidth], height }, categories, right);
+  if (!view.modal) return content;
+  return renderSettingsModal({ content, modal: view.modal, state, width, height, theme });
+}
+
+function renderSettingsPage(state, view, width, height, theme) {
+  const choosing = view.focus === 'choices';
+  const items = choosing ? view.choices : view.parameters;
+  const title = choosing
+    ? ` ${view.activeParameter?.label?.toUpperCase() ?? 'SELECT'} `
+    : ` ${view.selectedSetting.label.toUpperCase()} `;
+  const description = choosing
+    ? view.activeParameter?.description ?? ''
     : view.selectedSetting.description;
-  const content = WorkspacePane({
+  return WorkspacePane({
     title,
-    active: !view.modal,
+    active: view.focus !== 'categories' && !view.modal,
     height,
     theme,
     children: [
       Text(description, { wrap: true }),
       Text(''),
       SelectList({
-        title: categories ? 'Categories' : 'Options',
+        title: choosing ? 'Choose value' : 'Parameters',
         items,
-        selectedIndex: view.selectedIndex,
+        selectedIndex: choosing ? view.choiceIndex : view.parameterIndex,
         windowSize: Math.max(2, height - 8),
-        getLabel: (item) => {
-          if (categories || item.section || item.action) return item.label;
-          return `${item.selected ? '●' : '○'} ${item.label}`;
-        },
-        getDescription: (item) => item.description ?? '',
+        getLabel: (item) => choosing ? choiceLabel(state, item) : `${item.label}: ${item.value}`,
+        getDescription: (item) => item.disabled ? item.disabledReason ?? item.description ?? '' : item.description ?? '',
         getDisabled: (item) => item.disabled,
         wrapItems: true,
         maxItemLines: 3,
         theme,
-        pointerId: categories ? 'zipflow:settings-categories' : 'zipflow:settings-options',
+        pointerId: choosing ? 'zipflow:settings-choices' : 'zipflow:settings-parameters',
         onSelect: (_item, index) => state.dispatch?.({
-          type: categories ? 'settings-select-setting' : 'settings-select-option',
+          type: choosing ? 'settings-select-choice' : 'settings-select-parameter',
           index,
         }),
       }),
     ],
   });
-  if (!view.modal) return content;
-  return renderSettingsModal({ content, modal: view.modal, state, width, height, theme });
+}
+
+function choiceLabel(state, item) {
+  if (!item.settingId) return item.label;
+  const selected = item.selected || state.settings[item.settingId] === item.value;
+  return `${selected ? '●' : '○'} ${item.label}`;
 }
 
 function renderSettingsModal({ content, modal, state, width, height, theme }) {
@@ -289,8 +384,8 @@ function transcriptLines(state, theme) {
   const lines = [];
   if (!state.messages.length && !state.llmRuntime) return ['Starting Zipflow…'];
   for (const message of state.messages) {
-    const token = message.tone === 'error' ? 'danger' : message.tone === 'success' ? 'success' : message.tone === 'warning' ? 'warning' : 'title';
-    lines.push(color(theme, token, message.title));
+    const token = message.tone === 'error' ? 'danger' : message.tone === 'success' ? 'success' : message.tone === 'warning' ? 'warning' : message.tone === 'choice' ? 'accent' : 'title';
+    lines.push(color(theme, token, `${activityTag(message.tone)} ${message.title}`));
     for (const line of message.lines ?? []) lines.push(`  ${line}`);
     lines.push('');
   }
@@ -306,17 +401,17 @@ function screenTitle(state) {
     'setup-deletion-scope': 'Snapshot deletion', 'setup-git-checkpoint': 'Git checkpoint',
     'setup-git-result': 'Result commit', 'setup-git-message': 'Commit message source', 'commit-template': 'Commit template',
     'setup-deploy': 'Deployment', 'deploy-command': 'Deploy command', 'setup-review': 'Review',
-    'archive-input': 'Archive', 'plan-review': 'Update plan', 'plan-details': 'Changed files',
-    'conflict-summary': 'Conflict choices', 'conflict-checkpoint': 'Conflict checkpoint', conflicts: 'Choose files',
+    'archive-input': 'Archive', 'archive-duplicate': 'Archive already used', 'archive-safety': 'Archive safety', 'plan-review': 'Update plan', 'plan-details': 'Change groups', 'plan-files': 'Changed files', 'diff-view': 'Diff',
+    'conflict-summary': 'Conflict choices', 'conflict-checkpoint': 'Conflict checkpoint', 'conflict-file': 'Resolve conflict', conflicts: 'Choose files',
     applying: 'Applying update', 'checks-running': 'Checks', 'check-failed': 'Checks failed', commit: 'Commit',
     'commit-message': 'Commit message', 'deploy-prompt': 'Deployment', 'deploy-running': 'Deployment',
     'deploy-failed': 'Deployment failed', completed: 'Completed', 'run-details': 'Last run',
     'rollback-confirm': 'Rollback', 'rolling-back': 'Rolling back',
-    'export-mode': 'Create ZIP', 'export-select': 'Choose archive contents', 'export-path': 'Output archive',
+    'export-mode': 'Create ZIP', 'export-select': 'Choose archive contents', 'export-preview': 'ZIP preview', 'export-files': 'Included files', 'export-path': 'Output archive',
     'export-running': 'Creating ZIP', 'export-complete': 'ZIP created',
     'setup-git-init': 'Initialize Git', 'setup-gitignore': 'Git ignore rules',
     'setup-initial-commit': 'First commit', 'initial-commit-message': 'First commit message',
-    error: 'Error', settings: 'Settings',
+    'run-history': 'Run history', 'run-analytics': 'Performance analytics', error: 'Error', settings: 'Settings',
   };
   return titles[state.screen] ?? 'Zipflow';
 }
@@ -324,28 +419,37 @@ function screenTitle(state) {
 function footerHints(state) {
   if (state.screen === 'settings') {
     if (state.settingsPanel?.modal) return ['Enter save', 'Esc cancel', 'Tab complete path', 'Ctrl+B close settings'];
-    if (state.settingsPanel?.mode === 'options') return ['↑/↓ choose', 'Enter/Space apply', 'Esc/← categories', 'Ctrl+B close', 'Ctrl+T native select'];
-    return ['↑/↓ choose category', 'Enter open', 'Esc or Ctrl+B close', 'Ctrl+T native select'];
+    if (state.settingsPanel?.focus === 'choices') return ['↑/↓ choose', 'Enter apply', 'Esc return to parameter', 'Ctrl+B close'];
+    if (state.settingsPanel?.focus === 'parameters') return ['↑/↓ parameter', 'Enter open', 'Esc return to categories', 'Ctrl+B close'];
+    return ['↑/↓ category', 'Enter open page', 'Esc or Ctrl+B close', 'Ctrl+T native select'];
   }
+  if (state.screen === 'diff-view') return ['↑/↓ scroll', 'N/P next/previous hunk', 'M switch mode', 'Drag to copy', 'Esc back'];
+  if (state.llmAbortController) return ['Esc cancel LLM generation', 'Ctrl+C stop'];
   if (state.busy || ['checks-running', 'deploy-running'].includes(state.screen)) return ['Ctrl+C stop'];
   if (isEditorScreen(state.screen)) return state.editorContext?.multiline
     ? ['Enter confirm', 'Ctrl+Enter newline', 'Ctrl+U clear to cursor', 'Esc back', 'Ctrl+T native select']
     : ['Enter confirm', 'Tab complete path', 'Esc back', 'Ctrl+B settings', 'Ctrl+T native select'];
   if (state.screen === 'setup-checks') return ['↑/↓ choose', 'Space toggle', 'A add', 'E edit', 'Del remove', 'Enter continue/open', 'Ctrl+B settings'];
+  if (state.screen === 'conflict-file') return ['A archive', 'L local', 'D diff', 'Enter action', 'Esc back'];
   if (state.screen === 'conflicts') return ['↑/↓ choose', 'Space toggle decision', 'Enter action', 'Esc back', 'Ctrl+T native select'];
   if (state.screen === 'export-select') return ['↑/↓ choose', 'Enter/Space toggle', 'Esc back', 'Ctrl+T native select'];
-  return ['↑/↓ choose', 'Enter/Space select', 'Drag Activity to copy', 'PgUp/PgDn activity', 'Ctrl+T native select', 'Ctrl+B settings'];
+  return ['↑/↓ choose', 'Enter/Space select', '? help', 'Drag Activity to copy', 'PgUp/PgDn activity', 'Ctrl+T native select', 'Ctrl+B settings'];
 }
 
 function headerStats(state) {
-  return [
+  const step = runStep(state);
+  const stats = [
     { label: 'State', value: state.busy ? 'Working' : state.status },
     { label: 'Policy', value: state.workflow?.policy?.label ?? state.draft?.policy?.label ?? 'Not configured' },
-    { label: 'Theme', value: state.settings?.theme ?? 'ocean' },
   ];
+  if (step) stats.push({ label: 'Stage', value: `${step.number}/5 ${step.label}` });
+  else stats.push({ label: 'Theme', value: state.settings?.theme ?? 'ocean' });
+  return stats;
 }
 
 function preferredPromptHeight(state) {
+  if (state.screen === 'home') return 14;
+  if (['archive-safety', 'plan-review', 'plan-details', 'plan-files', 'conflict-summary', 'conflict-file', 'run-history', 'run-analytics', 'export-preview', 'export-files'].includes(state.screen)) return 17;
   if (state.screen === 'setup-checks' || state.screen === 'conflicts' || state.screen === 'export-select') return 17;
   if (['checks-running', 'deploy-running'].includes(state.screen)) return 14;
   if (isEditorScreen(state.screen)) return 13;
@@ -357,6 +461,15 @@ function isEditorScreen(screen) {
     'project-path-input', 'archive-input', 'custom-check-command', 'custom-check-name',
     'commit-message', 'commit-template', 'deploy-command', 'export-path', 'initial-commit-message',
   ].includes(screen);
+}
+
+function activityTag(tone) {
+  if (tone === 'success') return '[DONE]';
+  if (tone === 'warning') return '[WARN]';
+  if (tone === 'error') return '[FAIL]';
+  if (tone === 'choice') return '[YOU ]';
+  if (tone === 'process') return '[RUN ]';
+  return '[INFO]';
 }
 
 function clamp(value, min, max) {

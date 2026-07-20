@@ -5,48 +5,58 @@ import { formatByteSize } from '../utils/size.js';
 
 export function settingsDefinitions(state) {
   const definitions = [
-    {
-      id: 'theme',
-      primarySetting: 'theme',
-      label: 'Theme',
-      description: 'Color theme used by every project.',
-    },
-    {
-      id: 'checkOutput',
-      primarySetting: 'checkOutput',
-      label: 'Running check output',
-      description: 'How much command output is shown while checks are still running.',
-    },
-    {
-      id: 'localLlm',
-      primarySetting: 'llmProvider',
-      label: 'Local LLM',
-      description: 'Provider, model, response language, and optional API authentication.',
-    },
-    {
-      id: 'sourceArchive',
-      primarySetting: 'archivePolicy',
-      label: 'Source archives',
-      description: 'What Zipflow does with an uploaded ZIP after an update is kept.',
-    },
+    { id: 'theme', label: 'Theme', description: 'Color theme used by every project.' },
+    { id: 'checkOutput', label: 'Running checks', description: 'How much command output is shown while checks are running.' },
+    { id: 'localLlm', label: 'Local LLM', description: 'Provider, model, response language, and authentication.' },
+    { id: 'sourceArchive', label: 'Source archives', description: 'What happens to an uploaded ZIP after a completed update.' },
   ];
   if (state.project) definitions.push({
     id: 'managedHistory',
-    label: 'Managed-file history',
-    description: `${state.settingsPanel?.managedCount ?? 0} paths are recorded for the current project.`,
+    label: 'Managed history',
+    description: 'Paths Zipflow may remove in managed-history snapshot mode.',
   });
   return definitions;
 }
 
-export function settingsOptions(state, definition) {
-  if (definition.id === 'theme') return THEME_NAMES.map((value) => choice('theme', value, titleCase(value), state));
-  if (definition.id === 'checkOutput') return [
-    choice('checkOutput', 'compact', 'Compact', state, 'Show only check states and durations.'),
-    choice('checkOutput', 'last-line', 'Last output line', state, 'Also show the latest non-empty output line.'),
+export function settingsParameters(state, definition) {
+  if (definition.id === 'theme') return [choiceParameter('theme', 'Theme', titleCase(state.settings.theme), 'Choose one of the built-in Terlio themes.')];
+  if (definition.id === 'checkOutput') return [choiceParameter(
+    'checkOutput', 'Output while running', outputLabel(state.settings.checkOutput),
+    'Compact shows status only; last-line also shows the latest command output line.',
+  )];
+  if (definition.id === 'localLlm') return localLlmParameters(state);
+  if (definition.id === 'sourceArchive') return sourceArchiveParameters(state);
+  if (definition.id === 'managedHistory') return managedHistoryParameters(state);
+  return [];
+}
+
+export function settingsChoices(state, parameter) {
+  if (parameter.settingId === 'theme') return THEME_NAMES.map((value) => option(parameter, value, titleCase(value)));
+  if (parameter.settingId === 'checkOutput') return [
+    option(parameter, 'compact', 'Compact', 'Show check state and duration only.'),
+    option(parameter, 'last-line', 'Last output line', 'Also show the latest non-empty output line.'),
   ];
-  if (definition.id === 'localLlm') return localLlmOptions(state);
-  if (definition.id === 'sourceArchive') return sourceArchiveOptions(state);
-  if (definition.id === 'managedHistory') return managedHistoryOptions(state);
+  if (parameter.settingId === 'llmProvider') return [
+    option(parameter, 'disabled', 'Disabled', 'Do not contact a local LLM server.'),
+    option(parameter, 'ollama', 'Ollama', 'Local server at 127.0.0.1:11434.'),
+    option(parameter, 'lmstudio', 'LM Studio', 'Native API at 127.0.0.1:1234/api/v1.'),
+  ];
+  if (parameter.settingId === 'llmModel') return modelChoices(state, parameter);
+  if (parameter.settingId === 'llmLanguage') return LLM_LANGUAGES.map((value) => option(parameter, value, value));
+  if (parameter.settingId === 'llmArchiveReview') return [
+    option(parameter, 'disabled', 'Summary only', 'Generate summary and commit message without an archive suitability verdict.'),
+    option(parameter, 'structure', 'Structure guard', 'Compare the project and archive trees before the patch summary request.'),
+    option(parameter, 'patch', 'Deep patch review', 'Assess archive suitability together with summary and commit message from changes.patch.'),
+  ];
+  if (parameter.settingId === 'archivePolicy') return [
+    option(parameter, 'keep', 'Do nothing', 'Leave the ZIP in its original location.'),
+    option(parameter, 'move', 'Move to archive storage', 'Move the ZIP and enforce retention and size limits.'),
+    option(parameter, 'delete', 'Delete source ZIP', 'Delete the uploaded ZIP after the update is completed.'),
+  ];
+  if (parameter.id === 'managedHistoryReset') return [
+    { id: 'history-cancel', action: 'history-cancel', label: 'Keep history', description: 'Return without changing managed-file history.' },
+    { id: 'history-reset-confirm', action: 'history-reset-confirm', label: 'Reset history', description: 'Forget every path previously created or updated by Zipflow.' },
+  ];
   return [];
 }
 
@@ -60,112 +70,115 @@ export function settingsEditorValue(state, fieldId) {
   return String(state.settings[fieldId] ?? '');
 }
 
-function localLlmOptions(state) {
-  const options = [
-    section('Provider'),
-    choice('llmProvider', 'disabled', 'Disabled', state, 'Do not contact a local LLM server.'),
-    choice('llmProvider', 'ollama', 'Ollama', state, 'OpenAI-compatible server at 127.0.0.1:11434.'),
-    choice('llmProvider', 'lmstudio', 'LM Studio', state, 'OpenAI-compatible server at 127.0.0.1:1234.'),
+function localLlmParameters(state) {
+  const disabled = state.settings.llmProvider === 'disabled';
+  const models = state.settingsPanel?.models ?? [];
+  const selected = models.find((item) => item.id === state.settings.llmModel || item.key === state.settings.llmModel);
+  return [
+    choiceParameter('llmProvider', 'Provider', providerLabel(state.settings.llmProvider), 'Select the local LLM server implementation.'),
+    {
+      ...choiceParameter('llmModel', 'Model', selected?.label ?? (state.settings.llmModel || 'Not selected'), 'Choose a model exposed by the selected provider.'),
+      disabled,
+      disabledReason: 'Enable Ollama or LM Studio first.',
+    },
+    {
+      ...choiceParameter('llmLanguage', 'Response language', state.settings.llmLanguage, 'The prompt remains English; summary and commit message use this language.'),
+      disabled,
+      disabledReason: 'Enable a local LLM provider first.',
+    },
+    {
+      ...choiceParameter('llmArchiveReview', 'Archive review', archiveReviewLabel(state.settings.llmArchiveReview), 'Optional LLM safety assessment; deterministic Zipflow checks always remain authoritative.'),
+      disabled,
+      disabledReason: 'Enable a local LLM provider first.',
+    },
+    {
+      id: 'llmApiToken', type: 'input', fieldId: 'llmApiToken', label: 'Authentication',
+      value: state.settings.llmApiToken ? 'Bearer token configured' : 'Not configured',
+      description: 'Optional API token for model discovery and generation.',
+    },
   ];
-  if (state.settings.llmProvider === 'disabled') return options;
-
-  const panel = state.settingsPanel;
-  options.push(
-    section('Model'),
-    {
-      id: 'refresh-models',
-      action: 'refresh-models',
-      label: panel?.loadingModels ? 'Loading models…' : 'Refresh available models',
-      disabled: panel?.loadingModels,
-      description: panel?.modelError ?? 'Read the models currently exposed by the selected provider.',
-    },
-  );
-  const models = panel?.models ?? [];
-  if (models.length) {
-    options.push(...models.map((model) => choice('llmModel', model, model, state)));
-  } else {
-    options.push({
-      id: 'no-models',
-      label: panel?.modelError ? 'Models unavailable' : 'No models returned',
-      description: panel?.modelError ?? 'Refresh after starting the local LLM server.',
-      disabled: true,
-    });
-  }
-  options.push(
-    section('Response language'),
-    ...LLM_LANGUAGES.map((value) => choice('llmLanguage', value, value, state)),
-    section('Authentication'),
-    {
-      id: 'edit-llm-token',
-      action: 'edit-setting',
-      fieldId: 'llmApiToken',
-      label: state.settings.llmApiToken ? 'Replace API token' : 'Set optional API token',
-      description: state.settings.llmApiToken
-        ? 'A bearer token is configured. Its value is never displayed.'
-        : 'Usually unnecessary for a local Ollama or LM Studio server.',
-    },
-  );
-  if (state.settings.llmApiToken) options.push({
-    id: 'clear-llm-token',
-    action: 'clear-token',
-    label: 'Clear API token',
-  });
-  return options;
 }
 
-function sourceArchiveOptions(state) {
-  const options = [
-    section('After a completed update'),
-    choice('archivePolicy', 'keep', 'Do nothing', state, 'Leave the ZIP in its original location.'),
-    choice('archivePolicy', 'move', 'Move to archive storage', state, 'Move the ZIP and enforce retention and size limits.'),
-    choice('archivePolicy', 'delete', 'Delete source ZIP', state, 'Delete the uploaded ZIP after the run is completed.'),
-  ];
-  if (state.settings.archivePolicy !== 'move') return options;
-  options.push(
-    section('Archive storage'),
-    editAction('archiveDirectory', `Directory · ${displayArchiveDirectory(state.settings.archiveDirectory)}`, 'The directory is created when saved if it does not exist.'),
-    editAction('archiveRetentionDays', `Retention · ${state.settings.archiveRetentionDays} days`, 'Whole days. Use 0 to disable age-based cleanup.'),
-    editAction('archiveMaxBytes', `Maximum size · ${formatByteSize(state.settings.archiveMaxBytes)}`, 'Accepts B, KB, MB, GB, KiB, MiB, or GiB. Use 0 for no size limit.'),
+function sourceArchiveParameters(state) {
+  const parameters = [choiceParameter(
+    'archivePolicy', 'Policy', archivePolicyLabel(state.settings.archivePolicy),
+    'Choose what Zipflow does with the source ZIP after a completed update.',
+  )];
+  if (state.settings.archivePolicy === 'move') parameters.push(
+    inputParameter('archiveDirectory', 'Archive directory', displayArchiveDirectory(state.settings.archiveDirectory), 'Where completed source ZIPs are moved.'),
+    inputParameter('archiveRetentionDays', 'Retention', `${state.settings.archiveRetentionDays} days`, 'Maximum archive age; 0 disables age cleanup.'),
+    inputParameter('archiveMaxBytes', 'Maximum size', formatByteSize(state.settings.archiveMaxBytes), 'Combined size limit; 0 disables size cleanup.'),
   );
-  return options;
+  return parameters;
 }
 
-function managedHistoryOptions(state) {
-  if (state.run && state.plan && !state.run.applied) return [{
-    id: 'history-unavailable',
-    label: 'Unavailable during an active update',
-    description: 'Cancel or finish the current archive plan before resetting its deletion history.',
-    disabled: true,
-  }];
-  if (state.settingsPanel?.confirmHistoryReset) return [
-    { id: 'confirm-history-reset', action: 'confirm-history-reset', label: 'Confirm reset', description: 'Forget every path previously created or updated by Zipflow for this project.' },
-    { id: 'cancel-history-reset', action: 'cancel-history-reset', label: 'Cancel' },
-  ];
+function managedHistoryParameters(state) {
+  const active = state.run && state.plan && !state.run.applied;
   return [{
-    id: 'reset-history',
-    action: 'reset-history',
-    label: 'Reset managed-file history',
-    description: 'This does not change project files. Future managed-history snapshots start from an empty list.',
+    id: 'managedHistoryReset',
+    type: 'choice',
+    label: 'Recorded paths',
+    value: `${state.settingsPanel?.managedCount ?? 0}`,
+    description: active
+      ? 'History cannot be reset during an active update.'
+      : 'Open to reset managed-file history for the current project.',
+    disabled: Boolean(active),
   }];
 }
 
-function choice(settingId, value, label, state, description = '') {
-  return {
-    id: `${settingId}:${value}`,
-    settingId,
-    value,
-    label,
-    description,
-    selected: state.settings[settingId] === value,
-  };
+function modelChoices(state, parameter) {
+  const panel = state.settingsPanel;
+  const result = [{
+    id: 'refresh-models', action: 'refresh-models', label: panel?.loadingModels ? 'Refreshing models…' : 'Refresh available models',
+    description: panel?.modelError ?? 'Read the models currently exposed by the selected provider.',
+    disabled: Boolean(panel?.loadingModels),
+  }];
+  if (panel?.models?.length) {
+    result.push(...panel.models.map((model) => ({
+      id: `${parameter.settingId}:${model.id}`,
+      settingId: parameter.settingId,
+      value: model.id,
+      label: model.label,
+      description: model.loaded
+        ? `Already loaded${model.contextLength ? ` · context ${model.contextLength.toLocaleString('en-US')}` : ''}`
+        : 'Available for just-in-time loading',
+      selected: state.settings.llmModel === model.id || state.settings.llmModel === model.key,
+    })));
+  } else result.push({
+    id: 'no-models', label: panel?.modelError ? 'Models unavailable' : 'No models returned',
+    description: panel?.modelError ?? 'Refresh after starting the local LLM server.', disabled: true,
+  });
+  return result;
 }
 
-function section(label) {
-  return { id: `section:${label}`, label, section: true, disabled: true };
+function choiceParameter(settingId, label, value, description) {
+  return { id: settingId, type: 'choice', settingId, label, value, description };
 }
 
-function editAction(fieldId, label, description) {
-  return { id: `edit:${fieldId}`, action: 'edit-setting', fieldId, label, description };
+function inputParameter(fieldId, label, value, description) {
+  return { id: fieldId, type: 'input', fieldId, label, value, description };
+}
+
+function option(parameter, value, label, description = '') {
+  return { id: `${parameter.settingId}:${value}`, settingId: parameter.settingId, value, label, description };
+}
+
+function providerLabel(value) {
+  return value === 'ollama' ? 'Ollama' : value === 'lmstudio' ? 'LM Studio' : 'Disabled';
+}
+
+function outputLabel(value) {
+  return value === 'compact' ? 'Compact' : 'Last output line';
+}
+
+function archiveReviewLabel(value) {
+  if (value === 'structure') return 'Structure guard';
+  if (value === 'patch') return 'Deep patch review';
+  return 'Summary only';
+}
+
+function archivePolicyLabel(value) {
+  return value === 'move' ? 'Move to archive storage' : value === 'delete' ? 'Delete source ZIP' : 'Do nothing';
 }
 
 function displayArchiveDirectory(value) {

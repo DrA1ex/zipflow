@@ -1,15 +1,13 @@
-import { classifyServerError, normalizeServerError } from './errors.js';
+import { classifyServerError, LocalLlmError, normalizeServerError } from './errors.js';
 
 const PROVIDERS = {
   ollama: {
     label: 'Ollama',
-    baseUrl: 'http://127.0.0.1:11434/v1',
     openAiBaseUrl: 'http://127.0.0.1:11434/v1',
     nativeBaseUrl: 'http://127.0.0.1:11434/api',
   },
   lmstudio: {
     label: 'LM Studio',
-    baseUrl: 'http://127.0.0.1:1234/v1',
     openAiBaseUrl: 'http://127.0.0.1:1234/v1',
     nativeBaseUrl: 'http://127.0.0.1:1234/api/v1',
   },
@@ -19,26 +17,27 @@ export function providerDefinition(provider) {
   return PROVIDERS[provider] ?? null;
 }
 
-export async function listLocalModels(provider, {
+export async function listLocalModelChoices(provider, {
   fetchImpl = fetch,
   timeoutMs = 10_000,
   apiToken = '',
+  signal = null,
 } = {}) {
   const definition = requireProvider(provider);
-  const url = provider === 'lmstudio'
-    ? `${definition.nativeBaseUrl}/models`
-    : `${definition.openAiBaseUrl}/models`;
+  const native = provider === 'lmstudio';
+  const url = native ? `${definition.nativeBaseUrl}/models` : `${definition.openAiBaseUrl}/models`;
   const response = await request(fetchImpl, url, {
     method: 'GET', headers: headers(apiToken, false),
-  }, timeoutMs, { provider });
+  }, timeoutMs, { provider, signal });
   const payload = await response.json();
-  if (provider === 'lmstudio' && Array.isArray(payload.models)) {
-    return [...new Set(payload.models
-      .filter((item) => item.type !== 'embedding')
-      .flatMap((item) => preferredLmStudioIds(item))
-      .filter(Boolean))].sort();
-  }
-  return [...new Set((payload.data ?? []).map((item) => item.id).filter(Boolean))].sort();
+  if (native && Array.isArray(payload.models)) return lmStudioChoices(payload.models);
+  return [...new Set((payload.data ?? []).map((item) => item.id).filter(Boolean))]
+    .sort()
+    .map((id) => ({ id, key: id, label: id, loaded: null, contextLength: null }));
+}
+
+export async function listLocalModels(provider, options = {}) {
+  return (await listLocalModelChoices(provider, options)).map((item) => item.id);
 }
 
 export async function createLocalCompletion({
@@ -50,46 +49,53 @@ export async function createLocalCompletion({
   apiToken = '',
   contextLength = null,
   reasoningOffSupported = false,
+  loadedModel = false,
 }, {
   fetchImpl = fetch,
   timeoutMs = 600_000,
   onEvent = () => {},
+  signal = null,
 } = {}) {
   if (provider === 'lmstudio') {
     return createLmStudioCompletion({
-      model, messages, maxTokens, apiToken, contextLength, reasoningOffSupported,
-    }, { fetchImpl, timeoutMs, onEvent });
+      model, messages, maxTokens, apiToken, contextLength, reasoningOffSupported, loadedModel,
+    }, { fetchImpl, timeoutMs, onEvent, signal });
   }
   return createOpenAiCompletion({
     provider, model, messages, responseSchema, maxTokens, apiToken,
-  }, { fetchImpl, timeoutMs, onEvent });
+  }, { fetchImpl, timeoutMs, onEvent, signal });
 }
 
 async function createLmStudioCompletion({
-  model, messages, maxTokens, apiToken, contextLength, reasoningOffSupported,
-}, { fetchImpl, timeoutMs, onEvent }) {
+  model, messages, maxTokens, apiToken, contextLength, reasoningOffSupported, loadedModel,
+}, { fetchImpl, timeoutMs, onEvent, signal }) {
   const definition = requireProvider('lmstudio');
+  const { systemPrompt, input } = nativeMessages(messages);
   const body = {
     model,
-    input: renderMessages(messages),
+    input,
+    system_prompt: systemPrompt || undefined,
     stream: true,
     temperature: 0,
     max_output_tokens: maxTokens,
     store: false,
   };
-  if (contextLength) body.context_length = contextLength;
+  if (contextLength && !loadedModel) body.context_length = contextLength;
   if (reasoningOffSupported) body.reasoning = 'off';
-  onEvent({ type: 'request', attempt: 1, format: 'native-json', contextLength: body.context_length ?? null });
+  onEvent({
+    type: 'request', attempt: 1, format: 'native', transport: 'LM Studio native',
+    endpoint: '/api/v1/chat', model, loadedModel, contextLength: body.context_length ?? null,
+  });
   const response = await request(fetchImpl, `${definition.nativeBaseUrl}/chat`, {
     method: 'POST', headers: headers(apiToken), body: JSON.stringify(body),
-  }, timeoutMs, { allowHttpFailure: true, provider: 'lmstudio' });
+  }, timeoutMs, { allowHttpFailure: true, provider: 'lmstudio', signal });
   if (!response.ok) throw await responseError(response, 'lmstudio');
-  return readLmStudioResponse(response, { onEvent });
+  return readLmStudioResponse(response, { onEvent, signal });
 }
 
 async function createOpenAiCompletion({
   provider, model, messages, responseSchema, maxTokens, apiToken,
-}, { fetchImpl, timeoutMs, onEvent }) {
+}, { fetchImpl, timeoutMs, onEvent, signal }) {
   const definition = requireProvider(provider);
   const common = { model, messages, stream: true, temperature: 0, max_tokens: maxTokens };
   const attempts = [
@@ -104,10 +110,13 @@ async function createOpenAiCompletion({
   ];
   let firstError = null;
   for (let index = 0; index < attempts.length; index += 1) {
-    onEvent({ type: 'request', attempt: index + 1, format: index === 0 ? 'json_schema' : 'json_object' });
+    onEvent({
+      type: 'request', attempt: index + 1, format: index === 0 ? 'json_schema' : 'json_object',
+      transport: `${providerDefinition(provider).label} OpenAI-compatible`, endpoint: '/v1/chat/completions', model,
+    });
     const response = await request(fetchImpl, `${definition.openAiBaseUrl}/chat/completions`, {
       method: 'POST', headers: headers(apiToken), body: JSON.stringify(attempts[index]),
-    }, timeoutMs, { allowHttpFailure: true, provider });
+    }, timeoutMs, { allowHttpFailure: true, provider, signal });
     if (!response.ok) {
       const error = await responseError(response, provider);
       firstError ??= error;
@@ -115,7 +124,7 @@ async function createOpenAiCompletion({
       onEvent({ type: 'retry', reason: error.message });
       continue;
     }
-    return readOpenAiResponse(response, { onEvent, provider });
+    return readOpenAiResponse(response, { onEvent, provider, signal });
   }
   throw firstError ?? classifyServerError('Unknown local LLM error.', { provider });
 }
@@ -132,24 +141,31 @@ function headers(apiToken, json = true) {
   return value;
 }
 
-async function request(fetchImpl, url, options, timeoutMs, { allowHttpFailure = false, provider = null } = {}) {
+async function request(fetchImpl, url, options, timeoutMs, {
+  allowHttpFailure = false, provider = null, signal = null,
+} = {}) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const timer = setTimeout(() => controller.abort('timeout'), timeoutMs);
+  const abort = () => controller.abort('cancelled');
+  signal?.addEventListener('abort', abort, { once: true });
   try {
+    if (signal?.aborted) throw cancelledError(provider);
     const response = await fetchImpl(url, { ...options, signal: controller.signal });
     if (!allowHttpFailure && !response.ok) throw await responseError(response, provider);
     return response;
   } catch (error) {
-    if (error.name === 'AbortError') {
+    if (error.name === 'AbortError' || controller.signal.aborted) {
+      if (signal?.aborted || controller.signal.reason === 'cancelled') throw cancelledError(provider);
       throw classifyServerError(`Local LLM request timed out after ${Math.round(timeoutMs / 1000)} seconds.`, { provider });
     }
     throw error;
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener('abort', abort);
   }
 }
 
-async function readOpenAiResponse(response, { onEvent, provider }) {
+async function readOpenAiResponse(response, { onEvent, provider, signal }) {
   const contentType = response.headers.get('content-type') ?? '';
   if (!response.body || contentType.includes('application/json')) {
     const payload = await response.json();
@@ -164,12 +180,12 @@ async function readOpenAiResponse(response, { onEvent, provider }) {
     if (!payload) return;
     if (payload.error) throw classifyPayloadError(payload, provider);
     applyOpenAiPayload(payload, result, onEvent);
-  });
+  }, signal, provider);
   onEvent({ type: 'complete', ...result });
   return result;
 }
 
-async function readLmStudioResponse(response, { onEvent }) {
+async function readLmStudioResponse(response, { onEvent, signal }) {
   const contentType = response.headers.get('content-type') ?? '';
   if (!response.body || contentType.includes('application/json')) {
     const payload = await response.json();
@@ -184,28 +200,33 @@ async function readLmStudioResponse(response, { onEvent }) {
     const payload = parseJsonChunk(data, onEvent);
     if (!payload) return;
     applyLmStudioEvent(event || payload.type, payload, result, onEvent);
-  });
+  }, signal, 'lmstudio');
   onEvent({ type: 'complete', ...result });
   return result;
 }
 
-async function consumeSse(response, consume) {
+async function consumeSse(response, consume, signal, provider) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
-    let boundary;
-    while ((boundary = buffer.indexOf('\n\n')) >= 0) {
-      const block = buffer.slice(0, boundary);
-      buffer = buffer.slice(boundary + 2);
-      consume(parseSseBlock(block));
+  try {
+    while (true) {
+      if (signal?.aborted) throw cancelledError(provider);
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
+      let boundary;
+      while ((boundary = buffer.indexOf('\n\n')) >= 0) {
+        const block = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+        consume(parseSseBlock(block));
+      }
     }
+    buffer += decoder.decode();
+    if (buffer.trim()) consume(parseSseBlock(buffer));
+  } finally {
+    if (signal?.aborted) await reader.cancel().catch(() => {});
   }
-  buffer += decoder.decode();
-  if (buffer.trim()) consume(parseSseBlock(buffer));
 }
 
 function parseSseBlock(block) {
@@ -219,10 +240,9 @@ function parseSseBlock(block) {
 }
 
 function applyLmStudioEvent(event, payload, result, onEvent) {
-  if (event === 'error' || payload.type === 'error' || payload.error) {
-    throw classifyPayloadError(payload, 'lmstudio');
-  }
-  if (event === 'model_load.start') onEvent({ type: 'model-load-start' });
+  if (event === 'error' || payload.type === 'error' || payload.error) throw classifyPayloadError(payload, 'lmstudio');
+  if (event === 'chat.start') onEvent({ type: 'chat-start', modelInstanceId: payload.model_instance_id });
+  else if (event === 'model_load.start') onEvent({ type: 'model-load-start', modelInstanceId: payload.model_instance_id });
   else if (event === 'model_load.progress') onEvent({ type: 'model-load-progress', progress: payload.progress });
   else if (event === 'model_load.end') onEvent({ type: 'model-load-end', seconds: payload.load_time_seconds });
   else if (event === 'prompt_processing.start') onEvent({ type: 'prompt-progress', progress: 0 });
@@ -286,13 +306,36 @@ function textValue(value) {
   return value.map((item) => typeof item === 'string' ? item : item?.text ?? item?.content ?? '').join('');
 }
 
-function renderMessages(messages) {
-  return messages.map((message) => `${message.role.toUpperCase()}:\n${message.content}`).join('\n\n');
+function nativeMessages(messages) {
+  const systemPrompt = messages.filter((item) => item.role === 'system').map((item) => item.content).join('\n\n');
+  const nonSystem = messages.filter((item) => item.role !== 'system');
+  const input = nonSystem.length === 1
+    ? nonSystem[0].content
+    : nonSystem.map((item) => ({ type: 'message', role: item.role, content: item.content }));
+  return { systemPrompt, input };
 }
 
-function preferredLmStudioIds(item) {
-  const loaded = (item.loaded_instances ?? []).map((entry) => entry.id).filter(Boolean);
-  return loaded.length ? loaded : [item.key];
+function lmStudioChoices(models) {
+  const choices = [];
+  for (const item of models.filter((model) => model.type !== 'embedding')) {
+    const loaded = item.loaded_instances ?? [];
+    if (loaded.length) {
+      for (const instance of loaded) choices.push({
+        id: instance.id,
+        key: item.key,
+        label: `${item.display_name || item.key} · loaded`,
+        loaded: true,
+        contextLength: instance.config?.context_length ?? null,
+      });
+    } else choices.push({
+      id: item.key,
+      key: item.key,
+      label: item.display_name || item.key,
+      loaded: false,
+      contextLength: item.max_context_length ?? null,
+    });
+  }
+  return choices.sort((left, right) => Number(right.loaded) - Number(left.loaded) || left.label.localeCompare(right.label));
 }
 
 function parseJsonChunk(data, onEvent) {
@@ -320,4 +363,8 @@ async function responseError(response, provider) {
   return classifyServerError(normalizeServerError(text, `HTTP ${response.status}`), {
     status: response.status, provider, responseBody: text.slice(0, 4_000),
   });
+}
+
+function cancelledError(provider) {
+  return new LocalLlmError('Local LLM generation was cancelled.', { code: 'cancelled', provider });
 }

@@ -8,7 +8,7 @@ import { createInitialState } from '../src/app/state.js';
 import { renderZipflow } from '../src/ui/render.js';
 import { ZipflowController } from '../src/app/controller.js';
 import {
-  handleSettingsKey, openSettings, selectOption, selectSetting, settingsViewModel, submitSettingsEditor,
+  handleSettingsKey, openSettings, selectChoice, selectParameter, selectSetting, settingsViewModel, submitSettingsEditor,
 } from '../src/app/settings-panel.js';
 import { exists } from '../src/utils/fs.js';
 
@@ -35,25 +35,33 @@ async function settingsController(overrides = {}) {
   return { state, controller };
 }
 
-async function selectDefinition(controller, id) {
+async function selectCategory(controller, id) {
   const view = settingsViewModel(controller.state);
   const index = view.definitions.findIndex((item) => item.id === id);
-  assert.notEqual(index, -1, `Missing settings definition ${id}`);
+  assert.notEqual(index, -1, `Missing settings category ${id}`);
   await selectSetting(controller, index);
   return settingsViewModel(controller.state);
 }
 
-async function selectOptionById(controller, id) {
+async function openParameter(controller, id) {
   const view = settingsViewModel(controller.state);
-  const index = view.options.findIndex((item) => item.id === id);
-  assert.notEqual(index, -1, `Missing settings option ${id}`);
-  await selectOption(controller, index);
+  const index = view.parameters.findIndex((item) => item.id === id);
+  assert.notEqual(index, -1, `Missing settings parameter ${id}`);
+  await selectParameter(controller, index);
+  return settingsViewModel(controller.state);
+}
+
+async function chooseValue(controller, id) {
+  const view = settingsViewModel(controller.state);
+  const index = view.choices.findIndex((item) => item.id === id);
+  assert.notEqual(index, -1, `Missing settings choice ${id}`);
+  await selectChoice(controller, index);
 }
 
 test('global settings store theme, LLM authorization, and source archive defaults', async () => withSettingsHome(async () => {
   await saveSettings({
     theme: 'matrix', checkOutput: 'compact', llmProvider: 'ollama', llmModel: 'qwen-coder',
-    llmLanguage: 'Russian', llmApiToken: 'secret', archivePolicy: 'move',
+    llmLanguage: 'Russian', llmApiToken: 'secret', llmArchiveReview: 'patch', archivePolicy: 'move',
     archiveDirectory: '~/custom-archives', archiveRetentionDays: 45, archiveMaxBytes: 500_000_000,
   });
   const settings = await loadSettings();
@@ -64,6 +72,7 @@ test('global settings store theme, LLM authorization, and source archive default
   assert.equal(settings.llmModel, 'qwen-coder');
   assert.equal(settings.llmLanguage, 'Russian');
   assert.equal(settings.llmApiToken, 'secret');
+  assert.equal(settings.llmArchiveReview, 'patch');
   assert.equal(settings.archivePolicy, 'move');
   assert.equal(settings.archiveDirectory, '~/custom-archives');
   assert.equal(settings.archiveRetentionDays, 45);
@@ -77,93 +86,98 @@ test('new settings default to keeping source ZIPs for 30 days and 1 GB when arch
   assert.equal(DEFAULT_SETTINGS.archiveMaxBytes, 1_000_000_000);
 });
 
-test('settings initially show categories only', () => {
+test('settings keep categories on the left and the selected category page on the right', () => {
   const state = createInitialState();
   state.project = { name: 'fixture', root: '/tmp/fixture' };
   state.screen = 'settings';
-  state.settings = { ...DEFAULT_SETTINGS, archivePolicy: 'move' };
+  state.settings = { ...DEFAULT_SETTINGS };
   state.settingsPanel = {
-    mode: 'categories', settingIndex: 0, optionIndex: 0, optionIndices: {}, managedCount: 0,
+    focus: 'categories', categoryIndex: 0, parameterIndices: {}, choiceIndices: {}, managedCount: 0,
     previous: { screen: 'home', menuItems: [], selectedIndex: 0, status: 'Ready' },
   };
 
   const view = settingsViewModel(state);
   const output = renderToString(renderZipflow({ state, width: 110, height: 30 }), { width: 110, height: 30 });
 
-  assert.equal(view.mode, 'categories');
+  assert.equal(view.focus, 'categories');
   assert.deepEqual(view.definitions.map((item) => item.id), ['theme', 'checkOutput', 'localLlm', 'sourceArchive', 'managedHistory']);
-  assert.deepEqual(view.options, []);
-  assert.match(output, /Categories/);
-  assert.match(output, /Source archives/);
-  assert.doesNotMatch(output, /Archive retention/);
+  assert.equal(view.parameters[0].id, 'theme');
+  assert.match(output, /CATEGORIES/);
+  assert.match(output, /THEME/);
+  assert.match(output, /Theme: Ocean/);
 });
 
-test('category and item positions survive returning to categories and reopening', async () => withSettingsHome(async () => {
+test('a choice replaces only the right pane and returns to the originating parameter on Enter', async () => withSettingsHome(async () => {
   const { state, controller } = await settingsController({ archivePolicy: 'move' });
-  const definitions = settingsViewModel(state).definitions;
-  const sourceIndex = definitions.findIndex((item) => item.id === 'sourceArchive');
-  state.settingsPanel.settingIndex = sourceIndex;
+  await selectCategory(controller, 'sourceArchive');
+  let view = await openParameter(controller, 'archivePolicy');
 
-  await handleSettingsKey(controller, { name: 'enter' });
-  assert.equal(state.settingsPanel.mode, 'options');
-  let view = settingsViewModel(state);
-  const retentionIndex = view.options.findIndex((item) => item.id === 'edit:archiveRetentionDays');
-  state.settingsPanel.optionIndex = retentionIndex;
+  assert.equal(view.focus, 'choices');
+  assert.equal(view.choices[view.choiceIndex].id, 'archivePolicy:move');
+  let output = renderToString(renderZipflow({ state, width: 110, height: 30 }), { width: 110, height: 30 });
+  assert.match(output, /CATEGORIES/);
+  assert.match(output, /CHOOSE VALUE/i);
+
+  await chooseValue(controller, 'archivePolicy:keep');
+  view = settingsViewModel(state);
+  assert.equal(view.focus, 'parameters');
+  assert.equal(view.parameters[view.parameterIndex].id, 'archivePolicy');
+  assert.equal(state.settings.archivePolicy, 'keep');
+}));
+
+test('Escape from a nested value list returns to the same parameter without changing it', async () => withSettingsHome(async () => {
+  const { state, controller } = await settingsController({ archivePolicy: 'move' });
+  await selectCategory(controller, 'sourceArchive');
+  await openParameter(controller, 'archivePolicy');
+  await handleSettingsKey(controller, { name: 'down' });
   await handleSettingsKey(controller, { name: 'escape' });
 
-  assert.equal(state.settingsPanel.mode, 'categories');
-  assert.equal(state.settingsPanel.settingIndex, sourceIndex);
-  await handleSettingsKey(controller, { name: 'enter' });
-  view = settingsViewModel(state);
-  assert.equal(view.options[state.settingsPanel.optionIndex].id, 'edit:archiveRetentionDays');
-}));
-
-
-test('enabling archive storage keeps focus on the selected policy while revealing its dependent controls', async () => withSettingsHome(async () => {
-  const { state, controller } = await settingsController({ archivePolicy: 'keep' });
-  await selectDefinition(controller, 'sourceArchive');
-  const settingIndex = state.settingsPanel.settingIndex;
-  await selectOptionById(controller, 'archivePolicy:move');
   const view = settingsViewModel(state);
-
+  assert.equal(view.focus, 'parameters');
+  assert.equal(view.parameters[view.parameterIndex].id, 'archivePolicy');
   assert.equal(state.settings.archivePolicy, 'move');
-  assert.equal(state.settingsPanel.settingIndex, settingIndex);
-  assert.equal(view.options[state.settingsPanel.optionIndex].id, 'archivePolicy:move');
-  assert.ok(view.options.some((item) => item.id === 'edit:archiveRetentionDays'));
 }));
 
-test('archive retention controls stay inside the source archive options pane', async () => withSettingsHome(async () => {
-  const { state, controller } = await settingsController({ archivePolicy: 'move' });
-  const view = await selectDefinition(controller, 'sourceArchive');
+test('language choice opens with the current language selected and returns to Language', async () => withSettingsHome(async () => {
+  const { state, controller } = await settingsController();
+  state.settings = { ...state.settings, llmProvider: 'ollama', llmModel: 'qwen', llmLanguage: 'Russian' };
+  state.settingsPanel.modelsProvider = 'ollama';
+  state.settingsPanel.models = [{ id: 'qwen', key: 'qwen', label: 'qwen', loaded: true }];
+  await selectCategory(controller, 'localLlm');
+  let view = await openParameter(controller, 'llmLanguage');
 
-  assert.equal(view.definitions.some((item) => item.id === 'archiveRetentionDays'), false);
-  assert.ok(view.options.some((item) => item.id === 'edit:archiveDirectory'));
-  assert.ok(view.options.some((item) => item.id === 'edit:archiveRetentionDays'));
-  assert.ok(view.options.some((item) => item.id === 'edit:archiveMaxBytes'));
-  assert.equal(state.screen, 'settings');
+  assert.equal(view.choices[view.choiceIndex].id, 'llmLanguage:Russian');
+  await chooseValue(controller, 'llmLanguage:English');
+  view = settingsViewModel(state);
+  assert.equal(view.focus, 'parameters');
+  assert.equal(view.parameters[view.parameterIndex].id, 'llmLanguage');
+  assert.equal(state.settings.llmLanguage, 'English');
 }));
 
-test('archive directory opens in a modal and creates the configured folder', async () => withSettingsHome(async () => {
+test('archive storage parameters stay on one page and input values open in a modal', async () => withSettingsHome(async () => {
   const { state, controller } = await settingsController({ archivePolicy: 'move' });
-  await selectDefinition(controller, 'sourceArchive');
-  await selectOptionById(controller, 'edit:archiveDirectory');
+  const view = await selectCategory(controller, 'sourceArchive');
+  assert.deepEqual(view.parameters.map((item) => item.id), [
+    'archivePolicy', 'archiveDirectory', 'archiveRetentionDays', 'archiveMaxBytes',
+  ]);
 
+  await openParameter(controller, 'archiveDirectory');
   assert.equal(state.screen, 'settings');
   assert.equal(state.settingsPanel.modal.field.id, 'archiveDirectory');
 
   const target = path.join(await tempDir('zipflow-settings-storage-'), 'new-folder');
   state.editor.set(target);
   await submitSettingsEditor(controller);
-
   assert.equal(state.settings.archiveDirectory, target);
   assert.equal(await exists(target), true);
   assert.equal(state.settingsPanel.modal, null);
+  assert.equal(settingsViewModel(state).parameters[settingsViewModel(state).parameterIndex].id, 'archiveDirectory');
 }));
 
 test('numeric archive settings validate input in the modal and show their units', async () => withSettingsHome(async () => {
   const { state, controller } = await settingsController({ archivePolicy: 'move' });
-  await selectDefinition(controller, 'sourceArchive');
-  await selectOptionById(controller, 'edit:archiveRetentionDays');
+  await selectCategory(controller, 'sourceArchive');
+  await openParameter(controller, 'archiveRetentionDays');
 
   let output = renderToString(renderZipflow({ state, width: 110, height: 30 }), { width: 110, height: 30 });
   assert.match(output, /Unit: whole days/);
@@ -179,7 +193,7 @@ test('numeric archive settings validate input in the modal and show their units'
   assert.equal(state.settings.archiveRetentionDays, 45);
   assert.equal(state.settingsPanel.modal, null);
 
-  await selectOptionById(controller, 'edit:archiveMaxBytes');
+  await openParameter(controller, 'archiveMaxBytes');
   output = renderToString(renderZipflow({ state, width: 110, height: 30 }), { width: 110, height: 30 });
   assert.match(output, /Units: B, KB, MB, GB, KiB, MiB, GiB/);
   state.editor.set('not-a-size');
@@ -187,16 +201,30 @@ test('numeric archive settings validate input in the modal and show their units'
   assert.match(state.settingsPanel.modal.error, /500MB, 1GB, or 2GiB/);
 }));
 
-test('LLM token uses the same modal pattern and never pre-fills the stored secret', async () => withSettingsHome(async () => {
-  const { state, controller } = await settingsController({ llmProvider: 'ollama', llmApiToken: 'secret' });
-  await selectDefinition(controller, 'localLlm');
-  await selectOptionById(controller, 'edit-llm-token');
+test('LLM token uses a modal and never pre-fills the stored secret', async () => withSettingsHome(async () => {
+  const { state, controller } = await settingsController({ llmProvider: 'disabled', llmApiToken: 'secret' });
+  await selectCategory(controller, 'localLlm');
+  await openParameter(controller, 'llmApiToken');
 
-  assert.equal(state.screen, 'settings');
   assert.equal(state.settingsPanel.modal.field.id, 'llmApiToken');
   assert.equal(state.editor.value, '');
-
   state.editor.set('replacement');
   await submitSettingsEditor(controller);
   assert.equal(state.settings.llmApiToken, 'replacement');
+  assert.equal(settingsViewModel(state).parameters[settingsViewModel(state).parameterIndex].id, 'llmApiToken');
+}));
+
+test('archive review mode is selected from the Local LLM page and preserves the originating parameter', async () => withSettingsHome(async () => {
+  const { state, controller } = await settingsController({
+    llmProvider: 'lmstudio', llmModel: 'gemma', llmArchiveReview: 'structure',
+  });
+  state.settingsPanel.modelsProvider = 'lmstudio';
+  state.settingsPanel.models = [{ id: 'gemma', key: 'gemma', label: 'gemma', loaded: true }];
+  await selectCategory(controller, 'localLlm');
+  let view = await openParameter(controller, 'llmArchiveReview');
+  assert.equal(view.choices[view.choiceIndex].id, 'llmArchiveReview:structure');
+  await chooseValue(controller, 'llmArchiveReview:patch');
+  view = settingsViewModel(state);
+  assert.equal(state.settings.llmArchiveReview, 'patch');
+  assert.equal(view.parameters[view.parameterIndex].id, 'llmArchiveReview');
 }));

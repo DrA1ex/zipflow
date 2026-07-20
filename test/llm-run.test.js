@@ -83,3 +83,70 @@ test('archive inspection persists changes.patch and records the local LLM result
     delete process.env.ZIPFLOW_HOME;
   }
 });
+
+test('Escape cancels local LLM generation and still presents the update plan', async () => {
+  const home = await tempDir('zipflow-llm-cancel-home-');
+  const root = await tempDir('zipflow-llm-cancel-project-');
+  const archive = path.join(await tempDir('zipflow-llm-cancel-archive-'), 'update.zip');
+  const originalFetch = globalThis.fetch;
+  process.env.ZIPFLOW_HOME = home;
+  try {
+    await writeFiles(root, {
+      'package.json': '{"name":"fixture"}\n',
+      'src/index.js': 'export const value = 1;\n',
+    });
+    await initGit(root);
+    await createZip(archive, {
+      'package.json': '{"name":"fixture"}\n',
+      'src/index.js': 'export const value = 2;\n',
+    });
+
+    globalThis.fetch = async (url, options = {}) => {
+      if (url.endsWith('/api/v1/models')) return jsonResponse({
+        models: [{
+          type: 'llm', key: 'gemma', max_context_length: 32_000,
+          loaded_instances: [{ id: 'gemma-loaded', config: { context_length: 16_000 } }],
+          capabilities: { reasoning: { allowed_options: ['off'], default: 'off' } },
+        }],
+      });
+      return new Promise((_resolve, reject) => {
+        options.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), { once: true });
+      });
+    };
+
+    const project = await discoverProject(root);
+    const workflow = createRecommendedWorkflow(project);
+    workflow.checks = [];
+    workflow.policy.confirmPlan = true;
+    workflow.git.resultCommit = 'never';
+    const state = createInitialState();
+    state.project = project;
+    state.workflow = workflow;
+    state.settings = {
+      ...DEFAULT_SETTINGS,
+      llmProvider: 'lmstudio',
+      llmModel: 'gemma',
+      llmLanguage: 'English',
+    };
+    const controller = new ZipflowController(state);
+
+    beginArchiveInput(controller);
+    state.editor.insert(archive);
+    const inspection = submitRunEditor(controller);
+    for (let attempt = 0; attempt < 100 && !state.llmAbortController; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assert.ok(state.llmAbortController, 'LLM request did not start');
+    await controller.handleKey({ name: 'escape' });
+    await inspection;
+
+    assert.equal(state.screen, 'plan-review');
+    assert.equal(state.run.llm.cancelled, true);
+    assert.ok(state.messages.some((message) => message.title === 'Local LLM generation cancelled'));
+    assert.equal(state.llmAbortController, null);
+    await controller.cleanup();
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete process.env.ZIPFLOW_HOME;
+  }
+});

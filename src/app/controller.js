@@ -9,17 +9,18 @@ import {
   activateSetup, backSetup, beginSetup, handleSetupShortcut, handlesSetupScreen, submitSetupEditor,
 } from './setup-flow.js';
 import {
-  activateRun, backRun, beginArchiveInput, handleConflictShortcut, handlesRunScreen, showLastRun, submitRunEditor,
+  activateRun, backRun, beginArchiveInput, handleRunShortcut, handlesRunScreen, inspectArchivePath, showLastRun, submitRunEditor,
 } from './run-flow.js';
 import {
-  closeSettings, handleSettingsKey, isSettingsScreen, openSettings, selectOption, selectSetting,
+  closeSettings, handleSettingsKey, isSettingsScreen, openSettings, selectChoice, selectParameter, selectSetting,
 } from './settings-panel.js';
-import { projectSummary } from '../ui/format.js';
+import { projectSummary, workflowOverviewLines } from '../ui/format.js';
 import { terminateActiveProcesses } from '../utils/process.js';
 import { removeIfExists } from '../utils/fs.js';
 import {
   activateExport, backExport, beginCreateZip, handleExportShortcut, handlesExportScreen, submitExportEditor,
 } from './export-flow.js';
+import { activateHistory, backHistory, handlesHistoryScreen, repeatLastArchive, showRunHistory } from './history-flow.js';
 
 export class ZipflowController {
   constructor(state) {
@@ -62,7 +63,19 @@ export class ZipflowController {
       return;
     }
     if (isSettingsScreen(this.state.screen)) return handleSettingsKey(this, normalized);
+    if (handleRunShortcut(this, normalized)) return this.invalidate();
+    if (normalized.name === 'escape' && this.state.llmAbortController) {
+      this.state.llmAbortController.abort();
+      if (this.state.llmRuntime) {
+        this.state.llmRuntime.cancellationRequested = true;
+        this.state.llmRuntime.phase = 'cancelling';
+        this.state.llmRuntime.label = 'Cancelling local LLM generation';
+      }
+      this.setStatus('Cancelling local LLM generation…');
+      return;
+    }
     if (this.state.busy || ['checks-running', 'deploy-running'].includes(this.state.screen)) return;
+    if (normalized.printable && normalized.text === '?') return this.showContextHelp();
     if (normalized.name === 'page-up' || normalized.name === 'page-down') {
       const delta = normalized.name === 'page-up' ? -8 : 8;
       this.state.transcriptScroll = Math.max(0, this.state.transcriptScroll + delta);
@@ -70,7 +83,7 @@ export class ZipflowController {
       return this.invalidate();
     }
     if (isEditorScreen(this.state.screen)) return this.handleEditorKey(normalized);
-    if (handleSetupShortcut(this, normalized) || handleConflictShortcut(this, normalized) || handleExportShortcut(this, normalized)) return this.invalidate();
+    if (handleSetupShortcut(this, normalized) || handleExportShortcut(this, normalized)) return this.invalidate();
     if (normalized.name === 'up' || normalized.name === 'down') {
       this.moveSelection(normalized.name === 'up' ? -1 : 1);
       return this.invalidate();
@@ -81,7 +94,8 @@ export class ZipflowController {
 
   async dispatch(action) {
     if (action.type === 'settings-select-setting') return selectSetting(this, action.index);
-    if (action.type === 'settings-select-option') return selectOption(this, action.index);
+    if (action.type === 'settings-select-parameter') return selectParameter(this, action.index);
+    if (action.type === 'settings-select-choice') return selectChoice(this, action.index);
     if (action.type === 'activate-index') {
       this.state.selectedIndex = action.index;
       await this.activateSelected();
@@ -92,13 +106,23 @@ export class ZipflowController {
   async activateSelected() {
     const item = this.state.menuItems[this.state.selectedIndex];
     if (!item || item.disabled) return;
+    if (shouldRecordChoice(this.state.screen, item.id)) this.recordChoice(item.label);
     if (this.state.screen === 'home' || this.state.screen === 'new-project') return this.activateHome(item.id);
     if (handlesSetupScreen(this.state.screen)) return activateSetup(this, item.id);
     if (handlesRunScreen(this.state.screen)) return activateRun(this, item.id);
     if (handlesExportScreen(this.state.screen)) return activateExport(this, item.id);
+    if (handlesHistoryScreen(this.state.screen)) return activateHistory(this, item.id);
     if (this.state.screen === 'error') {
       if (item.id === 'back-home') return this.showHome();
       if (item.id === 'exit') return this.exit(1);
+    }
+  }
+
+  recordChoice(label) {
+    appendMessage(this.state, 'Your choice', [label], 'choice');
+    if (this.state.run) {
+      this.state.run.decisions ??= [];
+      this.state.run.decisions.push({ screen: this.state.screen, label, at: new Date().toISOString() });
     }
   }
 
@@ -107,33 +131,40 @@ export class ZipflowController {
     this.state.run = null;
     this.state.archive = null;
     this.state.archiveMetadata = null;
+    this.state.archiveSafety = null;
     this.state.plan = null;
+    this.state.runDetailsOrigin = null;
     if (workflow) {
+      const lastRun = workflow.lastRunId ? `Last run: ${workflow.lastRunId}` : 'No previous runs';
       return this.showMenu('home', [
-        { id: 'start-update', label: 'Start an update', description: 'Choose a ZIP archive and apply the saved workflow' },
-        { id: 'review-settings', label: 'Review workflow', description: `${workflow.checks.filter((check) => check.selected).length} checks · ${workflow.policy.label}` },
-        { id: 'fresh-setup', label: 'Start setup again', description: 'The current workflow stays active until its replacement is saved' },
+        { id: 'start-update', label: 'Start an update', description: 'Choose a ZIP archive and use the workflow summarized above' },
+        { id: 'fine-tune', label: 'Fine-tune workflow', description: 'Adjust checks, conflict handling, archive mode, Git, and deployment' },
         { id: 'create-zip', label: 'Create ZIP', description: 'Export tracked, non-ignored, selected, or all project files' },
-        { id: 'last-run', label: 'View last run', description: workflow.lastRunId ?? 'No previous run', disabled: !workflow.lastRunId },
+        { id: 'repeat-last', label: 'Repeat last archive', description: workflow.lastRunId ? 'Rebuild the previous archive plan against the current project' : 'No previous archive', disabled: !workflow.lastRunId },
+        { id: 'run-history', label: 'Run history', description: lastRun },
+        { id: 'fresh-setup', label: 'Rebuild workflow', description: 'Create a replacement while the current workflow remains active' },
         { id: 'exit', label: 'Exit' },
-      ], 'Ready');
+      ], 'Ready', 0, ['Current workflow', ...workflowOverviewLines(workflow), '', 'Use Fine-tune only when one of these selected defaults does not match the project.']);
     }
     return this.showMenu('new-project', [
       { id: 'setup-project', label: 'Set up this project', description: `${displayPath(project.root)} · ${project.labels.join(' · ') || 'Custom project'}` },
       { id: 'choose-directory', label: 'Choose another directory', description: 'Tab completes directory names' },
       { id: 'create-zip', label: 'Create ZIP', description: 'Export files before configuring an update workflow' },
       { id: 'exit', label: 'Exit' },
-    ], 'Workflow not configured');
+    ], 'Workflow not configured', 0, [
+      'Zipflow found the current project but no saved workflow.',
+      'Setup will detect useful checks, choose safe update defaults, and show every selected parameter before saving.',
+    ]);
   }
 
-  showMenu(screen, items, status = null, selectedIndex = null) {
+  showMenu(screen, items, status = null, selectedIndex = null, intro = []) {
     let nextIndex = selectedIndex;
     if (nextIndex === null && this.state.screen === screen) {
       const previousId = this.state.menuItems[this.state.selectedIndex]?.id;
       const matchingIndex = items.findIndex((item) => item.id === previousId);
       nextIndex = matchingIndex >= 0 ? matchingIndex : this.state.selectedIndex;
     }
-    setScreen(this.state, screen, { items, selectedIndex: nextIndex ?? 0, status });
+    setScreen(this.state, screen, { items, selectedIndex: nextIndex ?? 0, status, intro });
     this.state.busy = false;
     this.invalidate();
   }
@@ -184,9 +215,11 @@ export class ZipflowController {
   async activateHome(itemId) {
     if (itemId === 'exit') return this.exit(0);
     if (itemId === 'start-update') return beginArchiveInput(this);
-    if (itemId === 'review-settings') return beginSetup(this, { fresh: false });
+    if (itemId === 'fine-tune' || itemId === 'review-settings') return beginSetup(this, { fresh: false });
     if (itemId === 'fresh-setup') return beginSetup(this, { fresh: true });
     if (itemId === 'last-run') return showLastRun(this);
+    if (itemId === 'run-history') return showRunHistory(this);
+    if (itemId === 'repeat-last') return repeatLastArchive(this);
     if (itemId === 'create-zip') return beginCreateZip(this);
     if (itemId === 'setup-project') return beginSetup(this, { fresh: true });
     if (itemId === 'choose-directory') {
@@ -196,6 +229,19 @@ export class ZipflowController {
         instructions: ['Enter the project directory. Tab completes directory names.'],
       }, this.state.project.root);
     }
+  }
+
+  async inspectArchivePath(archivePath, options = {}) {
+    return inspectArchivePath(this, archivePath, options);
+  }
+
+  showContextHelp() {
+    const item = this.state.menuItems[this.state.selectedIndex];
+    if (!item) return;
+    const lines = [item.description || 'No additional description is available for this action.'];
+    if (item.help) lines.push('', item.help);
+    this.message(`Help · ${item.label}`, lines, 'info');
+    this.setStatus('Context help added to Activity');
   }
 
   async handleEditorKey(key) {
@@ -231,6 +277,7 @@ export class ZipflowController {
     if (handlesSetupScreen(this.state.screen)) return backSetup(this);
     if (handlesRunScreen(this.state.screen)) return backRun(this);
     if (handlesExportScreen(this.state.screen)) return backExport(this);
+    if (handlesHistoryScreen(this.state.screen)) return backHistory(this);
     if (this.state.screen === 'home' || this.state.screen === 'new-project') return this.exit(0);
     return this.showHome();
   }
@@ -251,5 +298,13 @@ function isEditorScreen(screen) {
   return [
     'project-path-input', 'archive-input', 'custom-check-command', 'custom-check-name',
     'commit-message', 'commit-template', 'deploy-command', 'export-path', 'initial-commit-message',
+  ].includes(screen);
+}
+
+function shouldRecordChoice(screen, itemId) {
+  if (['exit', 'back-home', 'history-back', 'back-to-plan', 'back-plan-categories', 'back-conflict-summary'].includes(itemId)) return false;
+  return [
+    'archive-safety', 'plan-review', 'conflict-summary', 'conflict-file', 'conflict-checkpoint', 'check-failed',
+    'commit', 'deploy-prompt', 'deploy-failed', 'rollback-confirm', 'archive-duplicate',
   ].includes(screen);
 }

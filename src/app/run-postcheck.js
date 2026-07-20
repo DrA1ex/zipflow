@@ -2,11 +2,12 @@ import { copyTextToClipboard } from 'terlio.js';
 import { runChecks } from '../checks/runner.js';
 import { runDeploy } from '../deploy/runner.js';
 import { createCommit } from '../git/repository.js';
-import { saveRunRecord, runReportPath } from '../runs/store.js';
-import { formatFailureForClipboard } from '../runs/text-report.js';
+import { listProjectRuns, saveRunRecord, runReportPath } from '../runs/store.js';
+import { buildRunAnalytics } from '../history/analytics.js';
+import { formatCompletionForClipboard, formatFailureForClipboard } from '../runs/text-report.js';
 import { saveWorkflow } from '../workflow/store.js';
 import { displayPath } from '../utils/paths.js';
-import { formatArchiveName, planSummary } from '../ui/format.js';
+import { compactPlanLine, compactPlanMeta, formatArchiveName } from '../ui/format.js';
 import { confirmRollback, showRunDetails } from './run-rollback.js';
 import { failRun, releaseRunResources } from './run-lifecycle.js';
 import { finalizeSourceArchive } from './archive-policy.js';
@@ -43,7 +44,11 @@ export async function activatePostCheck(controller, itemId) {
   if (state.screen === 'completed') {
     if (itemId === 'run-deploy') return startDeploy(controller, { fromCompleted: true });
     if (itemId === 'another-archive') return beginAnotherArchive(controller);
-    if (itemId === 'view-report') return showRunDetails(controller, state.run);
+    if (itemId === 'copy-summary') {
+      const copied = await copyTextToClipboard(formatCompletionForClipboard(state.run), { output: controller.runtime.output });
+      return controller.setStatus(copied ? 'Run summary copied' : `Report saved at ${runReportPath(state.run.id)}`);
+    }
+    if (itemId === 'view-report') return showRunDetails(controller, state.run, { origin: 'completed' });
     if (itemId === 'rollback') return confirmRollback(controller, state.run);
     if (itemId === 'home') return controller.showHome();
     if (itemId === 'exit') return controller.exit(0);
@@ -68,8 +73,13 @@ export async function submitPostCheckEditor(controller) {
 export async function startChecks(controller) {
   const { state } = controller;
   const checks = state.workflow.checks.filter((check) => check.selected);
+  const estimate = await previousCheckEstimate(state);
+  controller.message('Checks starting', [
+    `${checks.length} selected check${checks.length === 1 ? '' : 's'} will run in workflow order${estimate?.totalLabel ? ` · historical median ${estimate.totalLabel}` : ''}.`,
+    'Successful output stays compact; a failed command opens its useful output and copyable report.',
+  ], 'process');
   state.screen = 'checks-running';
-  state.checkRuntime = { checks, activeIndex: 0, results: [], lastLine: '' };
+  state.checkRuntime = { checks, activeIndex: 0, results: [], lastLine: '', estimates: estimate?.byName ?? {} };
   state.status = 'Running checks';
   controller.invalidate();
   try {
@@ -116,7 +126,7 @@ function showFailedCheck(controller) {
     { id: 'rerun-checks', label: 'Run checks again', description: 'Use after manually fixing files' },
     { id: 'keep-changes', label: 'Keep changes' },
     { id: 'rollback', label: 'Roll back update', description: 'Restore the exact pre-run files' },
-  ], 'Checks failed');
+  ], 'Checks failed', 0, ['The update is still applied locally.', 'Fix files and re-run checks, keep the update, or restore the exact pre-run state.']);
 }
 
 async function activateFailedCheck(controller, itemId) {
@@ -141,7 +151,7 @@ function showCommitPrompt(controller) {
     { id: 'create-commit', label: 'Create commit', description: message },
     { id: 'edit-message', label: 'Edit message', description: commitMessageSource(controller.state) },
     { id: 'finish-no-commit', label: 'Continue without commit', description: 'Deployment settings still apply after this step' },
-  ], 'Commit result');
+  ], 'Commit result', 0, [`Proposed source: ${commitMessageSource(controller.state)}`, 'The commit includes only paths applied by this Zipflow run.']);
 }
 
 async function createResultCommit(controller, message) {
@@ -169,7 +179,7 @@ function showDeployPrompt(controller) {
   controller.showMenu('deploy-prompt', [
     { id: 'run-deploy', label: 'Run deployment', description: deploy.commandText },
     { id: 'skip-deploy', label: 'Finish without deployment', description: 'The update and successful checks remain recorded' },
-  ], 'Checks passed · deployment is ready');
+  ], 'Checks passed · deployment is ready', 0, ['Every required check passed.', 'Deployment is optional for this run and does not change the recorded local update.']);
 }
 
 async function startDeploy(controller, { fromCompleted = false } = {}) {
@@ -234,8 +244,9 @@ async function completeRun(controller, status) {
   await finalizeSourceArchive(controller);
   await releaseRunResources(controller);
   controller.message(status === 'completed' ? 'Update completed successfully' : 'Update completed with errors', [
-    ...planSummary(state.plan),
-    `Deployment: ${deploymentResultLine(state)}`,
+    compactPlanLine(state.plan),
+    compactPlanMeta(state.plan),
+    `Checks: ${state.run.checks ? `${state.run.checks.passed} passed · ${state.run.checks.failed} failed` : 'not run'} · Deployment: ${deploymentResultLine(state)}`,
     `Report: ${displayPath(runReportPath(state.run.id))}`,
   ], status === 'completed' ? 'success' : 'warning');
   showCompleted(controller);
@@ -243,17 +254,26 @@ async function completeRun(controller, status) {
 
 function showCompleted(controller) {
   const { state } = controller;
-  const items = [];
+  const items = [
+    { id: 'home', label: 'Finish and return to project', description: 'Default action; the run remains available in history' },
+    { id: 'copy-summary', label: 'Copy run summary', description: 'Copy a compact summary with changes, checks, commit, and deployment' },
+    { id: 'another-archive', label: 'Apply another archive', description: 'Start the next update without leaving Zipflow' },
+    { id: 'view-report', label: 'View run details', description: 'Open the stored decisions, checks, commit, deployment, and report path' },
+  ];
   if (state.workflow.deploy?.policy === 'on-demand' && !state.run.deploy?.ok) {
     items.push({ id: 'run-deploy', label: 'Run deployment', description: state.workflow.deploy.commandText });
   }
-  items.push(
-    { id: 'another-archive', label: 'Apply another archive' },
-    { id: 'view-report', label: 'View report' },
-  );
-  if (!state.run.rollback || state.run.rollback.status !== 'completed') items.push({ id: 'rollback', label: 'Roll back this update' });
-  items.push({ id: 'home', label: 'Return to project' }, { id: 'exit', label: 'Exit' });
-  controller.showMenu('completed', items, 'Run completed');
+  if (!state.run.rollback || state.run.rollback.status !== 'completed') {
+    items.push({ id: 'rollback', label: 'Roll back this update', description: 'Restore the exact local state from before this run' });
+  }
+  items.push({ id: 'exit', label: 'Exit' });
+  controller.showMenu('completed', items, 'Run completed', 0, [
+    compactPlanLine(state.plan),
+    `Checks: ${state.run.checks ? `${state.run.checks.passed} passed · ${state.run.checks.failed} failed` : 'not run'}`,
+    `Commit: ${state.run.commit ? `${state.run.commit.revision} ${firstLine(state.run.commit.message)}` : 'not created'}`,
+    `Deployment: ${deploymentResultLine(state)}`,
+    `Source archive: ${archiveDispositionLine(state.run.archiveDisposition)}`,
+  ]);
 }
 
 function showCommitOrComplete(controller) {
@@ -338,6 +358,29 @@ function deploymentResultLine(state) {
   if (!state.run.deploy) return state.workflow.deploy?.policy === 'on-demand' ? 'available on demand' : 'not run';
   if (state.run.deploy.skipped) return 'skipped';
   return state.run.deploy.ok ? 'passed' : 'failed';
+}
+
+async function previousCheckEstimate(state) {
+  const runs = (await listProjectRuns(state.project.root, { limit: 40 })).filter((run) => run.id !== state.run.id);
+  const analytics = buildRunAnalytics(runs);
+  if (!analytics.checks.total.count) return null;
+  return {
+    totalLabel: estimateLabel(analytics.checks.total.medianMs),
+    byName: Object.fromEntries(analytics.checks.byName.map((item) => [item.name, item.medianMs])),
+  };
+}
+
+function estimateLabel(milliseconds) {
+  if (milliseconds >= 60_000) return `${Math.max(1, Math.round(milliseconds / 60_000))} min`;
+  return `${Math.max(1, Math.round(milliseconds / 1000))} sec`;
+}
+
+function archiveDispositionLine(value) {
+  if (!value) return 'not processed';
+  if (value.action === 'moved') return `moved to ${displayPath(value.path)}`;
+  if (value.action === 'deleted') return 'deleted by global policy';
+  if (value.action === 'kept') return 'kept in original location';
+  return value.error ? `policy failed: ${value.error}` : value.action;
 }
 
 function lastNonEmptyLine(value) {
