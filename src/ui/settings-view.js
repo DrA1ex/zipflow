@@ -3,13 +3,13 @@ import {
   Modal,
   Row,
   SelectList,
-  SuggestionsPanel,
   Text,
   TextEditorView,
   WorkspacePane,
   color,
 } from 'terlio.js';
 import { settingsViewModel } from '../app/settings-panel.js';
+import { PathCompletionPopup } from './path-completion.js';
 
 export function renderSettings(state, width, height, theme) {
   const view = settingsViewModel(state);
@@ -169,21 +169,14 @@ function renderSettingsModal({ content, modal, state, width, height, theme }) {
     opaque: true,
   });
   const completion = state.pathSuggestions;
-  if (!modal.field.path || completion?.owner !== 'settings-modal' || !completion.items?.length) return modalLayer;
-  const suggestions = SuggestionsPanel({
-    columns: Math.max(36, modalWidth),
-    height: Math.min(7, Math.max(4, completion.items.length + 2)),
-    theme,
-    suggestions: completion.items,
-    suggestionIndex: completion.selectedIndex,
-    suggestionWindowSize: 5,
-    onSuggestionSelect: (_item, index) => state.dispatch?.({ type: 'path-select', index }),
-  });
+  if (!modal.field.path || completion?.owner !== 'settings-modal' || !completion.items?.length || !state.pathSuggestionActive) return modalLayer;
+  const overlayHeight = Math.min(6, Math.max(3, completion.items.length + 1));
+  const suggestions = PathCompletionPopup({ state, width: modalWidth, height: overlayHeight, theme });
   return BottomOverlay({
     content: modalLayer,
     overlay: suggestions,
     height,
-    bottom: 1,
+    bottom: Math.max(1, Math.floor((height - estimatedHeight) / 2) + 4),
     left: Math.max(2, Math.floor((width - modalWidth) / 2)),
     right: Math.max(2, Math.floor((width - modalWidth) / 2)),
     width: modalWidth,

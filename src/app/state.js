@@ -22,6 +22,7 @@ export function createInitialState() {
     editor: new InputEditor(),
     editorContext: null,
     pathSuggestions: null,
+    pathSuggestionActive: false,
     busy: false,
     busyLabel: 'Starting…',
     progress: { value: 0, total: 1, detail: '' },

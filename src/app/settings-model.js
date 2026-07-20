@@ -4,18 +4,21 @@ import { saveSettings } from '../settings/store.js';
 export function openModelConfiguration(controller, model) {
   const { state } = controller;
   const saved = savedConfig(state, model);
+  const values = model.loaded
+    ? { ...configFromLoaded(model), ...saved }
+    : { ...defaultConfig(), ...saved };
   state.settingsPanel.focus = 'model-config';
   state.settingsPanel.modelConfig = {
     model,
     focus: 'parameters',
-    parameterIndex: model.loaded ? 0 : 0,
+    parameterIndex: useModelParameterIndex(model, values),
     choiceIndex: 0,
     activeParameterId: null,
-    values: model.loaded ? configFromLoaded(model) : { ...defaultConfig(), ...saved },
+    values,
     loading: false,
     error: null,
   };
-  state.status = model.loaded ? 'Loaded model details' : 'Configure model before loading';
+  state.status = 'Model configuration';
   controller.invalidate();
 }
 
@@ -79,17 +82,16 @@ export async function selectModelChoice(controller, index) {
 function modelParameters(config) {
   const model = config.model;
   const values = config.values;
-  const readOnly = model.loaded;
   const parameters = [
-    valueParameter('contextLength', 'Context length', tokenLabel(values.contextLength), readOnly),
-    valueParameter('evalBatchSize', 'Evaluation batch', numberLabel(values.evalBatchSize), readOnly),
-    valueParameter('flashAttention', 'Flash Attention', triStateLabel(values.flashAttention), readOnly),
-    valueParameter('offloadKvCacheToGpu', 'KV cache', kvLabel(values.offloadKvCacheToGpu), readOnly),
+    valueParameter('contextLength', 'Context length', tokenLabel(values.contextLength), false),
+    valueParameter('evalBatchSize', 'Evaluation batch', numberLabel(values.evalBatchSize), model.loaded),
+    valueParameter('flashAttention', 'Flash Attention', triStateLabel(values.flashAttention), model.loaded),
+    valueParameter('offloadKvCacheToGpu', 'KV cache', kvLabel(values.offloadKvCacheToGpu), model.loaded),
   ];
   if (values.numExperts != null || model.config?.num_experts != null) {
-    parameters.push(valueParameter('numExperts', 'Experts', numberLabel(values.numExperts), readOnly));
+    parameters.push(valueParameter('numExperts', 'Experts', numberLabel(values.numExperts), model.loaded));
   }
-  parameters.push({ id: 'use-model', action: 'use-model', label: model.loaded ? 'Use loaded instance' : 'Load and use model', value: model.loaded ? 'No additional loading' : configSummary(values) });
+  parameters.push({ id: 'use-model', action: 'use-model', label: 'Use this model', value: '' });
   parameters.push({ id: 'back-models', action: 'back-models', label: 'Back to model list', value: '' });
   return parameters;
 }
@@ -182,7 +184,7 @@ async function useConfiguredModel(controller) {
     state.settingsPanel.modelConfig = null;
     state.settingsPanel.focus = 'choices';
     state.settingsPanel.activeParameterId = 'llmModel';
-    state.status = model.loaded ? 'Loaded model selected' : 'Model loaded and selected';
+    state.status = model.loaded ? 'Model selected' : 'Model loaded and selected';
   } catch (error) {
     config.error = error.message;
     state.status = error.message;
@@ -221,8 +223,8 @@ export function modelConfigKey(provider, modelKey) {
 }
 
 export function modelConfigSummary(state, model) {
-  if (model.loaded) return configSummary(configFromLoaded(model));
   const saved = savedConfig(state, model);
+  if (model.loaded) return configSummary({ ...configFromLoaded(model), ...saved });
   return Object.keys(saved).length ? configSummary({ ...defaultConfig(), ...saved }) : '';
 }
 
@@ -239,6 +241,10 @@ function configFromLoaded(model) {
 
 function defaultConfig() {
   return { contextLength: null, evalBatchSize: null, flashAttention: null, offloadKvCacheToGpu: null, numExperts: null };
+}
+
+function useModelParameterIndex(model, values) {
+  return 4 + Number(values.numExperts != null || model.config?.num_experts != null);
 }
 
 function normalizeApiConfig(config) {

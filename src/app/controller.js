@@ -25,7 +25,7 @@ import {
 import { activateHistory, backHistory, handlesHistoryScreen, repeatLastArchive, showRunHistory } from './history-flow.js';
 import {
   acceptPathSuggestion, clearPathSuggestions, isPathEditorScreen, movePathSuggestion,
-  refreshPathSuggestions, selectPathSuggestion,
+  refreshPathSuggestions, resetPathSuggestionInput, selectPathSuggestion,
 } from './path-suggestions.js';
 
 export class ZipflowController {
@@ -47,7 +47,10 @@ export class ZipflowController {
       this.state.project = await discoverProject(process.cwd());
       this.state.workflow = await loadWorkflow(this.state.project.root);
       this.message('Project detected', projectSummary(this.state.project, this.state.workflow), 'project');
-      if (this.state.workflow) beginArchiveInput(this);
+      if (this.state.workflow) {
+        this.message('Hint', ['Current workflow loaded. Zipflow is waiting for a ZIP archive; press Esc to open the project menu or change the workflow.']);
+        beginArchiveInput(this);
+      }
       else this.showHome();
     } catch (error) {
       this.message('Zipflow could not start', [error.message], 'error');
@@ -160,11 +163,10 @@ export class ZipflowController {
       const lastRun = workflow.lastRunId ? `Last run: ${workflow.lastRunId}` : 'No previous runs';
       return this.showMenu('home', [
         { id: 'start-update', label: 'Start an update', description: 'Choose a ZIP archive and use the workflow summarized above' },
-        { id: 'fine-tune', label: 'Fine-tune workflow', description: 'Adjust checks, conflict handling, archive mode, Git, and deployment' },
+        { id: 'change-workflow', label: 'Change workflow', description: 'Review and update the workflow; nothing changes until you confirm the final step' },
         { id: 'create-zip', label: 'Create ZIP', description: 'Export tracked, non-ignored, selected, or all project files' },
         { id: 'repeat-last', label: 'Repeat last archive', description: workflow.lastRunId ? 'Rebuild the previous archive plan against the current project' : 'No previous archive', disabled: !workflow.lastRunId },
         { id: 'run-history', label: 'Run history', description: lastRun },
-        { id: 'fresh-setup', label: 'Rebuild workflow', description: 'Your current workflow stays unchanged until you confirm and save the replacement.' },
         { id: 'exit', label: 'Exit' },
       ], 'Ready');
     }
@@ -193,12 +195,12 @@ export class ZipflowController {
   }
 
   showEditor(screen, context, value = '') {
+    resetPathSuggestionInput(this.state);
     this.state.editor.set(String(value ?? ''));
     this.state.editorContext = context;
     setScreen(this.state, screen, { items: [], status: context.label });
     this.invalidate();
-    if (isPathEditorScreen(screen)) void refreshPathSuggestions(this);
-    else clearPathSuggestions(this.state);
+    if (!isPathEditorScreen(screen)) clearPathSuggestions(this.state);
   }
 
   message(title, lines = [], tone = 'info') {
@@ -240,8 +242,7 @@ export class ZipflowController {
   async activateHome(itemId) {
     if (itemId === 'exit') return this.exit(0);
     if (itemId === 'start-update') return beginArchiveInput(this);
-    if (itemId === 'fine-tune' || itemId === 'review-settings') return beginSetup(this, { fresh: false });
-    if (itemId === 'fresh-setup') return beginSetup(this, { fresh: true });
+    if (itemId === 'change-workflow' || itemId === 'review-settings') return beginSetup(this, { fresh: false });
     if (itemId === 'last-run') return showLastRun(this);
     if (itemId === 'run-history') return showRunHistory(this);
     if (itemId === 'repeat-last') return repeatLastArchive(this);
@@ -288,8 +289,12 @@ export class ZipflowController {
       await this.submitCurrentEditor();
       return this.invalidate();
     }
+    const previousValue = this.state.editor.value;
     handleInputEditorKey(this.state.editor, key, { multiline: Boolean(this.state.editorContext?.multiline) });
-    if (pathEditor) await refreshPathSuggestions(this);
+    if (pathEditor && this.state.editor.value !== previousValue) {
+      this.state.pathSuggestionActive = Boolean(String(this.state.editor.value ?? '').trim());
+      await refreshPathSuggestions(this);
+    }
     this.invalidate();
   }
 

@@ -10,7 +10,6 @@ export function projectSummary(project, workflow = null) {
   ];
   if (workflow) {
     lines.push(...workflowOverviewLines(workflow));
-    lines.push('Ready: waiting for a ZIP archive · press Esc to open the project menu or change the workflow.');
   }
   return lines;
 }

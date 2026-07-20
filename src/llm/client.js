@@ -109,7 +109,7 @@ async function createLmStudioCompletion({
     max_output_tokens: maxTokens,
     store: false,
   };
-  if (contextLength && !loadedModel) body.context_length = contextLength;
+  if (contextLength) body.context_length = contextLength;
   if (reasoningOffSupported) body.reasoning = 'off';
   onEvent({
     type: 'request', attempt: 1, format: 'native', transport: 'LM Studio native',

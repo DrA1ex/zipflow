@@ -12,7 +12,6 @@ import {
   WorkspacePane,
   WorkspaceShell,
   color,
-  SuggestionsPanel,
   copyTextToClipboard,
   resolveWorkspaceShellLayout,
   scrollBy,
@@ -25,6 +24,7 @@ import { ZIPFLOW_VERSION } from '../version.js';
 import { buildTranscript } from './activity.js';
 import { renderSettings } from './settings-view.js';
 import { settingsViewModel } from '../app/settings-panel.js';
+import { PathCompletionPopup } from './path-completion.js';
 
 export function renderZipflow({ state, width, height }) {
   const theme = themes[state.settings?.theme] ?? themes.ocean;
@@ -82,25 +82,18 @@ function renderWorkflow(state, width, mainHeight, theme) {
 
 function renderPathSuggestionsOverlay(state, content, width, height, promptHeight, theme) {
   const completion = state.pathSuggestions;
-  if (!completion?.items?.length || completion.owner === 'settings-modal') return content;
-  const overlayHeight = Math.min(8, Math.max(4, completion.items.length + 2));
-  const suggestions = SuggestionsPanel({
-    columns: Math.max(40, width - 4),
-    height: overlayHeight,
-    theme,
-    suggestions: completion.items,
-    suggestionIndex: completion.selectedIndex,
-    suggestionWindowSize: 6,
-    onSuggestionSelect: (_item, index) => state.dispatch?.({ type: 'path-select', index }),
-  });
+  if (!completion?.items?.length || completion.owner === 'settings-modal' || !state.pathSuggestionActive) return content;
+  const overlayHeight = Math.min(7, Math.max(3, completion.items.length + 1));
+  const suggestions = PathCompletionPopup({ state, width: Math.max(36, width - 6), height: overlayHeight, theme });
   return BottomOverlay({
     content,
     overlay: suggestions,
     height,
     bottom: promptHeight,
-    left: 1,
-    right: 1,
-    align: 'stretch',
+    left: 2,
+    right: 2,
+    width: Math.max(36, Math.min(width - 4, 86)),
+    align: 'left',
     opaque: true,
   });
 }

@@ -1,6 +1,5 @@
 import path from 'node:path';
 import { handleInputEditorKey } from 'terlio.js';
-import { listLocalModelChoices, providerDefinition } from '../llm/client.js';
 import { loadManagedHistory, resetManagedHistory } from '../history/managed.js';
 import { saveSettings } from '../settings/store.js';
 import { ensureDir } from '../utils/fs.js';
@@ -9,7 +8,10 @@ import { setScreen } from './state.js';
 import {
   handleModelSettingsKey, openModelConfiguration, selectModelChoice, selectModelParameter, settingsModelView,
 } from './settings-model.js';
-import { clearPathSuggestions, movePathSuggestion, refreshPathSuggestions, selectPathSuggestion } from './path-suggestions.js';
+import { ensureDefinitionData, ensureModels, refreshModels, resetModelCache } from './settings-model-list.js';
+import {
+  clearPathSuggestions, movePathSuggestion, refreshPathSuggestions, resetPathSuggestionInput, selectPathSuggestion,
+} from './path-suggestions.js';
 import { validateSettingValue } from './settings-validation.js';
 import {
   settingsChoices, settingsDefinitions, settingsEditorValue, settingsFieldDefinition, settingsParameters,
@@ -54,7 +56,7 @@ export function closeSettings(controller) {
   if (!panel) return;
   const { previous } = panel;
   controller.state.settingsPanel = null;
-  clearPathSuggestions(controller.state);
+  resetPathSuggestionInput(controller.state);
   setScreen(controller.state, previous.screen, {
     items: previous.menuItems,
     selectedIndex: previous.selectedIndex,
@@ -67,7 +69,7 @@ export function backSettingsEditor(controller) {
   const panel = controller.state.settingsPanel;
   if (!panel?.modal) return;
   panel.modal = null;
-  clearPathSuggestions(controller.state);
+  resetPathSuggestionInput(controller.state);
   controller.state.status = currentDefinition(controller.state).label;
   controller.invalidate();
 }
@@ -82,7 +84,7 @@ export async function submitSettingsEditor(controller) {
     state.settings = await saveSettings({ ...state.settings, [modal.field.id]: value });
     if (modal.field.id === 'llmApiToken') resetModelCache(state.settingsPanel);
     state.settingsPanel.modal = null;
-    clearPathSuggestions(state);
+    resetPathSuggestionInput(state);
     restoreParameter(state, modal.returnParameterId);
     state.status = `${modal.field.label} saved`;
     controller.invalidate();
@@ -312,8 +314,12 @@ async function handleModalKey(controller, key) {
   }
   if (key.name === 'enter') return submitSettingsEditor(controller);
   modal.error = null;
+  const previousValue = state.editor.value;
   handleInputEditorKey(state.editor, key, { multiline: false });
-  if (modal.field.path) await refreshPathSuggestions(controller, { settingsModal: true });
+  if (modal.field.path && state.editor.value !== previousValue) {
+    state.pathSuggestionActive = Boolean(String(state.editor.value ?? '').trim());
+    await refreshPathSuggestions(controller, { settingsModal: true });
+  }
   controller.invalidate();
   return true;
 }
@@ -323,51 +329,9 @@ function openSettingModal(controller, fieldId, returnParameterId) {
   if (!field) return;
   controller.state.settingsPanel.modal = { field, error: null, returnParameterId };
   controller.state.editor.set(settingsEditorValue(controller.state, fieldId));
+  resetPathSuggestionInput(controller.state);
   controller.state.status = field.label;
   controller.invalidate();
-  if (field.path) void refreshPathSuggestions(controller, { settingsModal: true });
-}
-
-async function refreshModels(controller, { quiet = false } = {}) {
-  const { state } = controller;
-  const provider = state.settings.llmProvider;
-  if (provider === 'disabled') return;
-  const panel = state.settingsPanel;
-  panel.loadingModels = true;
-  panel.modelError = null;
-  controller.invalidate();
-  try {
-    panel.models = await listLocalModelChoices(provider, { apiToken: state.settings.llmApiToken });
-    panel.modelsProvider = provider;
-    const current = panel.models.find((item) => item.id === state.settings.llmModel)
-      ?? panel.models.find((item) => item.key === state.settings.llmModel);
-    if (current && current.id !== state.settings.llmModel) {
-      state.settings = await saveSettings({ ...state.settings, llmModel: current.id });
-    } else if (!current && state.settings.llmModel) {
-      state.settings = await saveSettings({ ...state.settings, llmModel: '' });
-    }
-    if (!quiet) state.status = `${panel.models.length} ${providerDefinition(provider).label} models available`;
-  } catch (error) {
-    panel.models = [];
-    panel.modelsProvider = provider;
-    panel.modelError = error.message;
-    if (!quiet) state.status = error.message;
-  } finally {
-    panel.loadingModels = false;
-    controller.invalidate();
-  }
-}
-
-async function ensureDefinitionData(controller, definition) {
-  if (definition.id === 'localLlm') await ensureModels(controller);
-}
-
-async function ensureModels(controller) {
-  const { state } = controller;
-  const panel = state.settingsPanel;
-  if (state.settings.llmProvider !== 'disabled'
-    && panel.modelsProvider !== state.settings.llmProvider
-    && !panel.loadingModels) await refreshModels(controller, { quiet: true });
 }
 
 function currentDefinition(state) {
@@ -435,6 +399,10 @@ function selectedChoiceIndex(state, choices, parameter) {
   const selected = choices.findIndex((item) => item.settingId === parameter.settingId
     && (item.value === state.settings[parameter.settingId] || item.selected));
   if (selected >= 0) return selected;
+  if (parameter.settingId === 'llmModel') {
+    const firstModel = choices.findIndex((item) => item.model && !item.disabled);
+    if (firstModel >= 0) return firstModel;
+  }
   return choices.findIndex((item) => !item.disabled) >= 0 ? choices.findIndex((item) => !item.disabled) : 0;
 }
 
@@ -476,12 +444,6 @@ function directSettingParameter(definition, parameters) {
 
 function isDirectDefinition(definition) {
   return Boolean(definition?.directParameterId);
-}
-
-function resetModelCache(panel) {
-  panel.models = [];
-  panel.modelsProvider = null;
-  panel.modelError = null;
 }
 
 function wrap(value, length) {

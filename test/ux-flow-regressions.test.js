@@ -41,10 +41,15 @@ test('configured projects boot directly into archive waiting and Escape opens th
     const detected = state.messages.find((message) => message.title === 'Project detected');
     assert.ok(detected);
     assert.ok(detected.lines.some((line) => /Archive: Overlay/.test(line)));
+    const hint = state.messages.find((message) => message.title === 'Hint');
+    assert.ok(hint);
+    assert.match(hint.lines.join(' '), /press Esc/i);
+    assert.equal(detected.lines.some((line) => /press Esc/i.test(line)), false);
     await controller.handleKey({ name: 'escape', printable: false });
     assert.equal(state.screen, 'home');
     assert.deepEqual(state.panelIntro, []);
-    assert.match(state.menuItems.find((item) => item.id === 'fresh-setup').description, /stays unchanged until/i);
+    assert.ok(state.menuItems.some((item) => item.id === 'change-workflow'));
+    assert.equal(state.menuItems.some((item) => item.id === 'fine-tune' || item.id === 'fresh-setup'), false);
   } finally {
     process.chdir(previousCwd);
     if (previousHome === undefined) delete process.env.ZIPFLOW_HOME;
@@ -52,7 +57,7 @@ test('configured projects boot directly into archive waiting and Escape opens th
   }
 });
 
-test('fine-tune workflow opens each configurable step on Continue', async () => {
+test('Change workflow opens each configurable step on Continue', async () => {
   const state = createInitialState();
   state.project = projectFixture();
   state.workflow = createRecommendedWorkflow(state.project);

@@ -17,21 +17,28 @@ function controllerFixture(root) {
   return { state, controller };
 }
 
-test('archive path editor shows multiple live suggestions in an overlay', async () => {
+test('archive path editor keeps completion hidden until input starts, then overlays live suggestions', async () => {
   const root = await tempDir('zipflow-path-overlay-');
   await mkdir(path.join(root, 'updates'));
   await writeFile(path.join(root, 'one.zip'), 'zip');
   await writeFile(path.join(root, 'two.zip'), 'zip');
   const { state, controller } = controllerFixture(root);
-  controller.showEditor('archive-input', { label: 'ZIP archive path', purpose: 'archive-path' }, `${root}${path.sep}`);
+  controller.showEditor('archive-input', { label: 'ZIP archive path', purpose: 'archive-path' }, '');
+  await refreshPathSuggestions(controller);
+  let output = renderToString(renderZipflow({ state, width: 100, height: 30 }), { width: 100, height: 30 });
+  assert.doesNotMatch(output, /Path suggestions/);
+  assert.equal(state.pathSuggestions, null);
+
+  state.editor.set(`${root}${path.sep}`);
+  state.pathSuggestionActive = true;
   await refreshPathSuggestions(controller);
 
-  const output = renderToString(renderZipflow({ state, width: 100, height: 30 }), { width: 100, height: 30 });
+  output = renderToString(renderZipflow({ state, width: 100, height: 30 }), { width: 100, height: 30 });
 
   assert.match(output, /one\.zip/);
   assert.match(output, /updates\//);
-  assert.match(output, /3 matches/);
-  assert.match(output, /Tab\/Enter complete/);
+  assert.match(output, /Path suggestions · 3/);
+  assert.match(output, /Tab\/Enter accept/);
 
   await controller.handleKey({ name: 'down' });
   await controller.handleKey({ name: 'down' });
@@ -46,6 +53,7 @@ test('Tab opens a selected directory while a selected file completes the path', 
   await writeFile(path.join(nested, 'release.zip'), 'zip');
   const { state, controller } = controllerFixture(root);
   controller.showEditor('archive-input', { label: 'ZIP archive path', purpose: 'archive-path' }, `${root}${path.sep}`);
+  state.pathSuggestionActive = true;
   await refreshPathSuggestions(controller);
   state.pathSuggestions.selectedIndex = state.pathSuggestions.items.findIndex((item) => item.label === 'updates/');
 

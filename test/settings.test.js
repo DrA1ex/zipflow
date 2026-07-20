@@ -163,7 +163,7 @@ test('parameter pages stay compact and move help text into the nested value page
 
   await openParameter(controller, 'llmProvider');
   output = renderToString(renderZipflow({ state, width: 110, height: 30 }), { width: 110, height: 30 });
-  assert.match(output, /Select the local LLM server implementation/);
+  assert.match(output, /Choose the local server Zipflow should contact/);
 }));
 
 test('managed history exposes keep and reset actions without an extra parameter screen', async () => withSettingsHome(async () => {

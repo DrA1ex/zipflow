@@ -59,6 +59,7 @@ async function lmStudioProfile(model, options) {
   const contextLength = loaded?.contextLength ?? record.maxContextLength ?? FALLBACK_CONTEXT;
   return {
     provider: 'lmstudio',
+    modelKey: record.key,
     contextLength,
     maxContextLength: record.maxContextLength ?? contextLength,
     source: loaded ? 'loaded-instance' : 'model-metadata',
@@ -111,6 +112,7 @@ function chooseLoadedInstance(record, model) {
 function fallbackProfile(provider, model = '') {
   return {
     provider,
+    modelKey: model,
     contextLength: FALLBACK_CONTEXT,
     maxContextLength: FALLBACK_CONTEXT,
     source: 'fallback',

@@ -8,6 +8,10 @@ export function isPathEditorScreen(screen) {
 
 export async function refreshPathSuggestions(controller, { settingsModal = false } = {}) {
   const { state } = controller;
+  if (!state.pathSuggestionActive || !String(state.editor.value ?? '').trim()) {
+    state.pathSuggestions = null;
+    return;
+  }
   const spec = pathSuggestionSpec(state, settingsModal);
   if (!spec) {
     state.pathSuggestions = null;
@@ -37,6 +41,11 @@ export async function refreshPathSuggestions(controller, { settingsModal = false
 
 export function clearPathSuggestions(state) {
   state.pathSuggestions = null;
+}
+
+export function resetPathSuggestionInput(state) {
+  state.pathSuggestionActive = false;
+  clearPathSuggestions(state);
 }
 
 export function movePathSuggestion(state, delta) {

@@ -4,6 +4,7 @@ import { renderToString } from 'terlio.js';
 import { createInitialState } from '../src/app/state.js';
 import { ZipflowController } from '../src/app/controller.js';
 import { openModelConfiguration, selectModelChoice, selectModelParameter, settingsModelView } from '../src/app/settings-model.js';
+import { settingsViewModel } from '../src/app/settings-panel.js';
 import { listLocalModelChoices } from '../src/llm/client.js';
 import { DEFAULT_SETTINGS } from '../src/settings/store.js';
 import { renderZipflow } from '../src/ui/render.js';
@@ -58,6 +59,51 @@ test('LM Studio model list shows parameter counts and only loaded models show ru
   assert.match(output, /Qwen 27B · 27B · Q5_K_M/);
   assert.match(output, /Loaded · context 24,000/);
   assert.doesNotMatch(output, /just-in-time/i);
+  assert.doesNotMatch(output, /Read the models currently exposed/i);
+});
+
+test('model selection skips Refresh and model configuration starts on Use this model', async () => {
+  const modelChoices = await models();
+  const state = settingsState(modelChoices);
+  state.settings.llmModel = '';
+  let view = settingsViewModel(state);
+  assert.equal(view.choices[view.choiceIndex].model.key, 'qwen-27b');
+
+  const controller = new ZipflowController(state);
+  controller.invalidate = () => {};
+  openModelConfiguration(controller, modelChoices.find((item) => item.key === 'gemma-12b'));
+  view = settingsModelView(state);
+  assert.equal(view.parameters[view.parameterIndex].id, 'use-model');
+  assert.equal(view.parameters[view.parameterIndex].label, 'Use this model');
+  assert.equal(view.parameters.some((item) => /Use loaded instance/i.test(item.label)), false);
+});
+
+test('loaded LM Studio models keep load-only settings read-only but allow a request context override', async () => {
+  const previousHome = process.env.ZIPFLOW_HOME;
+  process.env.ZIPFLOW_HOME = await tempDir('zipflow-loaded-model-context-home-');
+  try {
+    const modelChoices = await models();
+    const state = settingsState(modelChoices);
+    const controller = new ZipflowController(state);
+    controller.invalidate = () => {};
+    const loaded = modelChoices.find((item) => item.id === 'qwen-loaded');
+    openModelConfiguration(controller, loaded);
+
+    let view = settingsModelView(state);
+    assert.equal(view.parameters.find((item) => item.id === 'contextLength').disabled, false);
+    assert.equal(view.parameters.find((item) => item.id === 'evalBatchSize').disabled, true);
+    await selectModelParameter(controller, view.parameters.findIndex((item) => item.id === 'contextLength'));
+    view = settingsModelView(state);
+    await selectModelChoice(controller, view.choices.findIndex((item) => item.value === 16_384));
+    view = settingsModelView(state);
+    await selectModelParameter(controller, view.parameters.findIndex((item) => item.id === 'use-model'));
+
+    assert.equal(state.settings.llmModel, 'qwen-loaded');
+    assert.equal(state.settings.llmModelLoadConfigs['lmstudio:qwen-27b'].contextLength, 16_384);
+  } finally {
+    if (previousHome === undefined) delete process.env.ZIPFLOW_HOME;
+    else process.env.ZIPFLOW_HOME = previousHome;
+  }
 });
 
 test('unloaded LM Studio models open load configuration and apply selected parameters', async () => {

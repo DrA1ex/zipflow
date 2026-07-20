@@ -108,7 +108,7 @@ test('LM Studio generation uses native streaming settings and a safe context len
   assert.equal(chatBody.stream, true);
   assert.equal(chatBody.reasoning, 'off');
   assert.equal(chatBody.model, 'gemma-loaded');
-  assert.equal('context_length' in chatBody, false, 'loaded instances must not be reconfigured or loaded again');
+  assert.equal(chatBody.context_length, 16_384, 'loaded instances may use the Zipflow request context without loading another model');
 });
 
 test('LM Studio native stream exposes model loading, prompt progress, reasoning, and answer chunks', async () => {
@@ -257,7 +257,7 @@ test('LM Studio reuses a loaded instance when the saved model is the catalog key
   const chat = requests.find((item) => item.url.endsWith('/api/v1/chat'));
   assert.ok(chat);
   assert.equal(chat.body.model, 'gemma-loaded');
-  assert.equal('context_length' in chat.body, false);
+  assert.equal(chat.body.context_length, 16_384);
   assert.equal(result.diagnostics.profile.loadedModel, true);
 });
 

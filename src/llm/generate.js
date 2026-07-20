@@ -47,6 +47,7 @@ export async function generateChangeDescription({ settings, project, plan, patch
     fetchImpl: options.fetchImpl, timeoutMs: options.metadataTimeoutMs ?? 10_000,
     apiToken: settings.llmApiToken, signal: options.signal,
   });
+  applyConfiguredContext(settings, profile);
   notify({ type: 'model-profile', profile });
   const budget = createPromptBudget({
     contextLength: profile.contextLength,
@@ -115,6 +116,16 @@ export async function generateChangeDescription({ settings, project, plan, patch
     completion: completionDiagnostics(completion, true),
   };
   throw error;
+}
+
+function applyConfiguredContext(settings, profile) {
+  const key = `${settings.llmProvider}:${profile.modelKey || settings.llmModel}`;
+  const configured = Number(settings.llmModelLoadConfigs?.[key]?.contextLength);
+  if (!Number.isInteger(configured) || configured <= 0) return;
+  profile.contextLength = profile.maxContextLength
+    ? Math.min(configured, profile.maxContextLength)
+    : configured;
+  profile.source = 'zipflow-settings';
 }
 
 async function generateFromPatch(context, options, notify) {

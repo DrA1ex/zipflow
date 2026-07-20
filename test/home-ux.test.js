@@ -17,9 +17,10 @@ test('configured project home keeps workflow details in Activity instead of the 
 
   assert.equal(state.screen, 'home');
   assert.deepEqual(state.panelIntro, []);
-  assert.ok(state.menuItems.some((item) => item.id === 'fine-tune'));
+  assert.ok(state.menuItems.some((item) => item.id === 'change-workflow'));
+  assert.equal(state.menuItems.some((item) => item.id === 'fine-tune'), false);
+  assert.equal(state.menuItems.some((item) => item.id === 'fresh-setup'), false);
   assert.equal(state.menuItems[0].id, 'start-update');
   const summary = projectSummary(state.project, state.workflow);
-  assert.match(summary.at(-1), /waiting for a ZIP archive/i);
-  assert.match(summary.at(-1), /Esc/i);
+  assert.equal(summary.some((line) => /waiting for a ZIP archive/i.test(line)), false);
 });

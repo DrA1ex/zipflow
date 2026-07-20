@@ -6,22 +6,22 @@ import { modelConfigSummary } from './settings-model.js';
 
 export function settingsDefinitions(state) {
   const definitions = [
-    { id: 'theme', label: 'Theme', description: 'Choose the color theme used by every project.', directParameterId: 'theme' },
-    { id: 'checkOutput', label: 'Running checks', description: 'Choose how much command output is shown while checks run.', directParameterId: 'checkOutput' },
+    { id: 'theme', label: 'Theme', description: '', directParameterId: 'theme' },
+    { id: 'checkOutput', label: 'Running checks', description: '', directParameterId: 'checkOutput' },
     { id: 'localLlm', label: 'Local LLM', description: 'Provider, model, response language, and authentication.' },
     { id: 'sourceArchive', label: 'Source archives', description: 'What happens to an uploaded ZIP after a completed update.' },
   ];
   if (state.project) definitions.push({
     id: 'managedHistory',
     label: 'Managed history',
-    description: 'Choose whether to keep or reset paths recorded by Zipflow.',
+    description: '',
     directParameterId: 'managedHistoryReset',
   });
   return definitions;
 }
 
 export function settingsParameters(state, definition) {
-  if (definition.id === 'theme') return [choiceParameter('theme', 'Theme', titleCase(state.settings.theme), 'Choose one of the built-in Terlio themes.')];
+  if (definition.id === 'theme') return [choiceParameter('theme', 'Theme', titleCase(state.settings.theme), '')];
   if (definition.id === 'checkOutput') return [choiceParameter(
     'checkOutput', 'Output while running', outputLabel(state.settings.checkOutput),
     'Compact shows status only; last-line also shows the latest command output line.',
@@ -88,9 +88,9 @@ function localLlmParameters(state) {
   const models = state.settingsPanel?.models ?? [];
   const selected = models.find((item) => item.id === state.settings.llmModel || item.key === state.settings.llmModel);
   return [
-    choiceParameter('llmProvider', 'Provider', providerLabel(state.settings.llmProvider), 'Select the local LLM server implementation.'),
+    choiceParameter('llmProvider', 'Provider', providerLabel(state.settings.llmProvider), 'Choose the local server Zipflow should contact.'),
     {
-      ...choiceParameter('llmModel', 'Model', selected ? modelDisplayLabel(selected) : (state.settings.llmModel || 'Not selected'), 'Choose a model exposed by the selected provider.'),
+      ...choiceParameter('llmModel', 'Model', selected ? modelDisplayLabel(selected) : (state.settings.llmModel || 'Not selected'), ''),
       disabled,
       disabledReason: 'Enable Ollama or LM Studio first.',
     },
@@ -153,7 +153,7 @@ function modelChoices(state, parameter) {
   const panel = state.settingsPanel;
   const result = [{
     id: 'refresh-models', action: 'refresh-models', label: panel?.loadingModels ? 'Refreshing models…' : 'Refresh available models',
-    description: panel?.modelError ?? 'Read the models currently exposed by the selected provider.',
+    description: panel?.modelError ?? '',
     disabled: Boolean(panel?.loadingModels),
   }];
   if (panel?.models?.length) {
