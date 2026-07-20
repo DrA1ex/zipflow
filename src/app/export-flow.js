@@ -2,12 +2,14 @@ import path from 'node:path';
 import { stat } from 'node:fs/promises';
 import { copyTextToClipboard } from 'terlio.js';
 import { collectExportPaths, listExportTopLevel } from '../export/candidates.js';
+import { inspectPotentiallySensitivePaths, sensitivePathMap } from '../export/sensitive.js';
 import { createProjectArchive } from '../export/create.js';
 import { displayPath, parseEnteredPath } from '../utils/paths.js';
 import { runProcess } from '../utils/process.js';
+import { rememberExportPath } from '../settings/recent.js';
 
 export function handlesExportScreen(screen) {
-  return ['export-mode', 'export-select', 'export-preview', 'export-files', 'export-path', 'export-running', 'export-complete'].includes(screen);
+  return ['export-mode', 'export-select', 'export-sensitive', 'export-preview', 'export-files', 'export-path', 'export-running', 'export-complete'].includes(screen);
 }
 
 export function beginCreateZip(controller) {
@@ -17,7 +19,9 @@ export function beginCreateZip(controller) {
     selectedRoots: new Set(),
     selectedPaths: new Set(),
     pathSizes: new Map(),
-    outputPath: defaultArchivePath(controller.state.project),
+    outputPath: defaultArchivePath(controller.state.project, controller.state.settings),
+    sensitive: [],
+    sensitiveAcknowledged: false,
   };
   showExportMode(controller);
 }
@@ -39,8 +43,23 @@ export async function activateExport(controller, itemId) {
     if (itemId === 'export-select-continue') return prepareExportPreview(controller);
     if (itemId === 'export-cancel') return controller.showHome();
   }
+  if (state.screen === 'export-sensitive') {
+    if (itemId === 'export-sensitive-exclude') {
+      for (const record of state.exportDraft.sensitive) state.exportDraft.selectedPaths.delete(record.path);
+      state.exportDraft.sensitiveAcknowledged = true;
+      updateSelectedSize(state.exportDraft);
+      controller.toast(`${state.exportDraft.sensitive.length} potentially sensitive files excluded`, 'success');
+      return showExportPreview(controller);
+    }
+    if (itemId === 'export-sensitive-review') return showExportFiles(controller, null, { sensitiveOnly: true });
+    if (itemId === 'export-sensitive-include') {
+      state.exportDraft.sensitiveAcknowledged = true;
+      return showExportPreview(controller);
+    }
+    if (itemId === 'export-cancel') return controller.showHome();
+  }
   if (state.screen === 'export-preview') {
-    if (itemId === 'export-choose-path') return showExportPath(controller);
+    if (itemId === 'export-choose-path') return proceedToExportPath(controller);
     if (itemId === 'export-review-files') return showExportFiles(controller);
     if (itemId === 'export-change-mode') return showExportMode(controller);
     if (itemId === 'export-cancel') return controller.showHome();
@@ -51,12 +70,12 @@ export async function activateExport(controller, itemId) {
     if (itemId === 'export-files-all') return selectAllReviewFiles(controller, true);
     if (itemId === 'export-files-none') return selectAllReviewFiles(controller, false);
     if (itemId === 'export-files-back') return showExportPreview(controller);
-    if (itemId === 'export-choose-path') return showExportPath(controller);
+    if (itemId === 'export-choose-path') return proceedToExportPath(controller);
   }
   if (state.screen === 'export-complete') {
     if (itemId === 'export-copy-path') {
       const copied = await copyTextToClipboard(state.exportDraft.result.outputPath, { output: controller.runtime?.output });
-      return controller.setStatus(copied ? 'ZIP path copied' : 'Clipboard transfer unavailable');
+      return copied ? controller.toast('ZIP path copied', 'success') : controller.setStatus('Clipboard transfer unavailable');
     }
     if (itemId === 'export-open-folder') return openArchiveLocation(controller);
     if (itemId === 'export-again') return beginCreateZip(controller);
@@ -96,6 +115,7 @@ export function backExport(controller) {
   const screen = controller.state.screen;
   if (screen === 'export-mode') return controller.showHome();
   if (screen === 'export-select') return showExportMode(controller);
+  if (screen === 'export-sensitive') return controller.state.exportDraft.mode === 'interactive' ? showInteractiveSelection(controller) : showExportMode(controller);
   if (screen === 'export-preview') return controller.state.exportDraft.mode === 'interactive' ? showInteractiveSelection(controller) : showExportMode(controller);
   if (screen === 'export-files') return showExportPreview(controller);
   if (screen === 'export-path') return showExportPreview(controller);
@@ -107,13 +127,13 @@ function showExportMode(controller) {
   controller.showMenu('export-mode', [
     {
       id: 'export-tracked',
-      label: 'Only Git-tracked files',
+      label: 'Git-tracked files',
       description: git ? 'Create the smallest reproducible archive from files already tracked by Git.' : 'Initialize Git first to use this mode.',
       disabled: !git,
     },
-    { id: 'export-nonignored', label: 'All files except ignored', description: 'Include tracked and untracked files, but leave out paths matched by .gitignore.' },
+    { id: 'export-nonignored', label: 'Non-ignored files', description: 'Include tracked and untracked files, but leave out paths matched by .gitignore.' },
     { id: 'export-interactive', label: 'Choose top-level items', description: 'Select project folders and files from a compact top-level list.' },
-    { id: 'export-all', label: 'All project files', description: 'Include ignored files too. .git/ and .zipflow/ always remain protected.' },
+    { id: 'export-all', label: 'Everything, including ignored files · advanced', description: 'Include ignored files too. A safety review checks likely secrets, private data, caches, and very large files. .git/ and .zipflow/ remain protected.' },
     { id: 'export-cancel', label: 'Cancel' },
   ], 'Create ZIP archive');
 }
@@ -156,18 +176,96 @@ function selectAll(controller, enabled) {
 
 async function prepareExportPreview(controller) {
   const { state } = controller;
-  const paths = await collectExportPaths({
-    project: state.project,
-    mode: state.exportDraft.mode,
-    selectedRoots: [...state.exportDraft.selectedRoots],
-  });
-  const pathSizes = new Map();
-  for (const relative of paths) pathSizes.set(relative, (await stat(path.join(state.project.root, relative))).size);
-  state.exportDraft.paths = paths.sort((left, right) => left.localeCompare(right));
-  state.exportDraft.selectedPaths = new Set(state.exportDraft.paths);
-  state.exportDraft.pathSizes = pathSizes;
-  updateSelectedSize(state.exportDraft);
-  return showExportPreview(controller);
+  const abortController = new AbortController();
+  state.exportAbortController = abortController;
+  state.busy = true;
+  state.screen = 'export-running';
+  state.busyLabel = 'Preparing ZIP preview';
+  state.progress = { value: 0, total: 1, detail: 'Scanning project files' };
+  controller.invalidate();
+  try {
+    const paths = await collectExportPaths({
+      project: state.project,
+      mode: state.exportDraft.mode,
+      selectedRoots: [...state.exportDraft.selectedRoots],
+      signal: abortController.signal,
+      onProgress: ({ current = 0, total = 0, detail = '' }) => {
+        state.progress = { value: current, total: Math.max(1, total || current + 1), detail: `Scanning · ${detail}` };
+        controller.invalidate();
+      },
+    });
+    const sortedPaths = paths.sort((left, right) => left.localeCompare(right));
+    const pathSizes = await collectPathSizes(state.project.root, sortedPaths, {
+      signal: abortController.signal,
+      onProgress: (current, total, relative) => {
+        state.progress = { value: current, total: Math.max(1, total), detail: `Reading sizes · ${relative}` };
+        controller.invalidate();
+      },
+    });
+    state.progress = { value: sortedPaths.length, total: Math.max(1, sortedPaths.length), detail: 'Checking sensitive and generated files' };
+    state.exportDraft.paths = sortedPaths;
+    state.exportDraft.selectedPaths = new Set(sortedPaths);
+    state.exportDraft.pathSizes = pathSizes;
+    state.exportDraft.sensitive = inspectPotentiallySensitivePaths(sortedPaths, { pathSizes });
+    state.exportDraft.sensitiveMap = sensitivePathMap(state.exportDraft.sensitive);
+    state.exportDraft.sensitiveAcknowledged = state.exportDraft.sensitive.length === 0;
+    updateSelectedSize(state.exportDraft);
+    state.busy = false;
+    state.exportAbortController = null;
+    if (state.exportDraft.sensitive.length) return showSensitiveReview(controller);
+    return showExportPreview(controller);
+  } catch (error) {
+    state.busy = false;
+    state.exportAbortController = null;
+    if (error.code === 'cancelled') {
+      controller.toast('ZIP preview preparation cancelled', 'info');
+      return state.exportDraft.mode === 'interactive' ? showInteractiveSelection(controller) : showExportMode(controller);
+    }
+    controller.message('Could not prepare ZIP preview', [error.message], 'error', { collapsedSummary: `ZIP preview failed · ${error.message}` });
+    return showExportMode(controller);
+  }
+}
+
+async function collectPathSizes(root, paths, { signal, onProgress, concurrency = 16 } = {}) {
+  const result = new Map();
+  let next = 0;
+  let completed = 0;
+  async function worker() {
+    while (true) {
+      if (signal?.aborted) throw Object.assign(new Error('Operation cancelled.'), { code: 'cancelled' });
+      const index = next++;
+      if (index >= paths.length) return;
+      const relative = paths[index];
+      result.set(relative, (await stat(path.join(root, relative))).size);
+      completed += 1;
+      onProgress?.(completed, paths.length, relative);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, Math.max(1, paths.length)) }, () => worker()));
+  return result;
+}
+
+function showSensitiveReview(controller) {
+  const draft = controller.state.exportDraft;
+  const counts = draft.sensitive.reduce((map, item) => map.set(item.category, (map.get(item.category) ?? 0) + 1), new Map());
+  controller.showMenu('export-sensitive', [
+    { id: 'export-sensitive-exclude', label: 'Exclude recommended files and continue', description: `Remove ${draft.sensitive.length} flagged files from this ZIP` },
+    { id: 'export-sensitive-review', label: 'Review flagged files', description: 'Inspect reasons and include or exclude individual files' },
+    { id: 'export-sensitive-include', label: 'Include anyway', description: 'Advanced: keep all flagged files in the archive' },
+    { id: 'export-cancel', label: 'Cancel' },
+  ], 'Potentially sensitive files found', 0, [
+    `${draft.sensitive.length} flagged files · ${[...counts].map(([kind, count]) => `${count} ${kind}`).join(' · ')}`,
+    'This is a conservative filename and path check, not a guarantee that every secret was found.',
+  ]);
+}
+
+function hasUnacknowledgedSensitiveSelection(draft) {
+  return !draft.sensitiveAcknowledged && draft.sensitive.some((record) => draft.selectedPaths.has(record.path));
+}
+
+function proceedToExportPath(controller) {
+  if (hasUnacknowledgedSensitiveSelection(controller.state.exportDraft)) return showSensitiveReview(controller);
+  return showExportPath(controller);
 }
 
 function showExportPreview(controller) {
@@ -180,26 +278,28 @@ function showExportPreview(controller) {
   ], 'Review ZIP contents', 0, [
     `${draft.selectedPaths.size} of ${draft.paths.length} files · ${formatBytes(draft.totalSize)}`,
     `Mode: ${modeLabel(draft.mode)}`,
+    ...(draft.sensitive.length ? [`Safety review: ${draft.sensitive.filter((item) => draft.selectedPaths.has(item.path)).length} flagged files remain included.`] : []),
     '.git/ and .zipflow/ remain protected in every export mode.',
   ]);
 }
 
-function showExportFiles(controller, selectedIndex = null) {
+function showExportFiles(controller, selectedIndex = null, { sensitiveOnly = false } = {}) {
   const draft = controller.state.exportDraft;
-  const items = buildReviewItems(draft);
+  const items = buildReviewItems(draft, { sensitiveOnly });
   items.push(
     { id: 'export-files-all', label: 'Include all files' },
     { id: 'export-files-none', label: 'Exclude all files' },
     { id: 'export-files-back', label: 'Back to ZIP preview', description: `${draft.selectedPaths.size} files selected` },
     { id: 'export-choose-path', label: 'Choose output path and create ZIP', disabled: draft.selectedPaths.size === 0 },
   );
-  controller.showMenu('export-files', items, 'Choose included files', selectedIndex, [
+  controller.showMenu('export-files', items, sensitiveOnly ? 'Review flagged files' : 'Choose included files', selectedIndex, [
     `${draft.selectedPaths.size} of ${draft.paths.length} files · ${formatBytes(draft.totalSize)}`,
-    'Root files appear first. Directories follow alphabetically; Enter or Space toggles a file or an entire directory.',
+    sensitiveOnly ? 'Only flagged files are shown. Enter or Space toggles each file.' : 'Root files appear first. Directories follow alphabetically; Enter or Space toggles a file or an entire directory.',
   ]);
 }
 
-function buildReviewItems(draft) {
+function buildReviewItems(draft, { sensitiveOnly = false } = {}) {
+  if (sensitiveOnly) return draft.sensitive.map((record) => reviewFileItem(draft, record.path, false));
   const rootFiles = draft.paths.filter((value) => !value.includes('/'));
   const directories = [...new Set(draft.paths.filter((value) => value.includes('/')).map((value) => value.split('/')[0]))]
     .sort((left, right) => left.localeCompare(right));
@@ -226,14 +326,17 @@ function reviewFileItem(draft, filePath, nested) {
   return {
     id: `export-file:${encodeURIComponent(filePath)}`,
     label: dimIfExcluded(label, !selected),
-    description: selected ? 'Included in ZIP' : 'Excluded from ZIP · Enter to include',
+    description: draft.sensitiveMap?.get(filePath)?.reason ?? (selected ? 'Included in ZIP' : 'Excluded from ZIP · Enter to include'),
   };
 }
 
 function toggleReviewFile(controller, filePath, selectedIndex = null) {
   const selected = controller.state.exportDraft.selectedPaths;
   if (selected.has(filePath)) selected.delete(filePath);
-  else selected.add(filePath);
+  else {
+    selected.add(filePath);
+    if (controller.state.exportDraft.sensitiveMap?.has(filePath)) controller.state.exportDraft.sensitiveAcknowledged = false;
+  }
   updateSelectedSize(controller.state.exportDraft);
   showExportFiles(controller, selectedIndex);
 }
@@ -246,6 +349,7 @@ function toggleReviewDirectory(controller, directory, selectedIndex = null) {
     if (allSelected) draft.selectedPaths.delete(filePath);
     else draft.selectedPaths.add(filePath);
   }
+  if (!allSelected && children.some((filePath) => draft.sensitiveMap?.has(filePath))) draft.sensitiveAcknowledged = false;
   updateSelectedSize(draft);
   showExportFiles(controller, selectedIndex);
 }
@@ -253,6 +357,7 @@ function toggleReviewDirectory(controller, directory, selectedIndex = null) {
 function selectAllReviewFiles(controller, enabled) {
   const draft = controller.state.exportDraft;
   draft.selectedPaths = new Set(enabled ? draft.paths : []);
+  if (enabled && draft.sensitive.length) draft.sensitiveAcknowledged = false;
   updateSelectedSize(draft);
   showExportFiles(controller);
 }
@@ -271,7 +376,7 @@ async function openArchiveLocation(controller) {
     if (process.platform === 'darwin') await runProcess('open', ['-R', target]);
     else if (process.platform === 'linux') await runProcess('xdg-open', [path.dirname(target)]);
     else return controller.setStatus('Opening the containing folder is not supported on this platform.');
-    controller.setStatus('Opened archive location');
+    controller.toast('Opened archive location', 'success');
   } catch (error) {
     controller.message('Could not open archive location', [error.message], 'warning');
   }
@@ -314,6 +419,7 @@ async function createArchive(controller) {
       },
     });
     state.exportDraft.result = result;
+    state.settings = await rememberExportPath(state, result.outputPath);
     state.busy = false;
     controller.message('ZIP archive created', [
       displayPath(result.outputPath),
@@ -337,9 +443,10 @@ async function createArchive(controller) {
   }
 }
 
-function defaultArchivePath(project) {
+function defaultArchivePath(project, settings = {}) {
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, '').replace('T', '-');
-  return path.join(path.dirname(project.root), `${safeName(project.name)}-${stamp}.zip`);
+  const directory = settings.lastExportDirectory || path.dirname(project.root);
+  return path.join(directory, `${safeName(project.name)}-${stamp}.zip`);
 }
 
 function safeName(value) {
@@ -347,10 +454,10 @@ function safeName(value) {
 }
 
 function modeLabel(mode) {
-  if (mode === 'tracked') return 'Only Git-tracked files';
-  if (mode === 'nonignored') return 'All files except ignored';
+  if (mode === 'tracked') return 'Git-tracked files';
+  if (mode === 'nonignored') return 'Non-ignored files';
   if (mode === 'interactive') return 'Selected top-level items';
-  return 'All project files';
+  return 'Everything, including ignored files';
 }
 
 function formatBytes(bytes) {

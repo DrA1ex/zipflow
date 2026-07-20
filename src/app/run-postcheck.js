@@ -15,6 +15,9 @@ import { explainCheckFailure } from '../llm/failure.js';
 import { isLocalLlmEnabled } from '../llm/generate.js';
 import { beginLlmProgress } from './llm-progress.js';
 import { saveLlmDiagnostics } from '../llm/diagnostics.js';
+import { activeRunSettings, clearRunSettings } from './runtime-settings.js';
+import { waitForPendingLlmReview } from './run-llm-review.js';
+import { recentArchiveHint } from '../settings/recent.js';
 
 export function isPostCheckScreen(screen) {
   return [
@@ -49,7 +52,7 @@ export async function activatePostCheck(controller, itemId) {
     if (itemId === 'run-deploy') return startDeploy(controller, { fromCompleted: true });
     if (itemId === 'copy-summary') {
       const copied = await copyTextToClipboard(formatCompletionForClipboard(state.run), { output: controller.runtime.output });
-      return controller.setStatus(copied ? 'Run summary copied' : `Report saved at ${runReportPath(state.run.id)}`);
+      return copied ? controller.toast('Run summary copied', 'success') : controller.setStatus(`Report saved at ${runReportPath(state.run.id)}`);
     }
     if (itemId === 'view-report') return showRunDetails(controller, state.run, { origin: 'completed' });
     if (itemId === 'rollback') return confirmRollback(controller, state.run);
@@ -106,19 +109,20 @@ export async function startChecks(controller) {
       controller.message('Checks failed', [
         failed?.name ?? 'Required check',
         lastNonEmptyLine(`${failed?.stdout ?? ''}\n${failed?.stderr ?? ''}`) || 'No output',
-      ], 'error');
+      ], 'error', { collapsedSummary: `Checks failed · ${failed?.name ?? 'Required check'}` });
       await maybeExplainFailedCheck(controller, failed);
       controller.message('Check result summary', [checkSummaryLine(checksResult)], 'summary');
       return showFailedCheck(controller);
     }
-    controller.message('All checks passed', [`${checksResult.passed} checks passed`], 'success');
+    controller.message('All checks passed', [`${checksResult.passed} checks passed`], 'success', { collapsedSummary: `Checks · ${checksResult.passed}/${checksResult.passed} passed` });
     return continueAfterChecks(controller);
   } catch (error) {
     await failRun(controller, error);
   }
 }
 
-function continueAfterChecks(controller) {
+async function continueAfterChecks(controller) {
+  await waitForPendingLlmReview(controller);
   const { state } = controller;
   if (!state.run.applied.paths.length || state.workflow.git.resultCommit === 'never') return continueToDeploy(controller);
   if (state.workflow.git.resultCommit === 'auto') return createResultCommit(controller, defaultCommitMessage(state));
@@ -139,7 +143,7 @@ async function activateFailedCheck(controller, itemId) {
   const { state } = controller;
   if (itemId === 'copy-failure') {
     const copied = await copyTextToClipboard(formatFailureForClipboard(state.run), { output: controller.runtime.output });
-    return controller.setStatus(copied ? 'Failure report copied' : `Report saved at ${runReportPath(state.run.id)}`);
+    return copied ? controller.toast('Failure report copied', 'success') : controller.setStatus(`Report saved at ${runReportPath(state.run.id)}`);
   }
   if (itemId === 'view-failure') {
     const failed = state.run.checks.results.find((item) => !item.ok);
@@ -242,10 +246,10 @@ async function startDeploy(controller, { fromCompleted = false } = {}) {
       controller.message('Deployment failed', [
         deploy.commandText,
         lastNonEmptyLine(`${result.stdout}\n${result.stderr}`) || 'No output',
-      ], 'error');
+      ], 'error', { collapsedSummary: `Deployment · failed · ${deploy.commandText}` });
       return showDeployFailed(controller);
     }
-    controller.message('Deployment completed', [deploy.commandText], 'success');
+    controller.message('Deployment completed', [deploy.commandText], 'success', { collapsedSummary: `Deployment · completed · ${deploy.commandText}` });
     if (fromCompleted) return showCompleted(controller);
     return completeRun(controller, 'completed');
   } catch (error) {
@@ -281,14 +285,16 @@ async function completeRun(controller, status) {
   state.workflow = await saveWorkflow(state.workflow);
   await finalizeSourceArchive(controller);
   await releaseRunResources(controller);
-  controller.message('Final summary', finalSummaryLines(state), 'summary');
+  controller.message('Final summary', finalSummaryLines(state), 'summary', { collapsedSummary: `Run complete · ${compactPlanLine(state.plan)} · ${checkSummaryLine(state.run.checks)}` });
+  clearRunSettings(state);
   showCompleted(controller);
 }
 
 
 async function maybeExplainFailedCheck(controller, failedCheck) {
   const { state } = controller;
-  if (!failedCheck || !isLocalLlmEnabled(state.settings) || state.settings.llmFailureAnalysis === 'disabled') return null;
+  const settings = activeRunSettings(state);
+  if (!failedCheck || !isLocalLlmEnabled(settings) || settings.llmFailureAnalysis === 'disabled') return null;
   const progress = beginLlmProgress(controller);
   const abortController = new AbortController();
   state.llmAbortController = abortController;
@@ -296,7 +302,7 @@ async function maybeExplainFailedCheck(controller, failedCheck) {
   const startedAt = Date.now();
   try {
     const result = await explainCheckFailure({
-      settings: state.settings, project: state.project, run: state.run, failedCheck,
+      settings, project: state.project, run: state.run, failedCheck,
     }, { onEvent: progress.onEvent, signal: abortController.signal });
     const record = { ...result, durationMs: Date.now() - startedAt };
     state.run.llmFailure = record;
@@ -306,13 +312,13 @@ async function maybeExplainFailedCheck(controller, failedCheck) {
   } catch (error) {
     const cancelled = error.code === 'cancelled';
     const diagnosticsPath = await saveLlmDiagnostics(state.run.id, {
-      status: cancelled ? 'cancelled' : 'failed', provider: state.settings.llmProvider,
-      model: state.settings.llmModel, stage: 'failure-analysis', ...(cancelled ? {} : { error }),
+      status: cancelled ? 'cancelled' : 'failed', provider: settings.llmProvider,
+      model: settings.llmModel, stage: 'failure-analysis', ...(cancelled ? {} : { error }),
     }).catch(() => null);
     state.run.llmFailure = {
       durationMs: Date.now() - startedAt,
-      provider: state.settings.llmProvider, model: state.settings.llmModel,
-      mode: state.settings.llmFailureAnalysis,
+      provider: settings.llmProvider, model: settings.llmModel,
+      mode: settings.llmFailureAnalysis,
       cancelled, error: cancelled ? null : error.message, diagnosticsPath,
     };
     state.run = await saveRunRecord(state.run);
@@ -375,7 +381,10 @@ function beginAnotherArchive(controller) {
     label: 'ZIP archive path',
     placeholder: '~/Downloads/project-update.zip',
     purpose: 'archive-path',
-    instructions: ['Drop a ZIP file into the terminal or enter its path. Tab completes ZIP paths.'],
+    instructions: [
+      'Drop a ZIP file into the terminal or enter its path. Tab completes ZIP paths.',
+      ...(recentArchiveHint(controller.state.settings) ? [recentArchiveHint(controller.state.settings)] : []),
+    ],
   }, '');
   controller.setStatus('Waiting for archive');
 }

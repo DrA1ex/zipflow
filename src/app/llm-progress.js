@@ -1,10 +1,12 @@
 import { wrapText } from 'terlio.js';
+import { activeRunSettings } from './runtime-settings.js';
 export function beginLlmProgress(controller, { expectedMs = 0 } = {}) {
   const { state } = controller;
   const startedAt = Date.now();
+  const settings = activeRunSettings(state);
   state.llmRuntime = {
-    provider: state.settings.llmProvider,
-    model: state.settings.llmModel,
+    provider: settings.llmProvider,
+    model: settings.llmModel,
     phase: 'connecting',
     label: 'Connecting to the local LLM server',
     stage: 'generation',

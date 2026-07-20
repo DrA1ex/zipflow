@@ -75,6 +75,11 @@ test('archive inspection persists changes.patch and records the local LLM result
     await submitRunEditor(controller);
 
     assert.equal(state.screen, 'plan-review');
+    assert.equal(state.run.llm, null, 'the deterministic plan should be visible before the LLM finishes');
+    assert.equal(state.llmReviewPending, true);
+    const llmReview = state.llmReviewPromise;
+    assert.ok(llmReview);
+    await llmReview;
     assert.deepEqual(state.run.llm.summary, ['Обновлена логика значения.', 'Добавлен новый модуль.']);
     assert.equal(state.run.llm.commitMessage, 'Обновить значение и добавить модуль');
     const summaryMessage = state.messages.find((message) => message.title === 'Local LLM summary');
@@ -155,8 +160,10 @@ test('Escape cancels local LLM generation and still presents the update plan', a
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
     assert.ok(state.llmAbortController, 'LLM request did not start');
+    const llmReview = state.llmReviewPromise;
     await controller.handleKey({ name: 'escape' });
     await inspection;
+    await llmReview;
 
     assert.equal(state.screen, 'plan-review');
     assert.equal(state.run.llm.cancelled, true);

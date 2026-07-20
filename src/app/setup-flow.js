@@ -23,7 +23,8 @@ export async function beginSetup(controller, { fresh = false } = {}) {
     'Recommended choices are already selected. Change only the parts that differ from how this project is normally maintained.',
     'Nothing replaces the saved workflow until you review and confirm the final summary.',
   ]);
-  showProjectStep(controller);
+  if (state.setupEditing) showWorkflowSections(controller);
+  else showProjectStep(controller);
 }
 
 export function handlesSetupScreen(screen) {
@@ -35,16 +36,17 @@ export function handlesSetupScreen(screen) {
 export async function activateSetup(controller, itemId) {
   const { screen } = controller.state;
   if (handlesGitBootstrapScreen(screen)) return activateGitBootstrap(controller, itemId);
+  if (screen === 'setup-sections') return activateWorkflowSection(controller, itemId);
   if (screen === 'setup-project') return activateProject(controller, itemId);
-  if (screen === 'setup-checks') return activateChecks(controller, itemId, () => showPolicyStep(controller));
+  if (screen === 'setup-checks') return activateChecks(controller, itemId, () => finishSetupSection(controller, () => showPolicyStep(controller)));
   if (screen === 'setup-policy') return activatePolicy(controller, itemId);
   if (screen === 'setup-archive-mode') return activateArchiveMode(controller, itemId);
   if (screen === 'setup-deletion-scope') return activateDeletionScope(controller, itemId);
   if (screen === 'setup-git-checkpoint') return activateCheckpoint(controller, itemId);
   if (screen === 'setup-git-result') return activateResultCommit(controller, itemId);
   if (screen === 'setup-git-message') return activateMessageStrategy(controller, itemId);
-  if (screen === 'setup-deploy') return activateDeployPolicy(controller, itemId, () => showReviewStep(controller));
-  if (screen === 'setup-deploy-command') return activateDeployCommand(controller, itemId, () => showReviewStep(controller));
+  if (screen === 'setup-deploy') return activateDeployPolicy(controller, itemId, () => finishSetupSection(controller, () => showReviewStep(controller)));
+  if (screen === 'setup-deploy-command') return activateDeployCommand(controller, itemId, () => finishSetupSection(controller, () => showReviewStep(controller)));
   if (screen === 'setup-review') return activateReview(controller, itemId);
 }
 
@@ -59,9 +61,9 @@ export async function submitSetupEditor(controller) {
     if (!template) return controller.setStatus('Enter a commit message template.');
     state.draft.git.fixedMessage = template;
     controller.message('Commit template saved', [template], 'success');
-    return showDeployPolicyStep(controller);
+    return finishSetupSection(controller, () => showDeployPolicyStep(controller));
   }
-  if (purpose === 'deploy-command') return submitDeployEditor(controller, () => showReviewStep(controller));
+  if (purpose === 'deploy-command') return submitDeployEditor(controller, () => finishSetupSection(controller, () => showReviewStep(controller)));
 }
 
 export function handleSetupShortcut(controller, key) {
@@ -75,15 +77,16 @@ export function backSetup(controller) {
     if (handled !== false) return handled;
     return showProjectStep(controller);
   }
-  if (screen === 'setup-project') return controller.showHome();
-  if (screen === 'setup-checks') return showProjectStep(controller);
-  if (screen === 'setup-policy') return showChecksStep(controller);
-  if (screen === 'setup-archive-mode') return showPolicyStep(controller);
+  if (screen === 'setup-sections') return controller.showHome();
+  if (screen === 'setup-project') return isEditingSection(controller, 'project') ? showWorkflowSections(controller) : controller.showHome();
+  if (screen === 'setup-checks') return isEditingSection(controller, 'checks') ? showWorkflowSections(controller) : showProjectStep(controller);
+  if (screen === 'setup-policy') return isEditingSection(controller, 'policy') ? showWorkflowSections(controller) : showChecksStep(controller);
+  if (screen === 'setup-archive-mode') return isEditingSection(controller, 'archive') ? showWorkflowSections(controller) : showPolicyStep(controller);
   if (screen === 'setup-deletion-scope') return showArchiveModeStep(controller);
-  if (screen === 'setup-git-checkpoint') return previousBeforeCheckpoint(controller);
+  if (screen === 'setup-git-checkpoint') return isEditingSection(controller, 'git') ? showWorkflowSections(controller) : previousBeforeCheckpoint(controller);
   if (screen === 'setup-git-result') return showCheckpointStep(controller);
   if (screen === 'setup-git-message') return showResultCommitStep(controller);
-  if (screen === 'setup-deploy') return previousBeforeDeploy(controller);
+  if (screen === 'setup-deploy') return isEditingSection(controller, 'deploy') ? showWorkflowSections(controller) : previousBeforeDeploy(controller);
   if (screen === 'setup-deploy-command') return showDeployPolicyStep(controller);
   if (screen === 'setup-review') return showDeployPolicyStep(controller);
   if (screen.startsWith('custom-check')) return showChecksStep(controller);
@@ -93,7 +96,10 @@ export function backSetup(controller) {
 }
 
 function activateProject(controller, itemId) {
-  if (itemId === 'use-project') return controller.state.project.git ? showChecksStep(controller) : showGitBootstrap(controller);
+  if (itemId === 'use-project') {
+    if (isEditingSection(controller, 'project')) return showWorkflowSections(controller);
+    return controller.state.project.git ? showChecksStep(controller) : showGitBootstrap(controller);
+  }
   if (itemId === 'choose-project') return controller.showEditor('project-path-input', {
     label: 'Project directory',
     placeholder: controller.state.project.root,
@@ -113,6 +119,52 @@ async function submitProjectPath(controller) {
   } catch (error) {
     controller.message('Could not use this directory', [error.message], 'error');
   }
+}
+
+
+function showWorkflowSections(controller, selectedSection = null) {
+  const workflow = controller.state.draft;
+  const returnSection = selectedSection ?? controller.state.setupSection;
+  controller.state.setupSection = null;
+  const selectedChecks = workflow.checks.filter((check) => check.selected).length;
+  const items = [
+    { id: 'section-project', label: 'Project', description: `${displayPath(controller.state.project.root)} · ${detectedLine(controller.state.project)}` },
+    { id: 'section-checks', label: 'Checks', description: `${selectedChecks} selected check${selectedChecks === 1 ? '' : 's'}` },
+    { id: 'section-policy', label: 'Update policy', description: workflow.policy.label },
+    { id: 'section-archive', label: 'Archive mode', description: workflow.archive.mode === 'overlay' ? 'Overlay · missing files stay untouched' : deletionReviewLabel(workflow.deletion.scope) },
+    ...(controller.state.project.git ? [{ id: 'section-git', label: 'Git', description: `${checkpointLabel(workflow.git.checkpoint)} · ${resultCommitLabel(workflow.git.resultCommit)}` }] : []),
+    { id: 'section-deploy', label: 'Deployment', description: deployPolicyDescription(workflow.deploy.policy) },
+    { id: 'section-review', label: 'Review and save', description: 'Review every section before replacing the active workflow' },
+    { id: 'section-cancel', label: 'Cancel', description: 'Keep the currently saved workflow unchanged' },
+  ];
+  const selectedIndex = Math.max(0, items.findIndex((item) => item.id === `section-${returnSection}`));
+  controller.showMenu('setup-sections', items, 'Edit workflow', selectedIndex, ['Changes remain in a draft until Review and save succeeds.']);
+}
+
+function activateWorkflowSection(controller, itemId) {
+  if (itemId === 'section-cancel') return controller.showHome();
+  if (itemId === 'section-review') return showReviewStep(controller);
+  if (!itemId.startsWith('section-')) return;
+  return openWorkflowSection(controller, itemId.slice(8));
+}
+
+function openWorkflowSection(controller, section) {
+  controller.state.setupSection = section;
+  if (section === 'project') return showProjectStep(controller);
+  if (section === 'checks') return showChecksStep(controller);
+  if (section === 'policy') return showPolicyStep(controller);
+  if (section === 'archive') return showArchiveModeStep(controller);
+  if (section === 'git') return showCheckpointStep(controller);
+  if (section === 'deploy') return showDeployPolicyStep(controller);
+}
+
+function isEditingSection(controller, section) {
+  return Boolean(controller.state.setupEditing && controller.state.setupSection === section);
+}
+
+function finishSetupSection(controller, fallback) {
+  if (controller.state.setupEditing && controller.state.setupSection) return showWorkflowSections(controller);
+  return fallback();
 }
 
 function showProjectStep(controller) {
@@ -138,7 +190,7 @@ function activatePolicy(controller, itemId) {
     applyPolicyProfile(controller.state.draft, itemId.slice(8));
     return showPolicyStep(controller);
   }
-  if (itemId === 'policy-continue') return showArchiveModeStep(controller);
+  if (itemId === 'policy-continue') return finishSetupSection(controller, () => showArchiveModeStep(controller));
 }
 
 function showArchiveModeStep(controller) {
@@ -156,7 +208,8 @@ function activateArchiveMode(controller, itemId) {
     return showArchiveModeStep(controller);
   }
   if (itemId === 'archive-continue') {
-    return controller.state.draft.archive.mode === 'snapshot' ? showDeletionScopeStep(controller) : showAfterArchiveSettings(controller);
+    if (controller.state.draft.archive.mode === 'snapshot') return showDeletionScopeStep(controller);
+    return finishSetupSection(controller, () => showAfterArchiveSettings(controller));
   }
 }
 
@@ -175,7 +228,7 @@ function activateDeletionScope(controller, itemId) {
     controller.state.draft.deletion.scope = itemId === 'delete-tracked' ? 'tracked-only' : itemId === 'delete-managed' ? 'managed-history' : 'all';
     return showDeletionScopeStep(controller);
   }
-  if (itemId === 'deletion-continue') return showAfterArchiveSettings(controller);
+  if (itemId === 'deletion-continue') return finishSetupSection(controller, () => showAfterArchiveSettings(controller));
 }
 
 function showCheckpointStep(controller) {
@@ -214,7 +267,8 @@ function activateResultCommit(controller, itemId) {
     return showResultCommitStep(controller);
   }
   if (itemId === 'result-continue') {
-    return controller.state.draft.git.resultCommit === 'never' ? showDeployPolicyStep(controller) : showMessageStrategyStep(controller);
+    if (controller.state.draft.git.resultCommit === 'never') return finishSetupSection(controller, () => showDeployPolicyStep(controller));
+    return showMessageStrategyStep(controller);
   }
 }
 
@@ -244,7 +298,7 @@ function activateMessageStrategy(controller, itemId) {
         instructions: ['Available values: {runId}, {archiveName}, {projectName}, {date}, {time}.'],
       }, controller.state.draft.git.fixedMessage);
     }
-    return showDeployPolicyStep(controller);
+    return finishSetupSection(controller, () => showDeployPolicyStep(controller));
   }
 }
 
@@ -271,11 +325,11 @@ function showReviewStep(controller) {
 }
 
 async function activateReview(controller, itemId) {
-  if (itemId === 'edit-project') return showProjectStep(controller);
-  if (itemId === 'edit-checks') return showChecksStep(controller);
-  if (itemId === 'edit-policy') return showPolicyStep(controller);
-  if (itemId === 'edit-git') return showCheckpointStep(controller);
-  if (itemId === 'edit-deploy') return showDeployPolicyStep(controller);
+  if (itemId === 'edit-project') return openWorkflowSection(controller, 'project');
+  if (itemId === 'edit-checks') return openWorkflowSection(controller, 'checks');
+  if (itemId === 'edit-policy') return openWorkflowSection(controller, 'policy');
+  if (itemId === 'edit-git') return openWorkflowSection(controller, 'git');
+  if (itemId === 'edit-deploy') return openWorkflowSection(controller, 'deploy');
   if (itemId === 'cancel-setup') return controller.showHome();
   if (itemId === 'save-workflow') {
     controller.state.workflow = await saveWorkflow(controller.state.draft);

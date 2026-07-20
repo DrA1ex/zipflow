@@ -26,12 +26,18 @@ export async function refreshModels(controller, { quiet = false } = {}) {
     } else if (!current && state.settings.llmModel) {
       state.settings = await saveSettings({ ...state.settings, llmModel: '' });
     }
-    if (!quiet) state.status = `${panel.models.length} ${providerDefinition(provider).label} models available`;
+    if (!quiet) {
+      state.status = 'Local LLM';
+      controller.toast(`${panel.models.length} ${providerDefinition(provider).label} models available`, 'success');
+    }
   } catch (error) {
     panel.models = [];
     panel.modelsProvider = provider;
     panel.modelError = error.message;
-    if (!quiet) state.status = error.message;
+    if (!quiet) {
+      state.status = 'Model refresh failed';
+      controller.toast('Model refresh failed', 'error', 3, error.message);
+    }
   } finally {
     clearInterval(spinnerTimer);
     panel.loadingModels = false;

@@ -3,7 +3,7 @@ import { themes } from 'terlio.js';
 import { readJson, writeJsonAtomic } from '../utils/fs.js';
 import { ensureZipflowHome, getZipflowHome } from '../workflow/store.js';
 
-export const SETTINGS_VERSION = 7;
+export const SETTINGS_VERSION = 8;
 export const THEME_NAMES = Object.keys(themes);
 export const LLM_PROVIDERS = ['disabled', 'ollama', 'lmstudio'];
 export const LLM_LANGUAGES = ['English', 'Russian', 'German', 'French', 'Spanish', 'Chinese', 'Japanese'];
@@ -28,6 +28,10 @@ export const DEFAULT_SETTINGS = Object.freeze({
   archiveDirectory: '~/zipflow-archive',
   archiveRetentionDays: 30,
   archiveMaxBytes: 1_000_000_000,
+  recentArchivePaths: [],
+  lastArchiveDirectory: '',
+  lastExportDirectory: '',
+  lastDiffMode: 'unified',
 });
 
 export async function loadSettings() {
@@ -60,6 +64,10 @@ export function normalizeSettings(settings) {
   if (typeof value.archiveDirectory !== 'string' || !value.archiveDirectory.trim()) value.archiveDirectory = DEFAULT_SETTINGS.archiveDirectory;
   value.archiveRetentionDays = normalizeInteger(value.archiveRetentionDays, DEFAULT_SETTINGS.archiveRetentionDays, 0, 36_500);
   value.archiveMaxBytes = normalizeInteger(value.archiveMaxBytes, DEFAULT_SETTINGS.archiveMaxBytes, 0, Number.MAX_SAFE_INTEGER);
+  value.recentArchivePaths = normalizeRecentPaths(value.recentArchivePaths);
+  if (typeof value.lastArchiveDirectory !== 'string') value.lastArchiveDirectory = '';
+  if (typeof value.lastExportDirectory !== 'string') value.lastExportDirectory = '';
+  if (!['unified', 'side-by-side'].includes(value.lastDiffMode)) value.lastDiffMode = DEFAULT_SETTINGS.lastDiffMode;
   return value;
 }
 
@@ -98,4 +106,9 @@ function normalizeInteger(value, fallback, min, max) {
   const number = Number(value);
   if (!Number.isFinite(number)) return fallback;
   return Math.max(min, Math.min(max, Math.floor(number)));
+}
+
+function normalizeRecentPaths(value) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter((item) => typeof item === 'string' && item.trim()).map((item) => item.trim()))].slice(0, 5);
 }

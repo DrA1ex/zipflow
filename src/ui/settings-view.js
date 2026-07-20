@@ -50,8 +50,27 @@ export function renderSettings(state, width, height, theme) {
       { id: 'details', size: rightWidth, min: 26, grow: 1, node: right },
     ],
   });
-  if (!view.modal) return content;
+  if (!view.modal && !view.choiceSearch?.active) return content;
+  if (!view.modal && view.choiceSearch?.active) return renderChoiceSearch({ content, state, width, height, theme });
   return renderSettingsModal({ content, modal: view.modal, state, width, height, theme });
+}
+
+
+function renderChoiceSearch({ content, state, width, height, theme }) {
+  const overlayWidth = Math.max(34, Math.min(72, width - 6));
+  const overlay = WorkspacePane({
+    title: ' SEARCH MODELS ', active: true, height: 5, theme,
+    children: [
+      TextEditorView({
+        title: ' Filter ', value: state.searchEditor.value, cursor: state.searchEditor.cursor,
+        width: overlayWidth - 4, height: 3, placeholder: 'model name, author, parameters…', lineNumbers: false,
+      }),
+    ],
+  });
+  return BottomOverlay({
+    content, overlay, height, bottom: 1, left: 2, right: 2, width: overlayWidth,
+    align: 'center', opaque: true,
+  });
 }
 
 function renderSettingsPage(state, view, width, height, theme) {
@@ -61,9 +80,13 @@ function renderSettingsPage(state, view, width, height, theme) {
   const title = nestedChoice
     ? ` ${view.activeParameter?.label?.toUpperCase() ?? 'SELECT'} `
     : ` ${view.selectedSetting.label.toUpperCase()} `;
+  const selectedParameter = !showingChoices ? items[view.parameterIndex] : null;
   const description = nestedChoice
     ? view.activeParameter?.description ?? ''
     : view.selectedSetting.description;
+  const parameterDescription = selectedParameter?.disabled
+    ? selectedParameter.disabledReason ?? ''
+    : selectedParameter?.description ?? '';
   return WorkspacePane({
     title,
     active: view.focus !== 'categories' && !view.modal,
@@ -76,7 +99,7 @@ function renderSettingsPage(state, view, width, height, theme) {
         title: showingChoices ? 'Options' : 'Parameters',
         items,
         selectedIndex: showingChoices ? view.choiceIndex : view.parameterIndex,
-        windowSize: Math.max(2, height - (description ? 8 : 5)),
+        windowSize: Math.max(2, height - (description ? 8 : 5) - (parameterDescription ? 2 : 0)),
         getLabel: (item) => showingChoices ? choiceLabel(state, item) : `${item.label}: ${item.value}`,
         getDescription: (item) => showingChoices
           ? item.description ?? ''
@@ -91,6 +114,7 @@ function renderSettingsPage(state, view, width, height, theme) {
           index,
         }),
       }),
+      parameterDescription ? Text(color(theme, 'textMuted', parameterDescription), { wrap: true }) : null,
     ].filter(Boolean),
   });
 }

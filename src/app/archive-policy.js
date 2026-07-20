@@ -2,6 +2,7 @@ import { applySourceArchivePolicy } from '../archive/disposition.js';
 import { saveRunRecord } from '../runs/store.js';
 import { displayPath } from '../utils/paths.js';
 import { formatByteSize } from '../utils/size.js';
+import { activeRunSettings } from './runtime-settings.js';
 
 export async function finalizeSourceArchive(controller) {
   const { state } = controller;
@@ -10,7 +11,7 @@ export async function finalizeSourceArchive(controller) {
     const result = await applySourceArchivePolicy({
       archivePath: state.run.archivePath,
       runId: state.run.id,
-      settings: state.settings,
+      settings: activeRunSettings(state),
     });
     state.run.archiveDisposition = result;
     state.run = await saveRunRecord(state.run);

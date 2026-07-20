@@ -39,13 +39,16 @@ export async function writeTextAtomic(target, value) {
   await rename(temporary, target);
 }
 
-export async function walkFiles(root, { include = () => true, descend = () => true } = {}) {
+export async function walkFiles(root, { include = () => true, descend = () => true, onVisit = null, signal = null } = {}) {
   const files = [];
   async function visit(directory, relativeDirectory = '') {
+    throwIfAborted(signal);
     const entries = await readdir(directory, { withFileTypes: true });
     for (const entry of entries) {
+      throwIfAborted(signal);
       const relative = relativeDirectory ? `${relativeDirectory}/${entry.name}` : entry.name;
       const absolute = path.join(directory, entry.name);
+      onVisit?.({ relative, kind: entry.isDirectory() ? 'directory' : entry.isFile() ? 'file' : 'other', files: files.length });
       if (entry.isDirectory()) {
         if (descend(relative)) await visit(absolute, relative);
       } else if (entry.isFile() && include(relative)) {
@@ -56,6 +59,13 @@ export async function walkFiles(root, { include = () => true, descend = () => tr
   await visit(root);
   files.sort();
   return files;
+}
+
+function throwIfAborted(signal) {
+  if (!signal?.aborted) return;
+  const error = new Error('Operation cancelled.');
+  error.code = 'cancelled';
+  throw error;
 }
 
 export async function removeIfExists(target) {

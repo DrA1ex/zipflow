@@ -1,10 +1,12 @@
 import { inspectRollback, rollbackRun } from '../apply/rollback.js';
+import { copyTextToClipboard } from 'terlio.js';
 import { displayPath } from '../utils/paths.js';
 import { loadRunRecord, runReportPath, saveRunRecord } from '../runs/store.js';
 import { compactPlanLine, compactPlanMeta, formatArchiveName, planSummary, runStatusLabel } from '../ui/format.js';
 import { restoreManagedHistory } from '../history/managed.js';
-import { loadStoredFileDiff, runChangedGroups, storedPatchActivityLines } from '../diff/stored-patch.js';
+import { loadStoredFileDiff, runChangedGroups } from '../diff/stored-patch.js';
 import { setScreen } from './state.js';
+import { formatCompletionForClipboard } from '../runs/text-report.js';
 
 export async function showLastRun(controller) {
   const runId = controller.state.workflow?.lastRunId;
@@ -28,6 +30,10 @@ export async function activateRollback(controller, itemId) {
     if (itemId === 'another-archive') return false;
     if (itemId === 'view-run-files') return showRunFileGroups(controller);
     if (itemId === 'view-run-diff') return showCompleteRunDiff(controller);
+    if (itemId === 'copy-run-summary') {
+      const copied = await copyTextToClipboard(formatCompletionForClipboard(controller.state.run), { output: controller.runtime?.output });
+      return copied ? controller.toast('Run summary copied', 'success') : controller.setStatus('Clipboard transfer unavailable');
+    }
     if (itemId === 'back-home') return returnFromDetails(controller);
   }
   if (controller.state.screen === 'run-file-groups') {
@@ -74,7 +80,8 @@ export function showRunDetails(controller, run, { origin = null, announce = true
   if (run.plan?.counts) {
     items.push(
       { id: 'view-run-files', label: 'Changed files', description: 'Browse added, changed, and removed paths; Enter opens the stored diff' },
-      { id: 'view-run-diff', label: 'View complete diff in Activity', description: 'Append the stored changes.patch so it can be expanded and scrolled' },
+      { id: 'view-run-diff', label: 'Open complete diff', description: 'Browse every stored file diff without returning to the file list' },
+      { id: 'copy-run-summary', label: 'Copy run summary', description: 'Copy changes, checks, commit, deployment, and report details' },
     );
   }
   if (run.applied && run.rollback?.status !== 'completed') items.push({ id: 'rollback', label: 'Roll back this update' });
@@ -158,37 +165,49 @@ function showRunFileList(controller, groupId) {
 }
 
 async function openStoredRunDiff(controller, filePath) {
-  const diff = await loadStoredFileDiff(controller.state.run, filePath);
+  const group = runChangedGroups(controller.state.run).find((item) => item.id === controller.state.runFileGroup);
+  const files = (group?.paths ?? [filePath]).map((value) => ({ path: value }));
+  return openStoredDiffWorkspace(controller, files, Math.max(0, files.findIndex((item) => item.path === filePath)));
+}
+
+async function showCompleteRunDiff(controller) {
+  const files = runChangedGroups(controller.state.run).flatMap((group) => group.paths.map((value) => ({ path: value })));
+  if (!files.length) {
+    controller.toast('No stored file diffs are available', 'info');
+    return showRunDetails(controller, controller.state.run, { origin: controller.state.runDetailsOrigin, announce: false });
+  }
+  return openStoredDiffWorkspace(controller, files, 0);
+}
+
+async function openStoredDiffWorkspace(controller, files, fileIndex) {
+  const file = files[fileIndex] ?? files[0];
+  const diff = await loadStoredFileDiff(controller.state.run, file.path);
   controller.state.diffView = {
     diff,
-    mode: 'unified',
+    source: 'stored',
+    run: controller.state.run,
+    files,
+    fileIndex,
+    mode: controller.state.settings?.lastDiffMode ?? 'unified',
     scroll: 0,
     hunkIndex: 0,
     hunkCount: 1,
     hunkOffsets: [0],
     returnScreen: controller.state.screen,
     returnItems: controller.state.menuItems,
+    returnSourceItems: controller.state.menuSourceItems,
     returnIndex: controller.state.selectedIndex,
     returnStatus: controller.state.status,
     returnIntro: controller.state.panelIntro,
   };
-  setScreen(controller.state, 'diff-view', { status: `Stored diff · ${filePath}`, intro: [] });
+  setScreen(controller.state, 'diff-view', { status: `Stored diff · ${file.path}`, intro: [] });
   controller.invalidate();
-}
-
-async function showCompleteRunDiff(controller) {
-  const lines = await storedPatchActivityLines(controller.state.run);
-  controller.message(`Run diff · ${controller.state.run.id}`, lines, 'diff');
-  const message = controller.state.messages.at(-1);
-  if (message?.collapsible) message.collapsed = false;
-  controller.setStatus('Complete diff added to Activity');
-  return showRunDetails(controller, controller.state.run, { origin: controller.state.runDetailsOrigin, announce: false });
 }
 
 async function returnFromDetails(controller) {
   if (controller.state.runDetailsOrigin === 'history') {
     const { showRunHistory } = await import('./history-flow.js');
-    return showRunHistory(controller);
+    return showRunHistory(controller, controller.state.historyReturnIndex ?? null);
   }
   return controller.showHome();
 }

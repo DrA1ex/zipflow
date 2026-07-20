@@ -1,6 +1,9 @@
 import {
   BottomOverlay,
+  Box,
   Column,
+  OverlayHost,
+  PointerRegion,
   ProgressBar,
   RequireViewport,
   ScrollPane,
@@ -15,6 +18,7 @@ import {
   resolveWorkspaceShellLayout,
   scrollBy,
   themes,
+  wrapText,
 } from 'terlio.js';
 import { displayPath } from '../utils/paths.js';
 import { formatDuration, runStep } from './format.js';
@@ -24,12 +28,15 @@ import { buildTranscript } from './activity.js';
 import { renderSettings } from './settings-view.js';
 import { settingsViewModel } from '../app/settings-panel.js';
 import { PathCompletionPopup } from './path-completion.js';
+import { runSettingsStatus } from '../app/runtime-settings.js';
 
 export function renderZipflow({ state, width, height }) {
   const theme = themes[state.settings?.theme] ?? themes.ocean;
   const title = state.project?.name ? `Zipflow ${ZIPFLOW_VERSION} · ${state.project.name}` : `Zipflow ${ZIPFLOW_VERSION}`;
   const subtitle = state.project ? displayPath(state.project.root) : 'Safe source archive updates';
-  const footer = WorkspaceFooter({ left: footerHints(state), right: [state.status], theme });
+  state.statusDetail = state.screen === 'settings' ? runSettingsStatus(state) : '';
+  const footerRight = state.statusDetail ? [state.statusDetail] : [state.status].filter(Boolean);
+  const footer = WorkspaceFooter({ left: footerHints(state), right: footerRight, theme });
   const { mainHeight } = resolveWorkspaceShellLayout({
     width,
     height,
@@ -48,7 +55,17 @@ export function renderZipflow({ state, width, height }) {
     : state.screen === 'diff-view'
       ? renderDiffView(state, width, mainHeight, theme)
       : renderWorkflow(state, width, mainHeight, theme);
-  return RequireViewport({
+  const shell = WorkspaceShell({
+    title,
+    subtitle,
+    stats: headerStats(state),
+    focus: state.screen,
+    main,
+    footer,
+    height,
+    theme,
+  });
+  const responsive = RequireViewport({
     width,
     height,
     minWidth: 58,
@@ -56,27 +73,21 @@ export function renderZipflow({ state, width, height }) {
     title: 'Zipflow needs more room',
     message: 'Resize the terminal to at least 58×20.',
     theme,
-    children: WorkspaceShell({
-      title,
-      subtitle,
-      stats: headerStats(state),
-      focus: state.screen,
-      main,
-      footer,
-      height,
-      theme,
-    }),
+    children: shell,
   });
+  const withHelp = renderHelpToastOverlay(state, responsive, width, height, theme);
+  return OverlayHost({ content: withHelp, manager: state.overlays, theme, width, height, toastBottomMargin: 2 });
 }
 
 function renderWorkflow(state, width, mainHeight, theme) {
-  const promptHeight = Math.min(mainHeight - 4, preferredPromptHeight(state));
+  const promptHeight = Math.min(mainHeight - 4, preferredPromptHeight(state, width, mainHeight));
   const historyHeight = Math.max(4, mainHeight - promptHeight);
-  const content = Column({ height: mainHeight },
+  let content = Column({ height: mainHeight },
     renderTranscript(state, width, historyHeight, theme),
     renderCurrent(state, width, promptHeight, theme),
   );
-  return renderPathSuggestionsOverlay(state, content, width, mainHeight, promptHeight, theme);
+  content = renderPathSuggestionsOverlay(state, content, width, mainHeight, promptHeight, theme);
+  return renderMenuSearchOverlay(state, content, width, mainHeight, promptHeight, theme);
 }
 
 function renderPathSuggestionsOverlay(state, content, width, height, promptHeight, theme) {
@@ -105,21 +116,30 @@ function renderTranscript(state, width, height, theme) {
   if (state.transcriptSticky) state.transcriptScroll = maxScroll;
   state.activityLayout = { ranges: transcript.ranges, visibleRows, maxScroll };
   const hasCollapsed = transcript.ranges.some((item) => item.collapsible);
+  const unread = Math.max(0, Number(state.activityUnread) || 0);
+  const activityTitle = unread && !state.transcriptSticky
+    ? ` Activity · ${unread} new ↓ `
+    : ' Activity ';
   return ScrollPane({
-    title: ' Activity ',
+    title: activityTitle,
     lines,
     width,
     height,
     scroll: state.transcriptScroll,
-    footer: state.transcriptSticky
-      ? `following latest${hasCollapsed ? ' · E expand block at top' : ''}`
-      : `PgDn to return${hasCollapsed ? ' · E expand/collapse block at top' : ''}`,
+    footer: true,
     theme,
     pointerId: 'zipflow:transcript',
     onWheel: (event) => {
       state.transcriptScroll = scrollBy(state.transcriptScroll, event.deltaY, maxScroll);
       state.transcriptSticky = state.transcriptScroll >= maxScroll;
+      if (state.transcriptSticky) state.activityUnread = 0;
       event.preventDefault();
+    },
+    onClick: (event) => {
+      if (unread && Number(event.localY) >= height - 2) {
+        state.dispatch?.({ type: 'activity-follow-latest' });
+        event.preventDefault();
+      }
     },
     selection: state.activitySelection,
     onSelectionChange: (text, _selection, event) => {
@@ -129,7 +149,8 @@ function renderTranscript(state, width, height, theme) {
     },
     onCopy: (text, _selection, _event, context) => {
       const result = copyTextToClipboard(text, { output: context.runtime.output });
-      state.status = result.copied ? 'Activity text copied' : 'Clipboard transfer unavailable';
+      if (result.copied) state.overlays?.toast?.('Activity text copied', 'success', 2);
+      else state.status = 'Clipboard transfer unavailable';
       return result.copied;
     },
   });
@@ -141,6 +162,10 @@ function renderCurrent(state, width, height, theme) {
   if (['checks-running', 'manual-checks-running'].includes(state.screen)) return renderChecksRunning(state, height, theme);
   if (['deploy-running', 'manual-deploy-running'].includes(state.screen)) return renderDeployRunning(state, height, theme);
   const intro = state.panelIntro ?? [];
+  const selected = state.menuItems[state.selectedIndex];
+  const inlineDescriptions = showsInlineDescriptions(state.screen);
+  const selectedDescription = inlineDescriptions ? '' : selected?.description ?? '';
+  const descriptionRows = selectedDescription ? Math.min(4, wrapText(selectedDescription, Math.max(20, width - 8)).length) + 1 : 0;
   return WorkspacePane({
     title: ` ${screenTitle(state)} `,
     active: true,
@@ -153,12 +178,12 @@ function renderCurrent(state, width, height, theme) {
         title: 'Choose',
         items: state.menuItems,
         selectedIndex: state.selectedIndex,
-        windowSize: Math.max(2, height - 6 - Math.min(6, intro.length)),
+        windowSize: Math.max(2, height - 5 - Math.min(6, intro.length) - descriptionRows),
         getLabel: (item) => item.label,
-        getDescription: (item) => item.description ?? '',
+        getDescription: (item) => inlineDescriptions ? item.description ?? '' : '',
         getDisabled: (item) => item.disabled,
-        wrapItems: true,
-        maxItemLines: 3,
+        wrapItems: inlineDescriptions,
+        maxItemLines: inlineDescriptions ? 3 : 1,
         theme,
         pointerId: 'zipflow:menu',
         onSelect: (_item, index) => state.dispatch?.({ type: 'activate-index', index }),
@@ -168,6 +193,7 @@ function renderCurrent(state, width, height, theme) {
           event.preventDefault();
         },
       }),
+      selectedDescription ? Text(color(theme, 'textMuted', selectedDescription), { wrap: true }) : null,
     ].filter(Boolean),
   });
 }
@@ -261,13 +287,14 @@ function renderDiffView(state, width, height, theme) {
   const maxScroll = Math.max(0, lines.length - visibleRows);
   view.scroll = clamp(view.scroll, 0, maxScroll);
   const hunkLabel = document.hunkCount ? ` · HUNK ${view.hunkIndex + 1}/${document.hunkCount}` : '';
+  const fileLabel = view.files?.length > 1 ? ` · FILE ${(view.fileIndex ?? 0) + 1}/${view.files.length}` : '';
   return ScrollPane({
-    title: ` ${view.diff.path} · ${view.mode === 'unified' ? 'UNIFIED' : 'SIDE BY SIDE'}${hunkLabel} `,
+    title: ` ${view.diff.path} · ${view.mode === 'unified' ? 'UNIFIED' : 'SIDE BY SIDE'}${fileLabel}${hunkLabel} `,
     lines,
     width,
     height,
     scroll: view.scroll,
-    footer: `${view.scroll + 1}-${Math.min(lines.length, view.scroll + visibleRows)} of ${Math.max(1, lines.length)} · N/P hunk · M mode · Esc back`,
+    footer: `${view.scroll + 1}-${Math.min(lines.length, view.scroll + visibleRows)} of ${Math.max(1, lines.length)} · N/P hunk · J/K file · M mode · Esc back`,
     theme,
     pointerId: 'zipflow:diff',
     selection: state.diffSelection,
@@ -301,7 +328,7 @@ function formatDiffLine(line, mode, theme) {
 
 function screenTitle(state) {
   const titles = {
-    boot: 'Starting', home: 'Project', 'new-project': 'Project', 'setup-project': 'Project setup',
+    boot: 'Starting', home: 'Project', 'new-project': 'Project', 'setup-project': 'Project setup', 'setup-sections': 'Workflow sections',
     'project-path-input': 'Choose project', 'setup-checks': 'Checks', 'custom-check-command': 'Custom check command',
     'custom-check-name': 'Custom check name', 'setup-policy': 'Update policy', 'setup-archive-mode': 'Archive mode',
     'setup-deletion-scope': 'Snapshot deletion', 'setup-git-checkpoint': 'Git checkpoint',
@@ -313,11 +340,11 @@ function screenTitle(state) {
     'commit-message': 'Commit message', 'deploy-prompt': 'Deployment', 'deploy-running': 'Deployment',
     'deploy-failed': 'Deployment failed', completed: 'Completed', 'run-details': 'Last run', 'run-file-groups': 'Changed files', 'run-file-list': 'Changed files',
     'rollback-confirm': 'Rollback', 'rolling-back': 'Rolling back',
-    'export-mode': 'Create ZIP', 'export-select': 'Choose archive contents', 'export-preview': 'ZIP preview', 'export-files': 'Included files', 'export-path': 'Output archive',
+    'export-mode': 'Create ZIP', 'export-select': 'Choose archive contents', 'export-sensitive': 'ZIP safety review', 'export-preview': 'ZIP preview', 'export-files': 'Included files', 'export-path': 'Output archive',
     'export-running': 'Creating ZIP', 'export-complete': 'ZIP created',
     'setup-git-init': 'Initialize Git', 'setup-gitignore': 'Git ignore rules',
     'setup-initial-commit': 'First commit', 'initial-commit-message': 'First commit message',
-    'run-history': 'Run history', 'run-analytics': 'Performance analytics',
+    'run-history': 'Run history', 'run-history-filter': 'Filter run history', 'run-analytics': 'Performance analytics',
     'manual-checks-running': 'Running tests', 'manual-checks-result': 'Test report',
     'manual-deploy-running': 'Deployment', 'manual-deploy-result': 'Deployment report',
     error: 'Error', settings: 'Settings',
@@ -327,30 +354,17 @@ function screenTitle(state) {
 
 function footerHints(state) {
   if (state.screen === 'settings') {
-    if (state.settingsPanel?.modal) return ['Enter save', 'Esc cancel', 'Tab/Enter complete path', 'Ctrl+B close settings'];
-    if (state.settingsPanel?.focus === 'model-config') {
-      return state.settingsPanel?.modelConfig?.focus === 'choices'
-        ? ['↑/↓ choose', 'Enter apply', 'Esc return to model parameters', 'Ctrl+B close']
-        : ['↑/↓ parameter', 'Enter open/use', 'Esc return to model list', 'Ctrl+B close'];
-    }
-    if (state.settingsPanel?.focus === 'choices') {
-      const destination = settingsViewModel(state).direct ? 'categories' : 'parameter';
-      return ['↑/↓ choose', 'Enter apply', `Esc return to ${destination}`, 'Ctrl+B close'];
-    }
-    if (state.settingsPanel?.focus === 'parameters') return ['↑/↓ parameter', 'Enter open', 'Esc return to categories', 'Ctrl+B close'];
-    return ['↑/↓ category', 'Enter open page', 'Esc or Ctrl+B close', 'Ctrl+T native select'];
+    if (state.settingsPanel?.modal) return ['Enter save', 'Esc cancel', 'Ctrl+B close'];
+    if (state.settingsPanel?.choiceSearch?.active) return ['Type to filter', 'Enter keep', 'Esc clear/close'];
+    return ['↑/↓', 'Enter', '/ models', 'Ctrl+B close'];
   }
-  if (state.screen === 'diff-view') return ['↑/↓ scroll', 'N/P next/previous hunk', 'M switch mode', 'Drag to copy', 'Esc back'];
-  if (state.llmAbortController) return ['Esc cancel LLM generation', 'Ctrl+C stop'];
+  if (state.screen === 'diff-view') return ['↑/↓ scroll', 'N/P hunk', 'J/K file', 'M mode', 'Esc back'];
+  if (state.llmAbortController) return ['Esc cancel LLM', 'Ctrl+C stop'];
   if (state.busy || ['checks-running', 'deploy-running', 'manual-checks-running', 'manual-deploy-running'].includes(state.screen)) return ['Ctrl+C stop'];
-  if (isEditorScreen(state.screen)) return state.editorContext?.multiline
-    ? ['Enter confirm', 'Ctrl+Enter newline', 'Ctrl+U clear to cursor', 'Esc back', 'Ctrl+T native select']
-    : ['Enter confirm', 'Tab complete path', 'Esc back', 'Ctrl+B settings', 'Ctrl+T native select'];
-  if (state.screen === 'setup-checks') return ['↑/↓ choose', 'Space toggle', 'A add', 'E edit', 'Del remove', 'Enter continue/open', 'Ctrl+B settings'];
-  if (state.screen === 'conflict-file') return ['A archive', 'L local', 'D diff', 'Enter action', 'Esc back'];
-  if (state.screen === 'conflicts') return ['↑/↓ choose', 'Space toggle decision', 'Enter action', 'Esc back', 'Ctrl+T native select'];
-  if (state.screen === 'export-select' || state.screen === 'export-files') return ['↑/↓ choose', 'Enter/Space toggle', 'Esc back', 'Ctrl+T native select'];
-  return ['↑/↓ choose', 'Enter/Space select', '? help', 'Drag Activity to copy', 'PgUp/PgDn activity', 'Ctrl+T native select', 'Ctrl+B settings'];
+  if (state.menuSearch?.active) return ['Type to filter', 'Enter keep', 'Esc clear/close'];
+  if (isEditorScreen(state.screen)) return ['Enter confirm', 'Esc back', 'Tab complete'];
+  if (isSearchableScreen(state.screen)) return ['↑/↓ choose', 'Enter select', '/ search', '? help'];
+  return ['↑/↓ choose', 'Enter select', '? help', 'Ctrl+B settings'];
 }
 
 function headerStats(state) {
@@ -363,13 +377,24 @@ function headerStats(state) {
   return stats;
 }
 
-function preferredPromptHeight(state) {
-  if (state.screen === 'home') return 14;
-  if (['archive-root-choice', 'archive-safety', 'plan-review', 'plan-details', 'plan-files', 'conflict-summary', 'conflict-file', 'run-history', 'run-analytics', 'run-file-groups', 'run-file-list', 'export-preview', 'export-files'].includes(state.screen)) return 17;
-  if (state.screen === 'setup-checks' || state.screen === 'conflicts' || state.screen === 'export-select') return 17;
-  if (['checks-running', 'deploy-running'].includes(state.screen)) return 14;
-  if (isEditorScreen(state.screen)) return 13;
-  return 13;
+function preferredPromptHeight(state, width = 80, mainHeight = 20) {
+  const maximum = Math.max(7, Math.floor(mainHeight * 0.6));
+  if (state.busy) return Math.min(maximum, 8);
+  if (['checks-running', 'manual-checks-running'].includes(state.screen)) {
+    return Math.min(maximum, Math.max(8, (state.checkRuntime?.checks?.length ?? 0) + 5));
+  }
+  if (['deploy-running', 'manual-deploy-running'].includes(state.screen)) return Math.min(maximum, 8);
+  if (isEditorScreen(state.screen)) {
+    const instructions = state.editorContext?.instructions ?? [];
+    const rows = instructions.reduce((total, line) => total + wrapText(String(line), Math.max(20, width - 8)).length, 0);
+    return Math.min(maximum, Math.max(8, rows + 7));
+  }
+  const introRows = (state.panelIntro ?? []).reduce((total, line) => total + wrapText(String(line), Math.max(20, width - 8)).length, 0);
+  const itemRows = showsInlineDescriptions(state.screen)
+    ? state.menuItems.slice(0, 7).reduce((total, item) => total + 1 + Math.min(2, wrapText(String(item.description ?? ''), Math.max(20, width - 10)).length), 0)
+    : Math.min(8, Math.max(2, state.menuItems.length));
+  const selectedDescription = showsInlineDescriptions(state.screen) ? 0 : Math.min(3, wrapText(String(state.menuItems[state.selectedIndex]?.description ?? ''), Math.max(20, width - 8)).length);
+  return Math.min(maximum, Math.max(7, introRows + itemRows + selectedDescription + 5));
 }
 
 function isEditorScreen(screen) {
@@ -377,6 +402,66 @@ function isEditorScreen(screen) {
     'project-path-input', 'archive-input', 'custom-check-command', 'custom-check-name',
     'commit-message', 'commit-template', 'deploy-command', 'export-path', 'initial-commit-message',
   ].includes(screen);
+}
+
+function renderMenuSearchOverlay(state, content, width, height, promptHeight, theme) {
+  if (!state.menuSearch?.active) return content;
+  const overlayWidth = Math.max(32, Math.min(width - 6, 72));
+  const overlay = Box({ border: true, padding: { left: 1, right: 1 }, title: ' Search ' },
+    TextEditorView({
+      title: ' Filter ',
+      value: state.searchEditor.value,
+      cursor: state.searchEditor.cursor,
+      width: overlayWidth - 4,
+      height: 3,
+      placeholder: 'Type a path, name, or description',
+      lineNumbers: false,
+    }),
+    Text(color(theme, 'textMuted', `${state.menuItems.length} matching item${state.menuItems.length === 1 ? '' : 's'} · Enter keeps filter · Esc clears/closes`), { wrap: true }),
+  );
+  return BottomOverlay({ content, overlay, height, bottom: Math.max(1, promptHeight - 1), left: 2, right: 2, width: overlayWidth, align: 'center', opaque: true });
+}
+
+function renderHelpToastOverlay(state, content, width, height, theme) {
+  const toast = state.helpToast;
+  if (!toast) return content;
+  const toastWidth = Math.max(34, Math.min(width - 4, Math.min(82, Math.floor(width * 0.72))));
+  const toastHeight = Math.max(6, Math.min(18, Math.floor(height * 0.48)));
+  const contentWidth = Math.max(20, toastWidth - 4);
+  const wrapped = (toast.lines ?? []).flatMap((line) => wrapText(String(line ?? ''), contentWidth));
+  const visibleRows = Math.max(1, toastHeight - 3);
+  const maxScroll = Math.max(0, wrapped.length - visibleRows);
+  toast.maxScroll = maxScroll;
+  toast.scroll = clamp(toast.scroll ?? 0, 0, maxScroll);
+  const node = ScrollPane({
+    title: ` ${toast.title || 'Help'} `,
+    lines: wrapped.length ? wrapped : ['No additional help is available.'],
+    width: toastWidth,
+    height: toastHeight,
+    scroll: toast.scroll,
+    footer: maxScroll ? `Wheel/↑/↓ scroll · Click or Esc close` : 'Click or Esc to close',
+    theme,
+    pointerId: 'zipflow:help-toast',
+    onWheel: (event) => {
+      toast.scroll = scrollBy(toast.scroll, event.deltaY, maxScroll);
+      event.preventDefault();
+      event.stopPropagation?.();
+    },
+    onClick: (event) => {
+      state.dispatch?.({ type: 'dismiss-help-toast' });
+      event.preventDefault();
+      event.stopPropagation?.();
+    },
+  });
+  return BottomOverlay({ content, overlay: node, height, bottom: 2, left: 2, right: 2, width: toastWidth, align: 'right', opaque: true });
+}
+
+function showsInlineDescriptions(screen) {
+  return new Set(['setup-policy', 'setup-archive-mode', 'setup-deletion-scope', 'setup-git-checkpoint', 'setup-git-result', 'setup-git-message', 'setup-deploy', 'archive-safety']).has(screen);
+}
+
+function isSearchableScreen(screen) {
+  return new Set(['plan-files', 'export-select', 'export-files', 'run-history', 'setup-checks', 'run-file-list']).has(screen);
 }
 
 function clamp(value, min, max) {

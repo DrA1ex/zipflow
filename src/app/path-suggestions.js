@@ -1,6 +1,35 @@
+import path from 'node:path';
+import { exists } from '../utils/fs.js';
 import { suggestPathEntries } from '../utils/paths.js';
 
 const PATH_SCREENS = new Set(['project-path-input', 'archive-input']);
+
+export async function showRecentArchiveSuggestions(controller) {
+  const { state } = controller;
+  const recent = state.settings?.recentArchivePaths ?? [];
+  const available = [];
+  for (const archivePath of recent) {
+    if (await exists(archivePath)) available.push({
+      id: `recent:${archivePath}`,
+      label: path.basename(archivePath),
+      insert: archivePath,
+      isDirectory: false,
+      submit: true,
+    });
+  }
+  if (!available.length) return false;
+  state.pathSuggestionActive = true;
+  state.pathSuggestions = {
+    requestId: 0,
+    loading: false,
+    items: available,
+    selectedIndex: 0,
+    owner: 'archive-input',
+  };
+  state.status = 'Recent archives · Enter selects';
+  controller.invalidate();
+  return true;
+}
 
 export function isPathEditorScreen(screen) {
   return PATH_SCREENS.has(screen);

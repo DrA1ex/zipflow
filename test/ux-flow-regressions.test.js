@@ -57,24 +57,25 @@ test('configured projects boot directly into archive waiting and Escape opens th
   }
 });
 
-test('Change workflow opens each configurable step on Continue', async () => {
+test('Change workflow opens a section editor and returns after each isolated change', async () => {
   const state = createInitialState();
   state.project = projectFixture();
   state.workflow = createRecommendedWorkflow(state.project);
   const controller = new ZipflowController(state);
 
   await beginSetup(controller, { fresh: false });
-  await activateSetup(controller, 'use-project');
-  assert.equal(state.menuItems[state.selectedIndex].id, 'checks-continue');
+  assert.equal(state.screen, 'setup-sections');
+  assert.ok(state.menuItems.some((item) => item.id === 'section-checks'));
+  assert.ok(state.menuItems.some((item) => item.id === 'section-review'));
 
-  await activateSetup(controller, 'checks-continue');
-  assert.equal(state.menuItems[state.selectedIndex].id, 'policy-continue');
+  await activateSetup(controller, 'section-policy');
+  assert.equal(state.screen, 'setup-policy');
   await activateSetup(controller, 'profile-trust');
   assert.equal(state.draft.policy.id, 'trust');
-  assert.equal(state.menuItems[state.selectedIndex].id, 'policy-continue');
-
   await activateSetup(controller, 'policy-continue');
-  assert.equal(state.menuItems[state.selectedIndex].id, 'archive-continue');
+
+  assert.equal(state.screen, 'setup-sections');
+  assert.equal(state.menuItems[state.selectedIndex].id, 'section-policy');
 });
 
 test('Finish keeps Zipflow waiting for the next archive', async () => {
@@ -151,7 +152,7 @@ test('run history exposes changed groups and stored file diffs', async () => {
   assert.equal(state.diffView.diff.rows.some((row) => row.type === 'remove' && row.oldText === 'old'), true);
 });
 
-test('complete historical diff is added to Activity expanded', async () => {
+test('complete historical diff opens a multi-file diff workspace', async () => {
   const root = await tempDir('zipflow-history-full-diff-');
   const patchPath = path.join(root, 'changes.patch');
   await writeFile(patchPath, 'diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1,1 +1,1 @@\n-old\n+new\n');
@@ -167,10 +168,11 @@ test('complete historical diff is added to Activity expanded', async () => {
 
   await activateRollback(controller, 'view-run-diff');
 
-  const message = state.messages.find((item) => item.title === 'Run diff · run-2');
-  assert.ok(message);
-  assert.equal(message.collapsed, false);
-  assert.ok(message.lines.includes('+new'));
+  assert.equal(state.screen, 'diff-view');
+  assert.equal(state.diffView.source, 'stored');
+  assert.equal(state.diffView.files.length, 1);
+  assert.equal(state.diffView.diff.path, 'a.txt');
+  assert.equal(state.diffView.diff.rows.some((row) => row.type === 'add' && row.newText === 'new'), true);
 });
 
 test('ZIP file review groups directories and allows file and folder exclusion', async () => {

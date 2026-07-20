@@ -114,7 +114,7 @@ export function runStep(state) {
     { number: 1, label: 'Archive', screens: ['archive-input', 'archive-duplicate', 'archive-root-choice', 'applying'] },
     { number: 2, label: 'Review', screens: ['archive-safety', 'plan-review', 'plan-details', 'plan-files', 'conflict-summary', 'conflict-file', 'conflict-checkpoint', 'diff-view'] },
     { number: 3, label: 'Apply', screens: ['applying'] },
-    { number: 4, label: 'Checks', screens: ['checks-running', 'check-failed', 'commit-message', 'commit', 'deploy-prompt', 'deploy-running', 'deploy-failed'] },
+    { number: 4, label: 'Verify', screens: ['checks-running', 'check-failed', 'commit-message', 'commit', 'deploy-prompt', 'deploy-running', 'deploy-failed'] },
     { number: 5, label: 'Finish', screens: ['completed', 'run-details', 'rollback-confirm', 'rolling-back'] },
   ];
   if (state.screen === 'applying') {

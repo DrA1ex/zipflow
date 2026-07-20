@@ -3,6 +3,7 @@ import { LLM_LANGUAGES, THEME_NAMES } from '../settings/store.js';
 import { displayPath, expandHome } from '../utils/paths.js';
 import { formatByteSize } from '../utils/size.js';
 import { modelConfigSummary } from './settings-model.js';
+import { modelTestDescription, modelTestValue } from './settings-model-check.js';
 
 export function settingsDefinitions(state) {
   const definitions = [
@@ -118,6 +119,13 @@ function localLlmParameters(state) {
       id: 'llmApiToken', type: 'input', fieldId: 'llmApiToken', label: 'Authentication',
       value: state.settings.llmApiToken ? 'Bearer token configured' : 'Not configured',
       description: 'Optional API token for model discovery and generation.',
+    },
+    {
+      id: 'llmModelTest', type: 'action', label: 'Test selected model',
+      value: modelTestValue(state.settingsPanel),
+      description: modelTestDescription(state.settingsPanel),
+      disabled: disabled || !state.settings.llmModel || Boolean(state.settingsPanel?.modelTest?.running),
+      disabledReason: disabled ? 'Enable a local LLM provider first.' : 'Choose a model first.',
     },
   ];
 }

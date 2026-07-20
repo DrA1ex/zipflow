@@ -54,7 +54,7 @@ function standardActivityMessage(message, theme, width) {
         : message.tone === 'choice' ? 'accent' : 'title';
   const marker = message.collapsible ? (message.collapsed ? '▸ ' : '▾ ') : '';
   const body = message.collapsible && message.collapsed
-    ? collapsedLines(message.lines)
+    ? collapsedLines(message)
     : message.lines ?? [];
   const bodyWidth = Math.max(20, width - 7);
   return [
@@ -79,7 +79,9 @@ function diffToken(line) {
   return null;
 }
 
-function collapsedLines(lines = []) {
+function collapsedLines(message) {
+  const lines = message.lines ?? [];
+  if (message.collapsedSummary) return [message.collapsedSummary, `… ${lines.length} detail lines · click or press E to expand`];
   const visible = lines.slice(0, 2);
   const hidden = Math.max(0, lines.length - visible.length);
   return hidden ? [...visible, `… ${hidden} more lines · click or press E to expand`] : visible;

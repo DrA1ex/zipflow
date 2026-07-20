@@ -12,6 +12,16 @@ export async function startZipflow({ input = process.stdin, output = process.std
     input,
     output,
     pointer: 'auto',
+    tickMs: 250,
+    tick: ({ state: current, overlays }) => {
+      const toastChanged = overlays?.tick?.(0.25) ?? false;
+      let helpChanged = false;
+      if (current.helpToast?.expiresAt && Date.now() >= current.helpToast.expiresAt) {
+        current.helpToast = null;
+        helpChanged = true;
+      }
+      return toastChanged || helpChanged || Boolean(current.llmRuntime || current.busy);
+    },
     render: ({ state: current, width, height }) => renderZipflow({ state: current, width, height }),
     onKey: ({ key }) => { void controller.handleKey(key).catch((error) => controller.handleUnexpected(error)); },
     onExit: (code) => {

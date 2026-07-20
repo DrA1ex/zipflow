@@ -1,4 +1,6 @@
 import { loadPlanItemDiff } from '../diff/file.js';
+import { loadStoredFileDiff } from '../diff/stored-patch.js';
+import { rememberDiffMode } from '../settings/recent.js';
 import { compactPlanLine, compactPlanMeta } from '../ui/format.js';
 import { setScreen } from './state.js';
 
@@ -33,6 +35,10 @@ export async function activateReview(controller, itemId, actions) {
   }
   if (state.screen === 'plan-review') {
     if (itemId === 'view-plan') return showPlanCategories(controller);
+    if (itemId === 'skip-llm-review') {
+      await actions.skipPendingLlmReview(controller);
+      return showPlanReview(controller);
+    }
     if (itemId === 'apply-plan') return actions.startApply(controller);
     if (itemId === 'cancel-run') return actions.cancelRun(controller);
   }
@@ -70,10 +76,16 @@ export function handleReviewKey(controller, key) {
     if (key.name === 'm' || key.name === 'tab' || key.name === 'left' || key.name === 'right') {
       state.diffView.mode = state.diffView.mode === 'unified' ? 'side-by-side' : 'unified';
       state.diffView.pendingHunkJump = true;
+      void rememberDiffMode(state, state.diffView.mode).catch(() => {});
       controller.setStatus(`Diff mode: ${state.diffView.mode}`);
       return true;
     }
     const printableName = String(key.text ?? key.name ?? '').toLowerCase();
+    if (['j', 'k', '{', '}'].includes(printableName) && state.diffView.files?.length > 1) {
+      const delta = printableName === 'j' || printableName === '}' ? 1 : -1;
+      void moveDiffFile(controller, delta).catch((error) => controller.handleUnexpected(error));
+      return true;
+    }
     if (['n', 'p', ']', '['].includes(printableName)) {
       const delta = printableName === 'n' || printableName === ']' ? 1 : -1;
       const count = Math.max(1, state.diffView.hunkCount ?? 1);
@@ -113,12 +125,17 @@ export function showArchiveSafetyReview(controller) {
 }
 
 export function showPlanReview(controller) {
-  const { plan } = controller.state;
-  controller.showMenu('plan-review', [
-    { id: 'apply-plan', label: 'Apply update', description: plan.conflicts.length ? 'Uses the conflict decisions shown above' : 'Backup is created before any local file changes' },
+  const { plan, llmReviewPending } = controller.state;
+  const gated = llmReviewPending && controller.state.runSettings?.llmArchiveReview !== 'disabled';
+  const items = [
+    { id: 'apply-plan', label: gated ? 'Apply update · waiting for LLM review' : 'Apply update', description: plan.conflicts.length ? 'Uses the conflict decisions shown above' : 'Backup is created before any local file changes', disabled: gated },
     { id: 'view-plan', label: 'Review changes', description: 'Open file groups and inspect unified or side-by-side diffs' },
-    { id: 'cancel-run', label: 'Cancel update', description: 'Return without changing the project' },
-  ], 'Review update plan', 0, [compactPlanLine(plan), compactPlanMeta(plan), ...planWarnings(plan, controller.state.archiveSafety)]);
+  ];
+  if (gated) items.push({ id: 'skip-llm-review', label: 'Continue without LLM verdict', description: 'Cancel the advisory LLM step; deterministic protections remain active' });
+  items.push({ id: 'cancel-run', label: 'Cancel update', description: 'Return without changing the project' });
+  const intro = [compactPlanLine(plan), compactPlanMeta(plan), ...planWarnings(plan, controller.state.archiveSafety)];
+  if (llmReviewPending) intro.push(gated ? 'LLM review is running. Files and diffs remain available while Apply waits for the verdict.' : 'LLM summary is running in the background and does not block Apply.');
+  controller.showMenu('plan-review', items, 'Review update plan', 0, intro);
 }
 
 export function showConflictSummary(controller) {
@@ -151,7 +168,7 @@ function showPlanCategories(controller) {
     return count ? [{ id: `plan-category:${id}`, label: `${label} · ${count}`, description }] : [];
   });
   items.push(
-    { id: 'apply-plan', label: 'Apply update' },
+    { id: 'apply-plan', label: controller.state.llmReviewPending && controller.state.runSettings?.llmArchiveReview !== 'disabled' ? 'Apply update · waiting for LLM review' : 'Apply update', disabled: controller.state.llmReviewPending && controller.state.runSettings?.llmArchiveReview !== 'disabled' },
     { id: 'back-to-plan', label: 'Back to summary' },
   );
   controller.showMenu('plan-details', items, 'Review changed files', null, [compactPlanLine(plan), 'Choose a group. Enter on a changed file opens its diff.']);
@@ -169,7 +186,7 @@ function showPlanFiles(controller, category, selectedIndex = null) {
   }));
   items.push(
     { id: 'back-plan-categories', label: 'Back to groups' },
-    { id: 'apply-plan', label: 'Apply update' },
+    { id: 'apply-plan', label: controller.state.llmReviewPending && controller.state.runSettings?.llmArchiveReview !== 'disabled' ? 'Apply update · waiting for LLM review' : 'Apply update', disabled: controller.state.llmReviewPending && controller.state.runSettings?.llmArchiveReview !== 'disabled' },
   );
   controller.showMenu('plan-files', items, `${group[1]} files`, selectedIndex, [`${group[1]} · ${plan[category].length}`, group[2]]);
 }
@@ -264,16 +281,22 @@ async function activateCheckpoint(controller, itemId, actions) {
 }
 
 async function openDiff(controller, item) {
-  const diff = await loadPlanItemDiff(item);
+  const files = diffFilesForCurrentScreen(controller.state, item);
+  const fileIndex = Math.max(0, files.findIndex((candidate) => candidate.path === item.path));
+  const diff = await loadPlanItemDiff(files[fileIndex] ?? item);
   controller.state.diffView = {
     diff,
-    mode: 'unified',
+    source: 'plan',
+    files,
+    fileIndex,
+    mode: controller.state.settings?.lastDiffMode ?? 'unified',
     scroll: 0,
     hunkIndex: 0,
     hunkCount: 1,
     hunkOffsets: [0],
     returnScreen: controller.state.screen,
     returnItems: controller.state.menuItems,
+    returnSourceItems: controller.state.menuSourceItems,
     returnIndex: controller.state.selectedIndex,
     returnStatus: controller.state.status,
     returnIntro: controller.state.panelIntro,
@@ -286,7 +309,7 @@ function closeDiff(controller) {
   const view = controller.state.diffView;
   if (!view) return showPlanReview(controller);
   setScreen(controller.state, view.returnScreen, {
-    items: view.returnItems,
+    items: view.returnSourceItems ?? view.returnItems,
     selectedIndex: view.returnIndex,
     status: view.returnStatus,
     intro: view.returnIntro,
@@ -295,6 +318,30 @@ function closeDiff(controller) {
   controller.invalidate();
 }
 
+
+async function moveDiffFile(controller, delta) {
+  const view = controller.state.diffView;
+  if (!view?.files?.length) return;
+  view.fileIndex = (view.fileIndex + delta + view.files.length) % view.files.length;
+  const file = view.files[view.fileIndex];
+  view.diff = view.source === 'stored'
+    ? await loadStoredFileDiff(view.run, file.path ?? file)
+    : await loadPlanItemDiff(file);
+  view.scroll = 0;
+  view.hunkIndex = 0;
+  view.hunkCount = 1;
+  view.hunkOffsets = [0];
+  view.pendingHunkJump = true;
+  controller.setStatus(`Diff file ${view.fileIndex + 1} of ${view.files.length} · ${view.diff.path}`);
+}
+
+function diffFilesForCurrentScreen(state, item) {
+  if (state.screen === 'plan-files') {
+    return (state.plan[state.planReview?.category] ?? []).filter((candidate) => candidate.kind !== 'preserved' && candidate.kind !== 'skipped');
+  }
+  if (state.screen === 'conflict-file') return state.plan.conflicts ?? [item];
+  return [item];
+}
 
 function jumpToHunk(view, index) {
   view.hunkIndex = Math.max(0, index);

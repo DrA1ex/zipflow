@@ -13,6 +13,10 @@ import {
   clearPathSuggestions, movePathSuggestion, refreshPathSuggestions, resetPathSuggestionInput, selectPathSuggestion,
 } from './path-suggestions.js';
 import { validateSettingValue } from './settings-validation.js';
+import { testSelectedModel } from './settings-model-check.js';
+import {
+  canSearchSettingsChoices, filterSettingsChoices, handleSettingsChoiceSearchKey,
+} from './settings-choice-search.js';
 import {
   settingsChoices, settingsDefinitions, settingsEditorValue, settingsFieldDefinition, settingsParameters,
 } from './settings-options.js';
@@ -21,9 +25,12 @@ export function isSettingsScreen(screen) {
   return screen === 'settings';
 }
 
-export async function openSettings(controller) {
+export async function openSettings(controller, { categoryId = null } = {}) {
   const { state } = controller;
-  if (state.busy || ['checks-running', 'deploy-running'].includes(state.screen)) return false;
+  if (state.busy || ['checks-running', 'deploy-running', 'manual-checks-running', 'manual-deploy-running'].includes(state.screen)) {
+    controller.toast('Settings are available after this operation finishes', 'info');
+    return false;
+  }
   const history = state.project ? await loadManagedHistory(state.project.root) : { paths: [] };
   state.settingsPanel = {
     previous: {
@@ -33,7 +40,7 @@ export async function openSettings(controller) {
       status: state.status,
     },
     focus: 'categories',
-    categoryIndex: 0,
+    categoryIndex: Math.max(0, settingsDefinitions(state).findIndex((item) => item.id === categoryId)),
     parameterIndices: {},
     choiceIndices: {},
     activeParameterId: null,
@@ -44,6 +51,7 @@ export async function openSettings(controller) {
     managedCount: history.paths.length,
     modal: null,
     modelConfig: null,
+    choiceSearch: null,
   };
   setScreen(state, 'settings', { status: 'Global settings' });
   controller.invalidate();
@@ -86,7 +94,8 @@ export async function submitSettingsEditor(controller) {
     state.settingsPanel.modal = null;
     resetPathSuggestionInput(state);
     restoreParameter(state, modal.returnParameterId);
-    state.status = `${modal.field.label} saved`;
+    state.status = modal.field.label;
+    controller.toast(`${modal.field.label} saved`, 'success');
     controller.invalidate();
     return true;
   } catch (error) {
@@ -100,8 +109,21 @@ export async function submitSettingsEditor(controller) {
 export async function handleSettingsKey(controller, key) {
   const panel = controller.state.settingsPanel;
   if (!panel) return false;
+  if (panel.modelTest?.running && key.name === 'escape') {
+    controller.state.settingsTestAbortController?.abort();
+    controller.setStatus('Cancelling model test…');
+    return true;
+  }
   if (panel.modal) return handleModalKey(controller, key);
+  if (panel.choiceSearch?.active) return handleSettingsChoiceSearchKey(controller, key, (delta) => moveChoice(controller.state, delta));
   if (panel.focus?.startsWith('model-config')) return handleModelSettingsKey(controller, key);
+  if (key.printable && key.text === '/' && canSearchSettingsChoices(controller.state)) {
+    panel.choiceSearch = { active: true, query: '' };
+    controller.state.searchEditor.set('');
+    panel.choiceIndices[panel.activeParameterId] = 0;
+    controller.invalidate();
+    return true;
+  }
   if (key.name === 'escape' || key.name === 'left') return handleBack(controller);
   if (key.name === 'up' || key.name === 'down') {
     const delta = key.name === 'up' ? -1 : 1;
@@ -160,7 +182,7 @@ export function settingsViewModel(state) {
   const directParameter = directSettingParameter(selectedSetting, parameters);
   const activeParameter = directParameter ?? panelParameter(state, parameters);
   const showChoices = Boolean(directParameter) || state.settingsPanel?.focus === 'choices';
-  const choices = showChoices && activeParameter ? settingsChoices(state, activeParameter) : [];
+  const choices = showChoices && activeParameter ? filterSettingsChoices(state, settingsChoices(state, activeParameter), activeParameter) : [];
   return {
     focus: state.settingsPanel?.focus ?? 'categories',
     definitions,
@@ -174,6 +196,7 @@ export function settingsViewModel(state) {
     choiceIndex: currentChoiceIndex(state, choices, activeParameter),
     modal: state.settingsPanel?.modal ?? null,
     modelConfig: settingsModelView(state),
+    choiceSearch: state.settingsPanel?.choiceSearch ?? null,
   };
 }
 
@@ -182,6 +205,7 @@ async function handleBack(controller) {
   if (panel.focus === 'choices') {
     panel.focus = isDirectDefinition(currentDefinition(controller.state)) ? 'categories' : 'parameters';
     panel.activeParameterId = null;
+    panel.choiceSearch = null;
     controller.state.status = panel.focus === 'categories' ? 'Global settings' : currentDefinition(controller.state).label;
     controller.invalidate();
     return true;
@@ -219,12 +243,17 @@ async function activateParameter(controller) {
   const parameter = panelParameter(state);
   if (!parameter || parameter.disabled) return true;
   rememberParameter(state, parameter.id);
+  if (parameter.type === 'action') {
+    if (parameter.id === 'llmModelTest') await testSelectedModel(controller);
+    return true;
+  }
   if (parameter.type === 'input') {
     openSettingModal(controller, parameter.fieldId, parameter.id);
     return true;
   }
   state.settingsPanel.focus = 'choices';
   state.settingsPanel.activeParameterId = parameter.id;
+  state.settingsPanel.choiceSearch = null;
   if (parameter.settingId === 'llmModel' && state.settings.llmProvider !== 'disabled') {
     await ensureModels(controller);
   }
@@ -287,7 +316,8 @@ function returnAfterChoice(controller, parameterId, status) {
     state.settingsPanel.activeParameterId = null;
     restoreParameter(state, parameterId);
   }
-  state.status = status;
+  state.status = currentDefinition(state).label;
+  controller.toast(status, 'success');
   controller.invalidate();
   return true;
 }
@@ -385,7 +415,7 @@ function moveChoice(state, delta) {
 
 function currentChoices(state) {
   const parameter = panelParameter(state);
-  return parameter ? settingsChoices(state, parameter) : [];
+  return parameter ? filterSettingsChoices(state, settingsChoices(state, parameter), parameter) : [];
 }
 
 function currentChoiceIndex(state, choices, parameter) {

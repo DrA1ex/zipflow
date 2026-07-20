@@ -4,11 +4,7 @@ import { extractArchive } from '../archive/extract.js';
 import { readArchiveMetadata } from '../archive/metadata.js';
 import { evaluateArchiveRisks } from '../archive/risk.js';
 import { createPlanPatch } from '../patch/create.js';
-import { generateChangeDescription, isLocalLlmEnabled } from '../llm/generate.js';
-import { reviewArchiveStructure } from '../llm/archive-review.js';
-import { resolveLocalLlmSession } from '../llm/session.js';
-import { saveLlmDiagnostics } from '../llm/diagnostics.js';
-import { beginLlmProgress } from './llm-progress.js';
+import { isLocalLlmEnabled } from '../llm/generate.js';
 import { updateManagedHistory } from '../history/managed.js';
 import { buildUpdatePlan } from '../plan/build.js';
 import { applyUpdatePlan } from '../apply/apply.js';
@@ -19,8 +15,7 @@ import { exists } from '../utils/fs.js';
 import { hashFile } from '../utils/hash.js';
 import { displayPath, parseEnteredPath } from '../utils/paths.js';
 import { getZipflowHome } from '../workflow/store.js';
-import { createRunRecord, findAppliedArchiveRun, listProjectRuns, saveRunRecord } from '../runs/store.js';
-import { buildRunAnalytics } from '../history/analytics.js';
+import { createRunRecord, findAppliedArchiveRun, saveRunRecord } from '../runs/store.js';
 import { compactPlanLine, formatArchiveName, planActivityLines } from '../ui/format.js';
 import {
   activatePostCheck, backPostCheck, isPostCheckScreen, startChecks, submitPostCheckEditor,
@@ -34,6 +29,9 @@ import {
   showArchiveSafetyReview, showConflictCheckpoint, showConflictSummary, showPlanReview,
 } from './run-review.js';
 import { prepareArchiveRootReview, selectArchiveRoot, showArchiveRootChoice } from './archive-root.js';
+import { activeRunSettings, captureRunSettings } from './runtime-settings.js';
+import { skipPendingLlmReview, startLlmReview } from './run-llm-review.js';
+import { recentArchiveHint, rememberArchivePath } from '../settings/recent.js';
 
 export { showLastRun };
 
@@ -49,7 +47,8 @@ export function beginArchiveInput(controller) {
     placeholder: '~/Downloads/project-update.zip',
     purpose: 'archive-path',
     instructions: [
-      'Drop a ZIP file into the terminal or enter its path. Tab completes ZIP paths.',
+      'Drop a ZIP file into the terminal or enter its path. Tab completes ZIP paths; on an empty field it opens recent archives.',
+      ...(recentArchiveHint(controller.state.settings) ? [recentArchiveHint(controller.state.settings)] : []),
       'Next: Zipflow compares it with the project, creates changes.patch, and shows a compact review before any files change.',
     ],
   }, '');
@@ -72,6 +71,7 @@ export async function activateRun(controller, itemId) {
       retryArchive,
       createCheckpoint,
       continueAfterSafety,
+      skipPendingLlmReview,
     });
   }
   if (isPostCheckScreen(state.screen)) return activatePostCheck(controller, itemId);
@@ -105,6 +105,7 @@ export async function inspectArchivePath(controller, enteredPath, { allowDuplica
   const archiveStat = await stat(archivePath);
   if (!archiveStat.isFile()) return controller.message('Archive path is not a file', [displayPath(archivePath)], 'error');
   const archiveInfo = { size: archiveStat.size, modifiedAt: archiveStat.mtime.toISOString() };
+  await rememberArchivePath(state, archivePath);
   const digest = archiveHash ?? await hashFile(archivePath);
   if (!allowDuplicate) {
     const previous = await findAppliedArchiveRun(state.project.root, digest);
@@ -117,11 +118,13 @@ async function inspectArchive(controller, archivePath, archiveHash, archiveInfo)
   const { state } = controller;
   const runId = createRunId();
   state.pendingArchive = null;
-  state.run = await createRunRecord({ id: runId, project: state.project, workflow: state.workflow, archivePath, archiveHash, archiveInfo });
-  controller.activeLock = await acquireProjectLock(state.project.root, runId);
-  const temp = path.join(getZipflowHome(), 'tmp', runId);
-  setBusy(controller, 'Inspecting archive', 1, 7, 'Reading ZIP entries');
   try {
+    state.run = await createRunRecord({ id: runId, project: state.project, workflow: state.workflow, archivePath, archiveHash, archiveInfo });
+    captureRunSettings(state);
+    state.run = await saveRunRecord(state.run);
+    controller.activeLock = await acquireProjectLock(state.project.root, runId);
+    const temp = path.join(getZipflowHome(), 'tmp', runId);
+    setBusy(controller, 'Inspecting archive', 1, 7, 'Reading ZIP entries');
     const extracted = await extractArchive(archivePath, temp);
     const rootReview = await prepareArchiveRootReview({ project: state.project, workflow: state.workflow, extracted });
     if (rootReview.prompt) {
@@ -137,7 +140,10 @@ async function inspectArchive(controller, archivePath, archiveHash, archiveInfo)
       plan: rootReview.plan,
     });
   } catch (error) {
-    await failRun(controller, error);
+    await failRun(controller, error, {
+      kind: 'archive',
+      retry: () => inspectArchivePath(controller, archivePath, { allowDuplicate: true, archiveHash }),
+    });
   }
 }
 
@@ -150,7 +156,7 @@ async function continueArchiveInspection(controller, { archivePath, archiveHash,
     const resolvedPlan = plan ?? await buildUpdatePlan({ project: state.project, workflow: state.workflow, extracted });
     setProgress(controller, 4, 7, 'Creating changes.patch');
     const patch = await createPlanPatch(state.run.id, resolvedPlan);
-    const llm = await generateLlmSummary(controller, { plan: resolvedPlan, patch, extracted });
+    setProgress(controller, 5, 7, 'Checking deterministic archive risks');
     const archiveRisk = await evaluateArchiveRisks({
       projectPath: state.project.root,
       workflow: state.workflow,
@@ -158,7 +164,7 @@ async function continueArchiveInspection(controller, { archivePath, archiveHash,
       extracted,
       plan: resolvedPlan,
     });
-    setProgress(controller, 7, 7, 'Plan ready');
+
     state.archive = extracted;
     state.archiveMetadata = metadata;
     state.plan = resolvedPlan;
@@ -169,10 +175,10 @@ async function continueArchiveInspection(controller, { archivePath, archiveHash,
     state.run.plan = serializePlan(resolvedPlan);
     state.run.patch = { path: patch.path, omitted: patch.omitted };
     state.run.archiveInfo = { ...archiveInfo, fileCount: extracted.fileCount, totalSize: extracted.totalSize, rootPrefix: extracted.rootPrefix };
-    state.run.llm = llm.record;
+    state.run.llm = null;
     state.archiveSafety = {
       warnings: archiveRisk.warnings,
-      llm: llm.assessment ?? null,
+      llm: null,
       acknowledged: false,
     };
     state.run.archiveSafety = state.archiveSafety;
@@ -180,20 +186,31 @@ async function continueArchiveInspection(controller, { archivePath, archiveHash,
     state.run.status = 'planned';
     state.run = await saveRunRecord(state.run);
     state.pendingArchiveInspection = null;
+    setProgress(controller, 7, 7, 'Plan ready');
+    state.busy = false;
+
     controller.message('Archive inspected', [
       `${formatArchiveName(archivePath)} · ${extracted.fileCount} files${extracted.rootPrefix ? ` · root ${extracted.rootPrefix}/` : ''}`,
       ...(metadata.commitMessageSource ? [`Commit message found: ${metadata.commitMessageSource}`] : []),
-    ], 'success');
-    controller.message('Update plan', [...planActivityLines(resolvedPlan), `Patch: ${displayPath(patch.path)}`], resolvedPlan.conflicts.length ? 'warning' : 'info');
-    emitLlmResult(controller, llm, state.settings.llmArchiveReview);
-    state.busy = false;
+    ], 'success', { collapsedSummary: `Archive inspected · ${extracted.fileCount} files` });
+    controller.message('Update plan', [...planActivityLines(resolvedPlan), `Patch: ${displayPath(patch.path)}`], resolvedPlan.conflicts.length ? 'warning' : 'info', {
+      collapsedSummary: `Update plan · ${compactPlanLine(resolvedPlan)}`,
+    });
+
+    const settings = activeRunSettings(state);
+    const shouldRunLlm = isLocalLlmEnabled(settings)
+      && (changedCount(resolvedPlan) > 0 || settings.llmArchiveReview === 'structure');
+    if (shouldRunLlm) startLlmReview(controller, { plan: resolvedPlan, patch, extracted });
+
     if (requiresSafetyReview(state.archiveSafety)) return showArchiveSafetyReview(controller);
     return continueAfterSafety(controller);
   } catch (error) {
-    await failRun(controller, error);
+    await failRun(controller, error, {
+      kind: 'archive',
+      retry: () => inspectArchivePath(controller, archivePath, { allowDuplicate: true, archiveHash }),
+    });
   }
 }
-
 
 async function activateArchiveRootChoice(controller, itemId) {
   const pending = controller.state.pendingArchiveInspection;
@@ -215,111 +232,11 @@ async function activateArchiveRootChoice(controller, itemId) {
   });
 }
 
-async function generateLlmSummary(controller, { plan, patch, extracted }) {
-  const { state } = controller;
-  if (!isLocalLlmEnabled(state.settings)) return { record: null, assessment: null };
-  if (changedCount(plan) === 0 && state.settings.llmArchiveReview !== 'structure') return { record: null, assessment: null };
-  setProgress(controller, 5, 7, `Streaming summary from ${state.settings.llmModel}`);
-  const llmEstimate = await previousLlmEstimate(state);
-  controller.message('Local LLM analysis starting', [
-    `${changedCount(plan)} changed paths · delivery ${deliveryLabel(state.settings.llmChangeDelivery)}${state.settings.llmArchiveReview === 'structure' ? ' · project/archive structure guard first' : ''}${llmEstimate ? ` · historical median ${formatEstimate(llmEstimate)}` : ''}.`,
-    'Adaptive delivery uses one patch when it fits and file-by-file batches when it does not. Esc cancels only this LLM step.',
-  ], 'process');
-  const progress = beginLlmProgress(controller, { expectedMs: llmEstimate });
-  const abortController = new AbortController();
-  state.llmAbortController = abortController;
-  controller.invalidate();
-  const startedAt = Date.now();
-  try {
-    progress.onEvent({ type: 'phase', phase: 'model-info', label: 'Reading the selected model context limit' });
-    const session = await resolveLocalLlmSession(state.settings, { signal: abortController.signal });
-    progress.onEvent({ type: 'model-profile', profile: session.profile });
-    let structureAssessment = null;
-    if (state.settings.llmArchiveReview === 'structure') {
-      structureAssessment = await reviewArchiveStructure(
-        { settings: state.settings, project: state.project, workflow: state.workflow, extracted, plan },
-        { onEvent: progress.onEvent, signal: abortController.signal, session },
-      );
-      if (structureAssessment.assessment === 'unsuitable') {
-        const result = { summary: structureAssessment.reasons, commitMessage: '', assessment: structureAssessment.assessment, confidence: structureAssessment.confidence, reasons: structureAssessment.reasons, diagnostics: { structure: structureAssessment.diagnostics } };
-        const durationMs = Date.now() - startedAt;
-        const diagnosticsPath = await saveLlmDiagnostics(state.run.id, {
-          status: 'completed', provider: state.settings.llmProvider, model: state.settings.llmModel,
-          diagnostics: result.diagnostics,
-        }).catch(() => null);
-        return { result, assessment: assessmentRecord(result, 'structure'), diagnosticsPath, record: llmRecord(state, result, diagnosticsPath, durationMs) };
-      }
-    }
-    const result = await generateChangeDescription(
-      { settings: state.settings, project: state.project, plan, patchContent: patch.content },
-      { onEvent: progress.onEvent, signal: abortController.signal, session },
-    );
-    if (structureAssessment) {
-      result.structureAssessment = structureAssessment;
-      result.diagnostics = { ...(result.diagnostics ?? {}), structure: structureAssessment.diagnostics };
-    }
-    const durationMs = Date.now() - startedAt;
-    const diagnosticsPath = await saveLlmDiagnostics(state.run.id, {
-      status: 'completed', provider: state.settings.llmProvider, model: state.settings.llmModel,
-      diagnostics: result.diagnostics ?? null, raw: result.raw ?? null,
-    }).catch(() => null);
-    const assessment = result.assessment
-      ? assessmentRecord(result, 'patch')
-      : result.structureAssessment
-        ? assessmentRecord(result.structureAssessment, 'structure')
-        : null;
-    return { result, assessment, diagnosticsPath, record: llmRecord(state, result, diagnosticsPath, durationMs) };
-  } catch (error) {
-    const cancelled = error.code === 'cancelled';
-    const diagnosticsPath = await saveLlmDiagnostics(state.run.id, {
-      status: cancelled ? 'cancelled' : 'failed', provider: state.settings.llmProvider,
-      model: state.settings.llmModel, ...(cancelled ? {} : { error }),
-    }).catch(() => null);
-    return {
-      cancelled,
-      error: cancelled ? null : error.message,
-      diagnosticsPath,
-      assessment: null,
-      record: cancelled
-        ? { durationMs: Date.now() - startedAt, provider: state.settings.llmProvider, model: state.settings.llmModel, language: state.settings.llmLanguage, cancelled: true, diagnosticsPath }
-        : { durationMs: Date.now() - startedAt, provider: state.settings.llmProvider, model: state.settings.llmModel, language: state.settings.llmLanguage, error: error.message, diagnosticsPath },
-    };
-  } finally {
-    if (state.llmAbortController === abortController) state.llmAbortController = null;
-    progress.stop();
-  }
-}
-
-function emitLlmResult(controller, llm, reviewMode) {
-  if (llm.result) {
-    const attempt = llm.result.diagnostics?.attempts?.find((item) => typeof item.attempt === 'number');
-    if (attempt?.patch?.truncated) controller.message('Local LLM input reduced safely', [
-      `Estimated ${attempt.patch.originalEstimatedTokens.toLocaleString('en-US')} tokens · sent ${attempt.patch.sentEstimatedTokens.toLocaleString('en-US')}`,
-      `${attempt.patch.omittedFiles} files without excerpts · ${attempt.patch.omittedHunks} hunks omitted`,
-    ], 'warning');
-    const assessment = llm.assessment;
-    if (assessment) controller.message('Local LLM archive suitability', [
-      `${assessment.assessment} · ${assessment.confidence} confidence · ${assessment.mode} review`,
-      ...assessment.reasons,
-    ], assessment.assessment === 'suitable' ? 'success' : 'warning');
-    else controller.message('Local LLM archive suitability', [
-      reviewMode === 'disabled'
-        ? 'Not requested · Archive review is set to Summary only.'
-        : 'No suitability verdict was returned; deterministic Zipflow safety checks remain active.',
-    ], reviewMode === 'disabled' ? 'info' : 'warning');
-    if (llm.result.warning) controller.message('Local LLM fallback used', [llm.result.warning], 'warning');
-    if (llm.result.summary?.length) controller.message('Local LLM summary', llm.result.summary, 'summary');
-  } else if (llm.cancelled) controller.message('Local LLM generation cancelled', ['The update continues with normal commit-message fallbacks.'], 'warning');
-  else if (llm.error) controller.message('Local LLM summary was not generated', [
-    llm.error,
-    ...(llm.diagnosticsPath ? [`Diagnostics: ${displayPath(llm.diagnosticsPath)}`] : []),
-    'The update can continue and project files have not been affected by this error.',
-  ], 'warning');
-}
-
 export async function startApply(controller, { checkpointCreated = false } = {}) {
   const { state } = controller;
   try {
+    if (state.llmReviewPending && activeRunSettings(state).llmArchiveReview !== 'disabled') return showPlanReview(controller);
+    if (requiresSafetyReview(state.archiveSafety) && !state.archiveSafety.acknowledged) return showArchiveSafetyReview(controller);
     if (!checkpointCreated && state.workflow.git.checkpoint === 'ask' && archiveConflictPaths(state).length) return showConflictCheckpoint(controller);
     if (!checkpointCreated && state.workflow.git.checkpoint === 'auto' && archiveConflictPaths(state).length) await createCheckpoint(controller);
     if (changedCount(state.plan) === 0) {
@@ -414,25 +331,12 @@ function serializePlan(plan) {
   };
 }
 
-function llmRecord(state, result, diagnosticsPath, durationMs = 0) {
-  return {
-    durationMs, provider: state.settings.llmProvider, model: state.settings.llmModel, language: state.settings.llmLanguage,
-    summary: result.summary, commitMessage: result.commitMessage || null, warning: result.warning || null,
-    assessment: result.assessment ?? result.structureAssessment?.assessment ?? null,
-    confidence: result.confidence ?? result.structureAssessment?.confidence ?? null,
-    reasons: result.reasons ?? result.structureAssessment?.reasons ?? null,
-    diagnostics: result.diagnostics || null, diagnosticsPath,
-    contextText: result.contextText ?? null,
-    delivery: result.diagnostics?.delivery ?? null,
-  };
-}
-
 export function continueAfterSafety(controller) {
   const { state } = controller;
   const plan = state.plan;
   if (plan.conflicts.length && state.workflow.policy.conflictPolicy !== 'overwrite') return showConflictSummary(controller);
   if (plan.conflicts.length) controller.message('Saved conflict policy applied', [`Archive versions selected for ${plan.conflicts.length} conflicts; each file will be backed up.`], 'warning');
-  if (state.workflow.policy.confirmPlan || plan.skipped.length > 0 || (state.archiveSafety?.warnings?.length && !state.archiveSafety.acknowledged)) return showPlanReview(controller);
+  if (state.llmReviewPending || state.workflow.policy.confirmPlan || plan.skipped.length > 0 || (state.archiveSafety?.warnings?.length && !state.archiveSafety.acknowledged)) return showPlanReview(controller);
   controller.message('Safe plan accepted automatically', [compactPlanLine(plan), 'The saved workflow allows conflict-free plans to continue after the normal backup.'], 'choice');
   return startApply(controller);
 }
@@ -441,16 +345,6 @@ function requiresSafetyReview(safety) {
   if (!safety) return false;
   if (safety.warnings?.length) return true;
   return ['suspicious', 'unsuitable'].includes(safety.llm?.assessment);
-}
-
-function assessmentRecord(value, mode) {
-  if (!value?.assessment) return null;
-  return {
-    mode,
-    assessment: value.assessment,
-    confidence: value.confidence ?? 'low',
-    reasons: value.reasons ?? value.summary ?? [],
-  };
 }
 
 function setBusy(controller, label, value, total, detail) {
@@ -464,26 +358,6 @@ function setBusy(controller, label, value, total, detail) {
 function setProgress(controller, value, total, detail) {
   controller.state.progress = { value, total: Math.max(1, total), detail };
   controller.invalidate();
-}
-
-async function previousLlmEstimate(state) {
-  const runs = (await listProjectRuns(state.project.root, { limit: 40 })).filter((run) => run.id !== state.run.id);
-  const analytics = buildRunAnalytics(runs);
-  const sameModel = analytics.llm.byModel.find((item) => item.name === `${state.settings.llmProvider} · ${state.settings.llmModel}`);
-  return sameModel?.medianMs || analytics.llm.total.medianMs || 0;
-}
-
-
-function deliveryLabel(value) {
-  if (value === 'patch') return 'full patch';
-  if (value === 'change-list') return 'changed paths only';
-  if (value === 'chunked') return 'file-by-file chunks';
-  return 'adaptive';
-}
-
-function formatEstimate(milliseconds) {
-  if (milliseconds >= 60_000) return `${Math.max(1, Math.round(milliseconds / 60_000))} min`;
-  return `${Math.max(1, Math.round(milliseconds / 1000))} sec`;
 }
 
 function changedCount(plan) {

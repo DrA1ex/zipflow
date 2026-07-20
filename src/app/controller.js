@@ -1,10 +1,11 @@
 import path from 'node:path';
-import { handleInputEditorKey } from 'terlio.js';
+import { copyTextToClipboard, handleInputEditorKey } from 'terlio.js';
 import { discoverProject } from '../project/detect.js';
 import { ensureZipflowHome, getZipflowHome, loadWorkflow } from '../workflow/store.js';
 import { loadSettings } from '../settings/store.js';
 import { displayPath } from '../utils/paths.js';
-import { appendMessage, setScreen } from './state.js';
+import { ZIPFLOW_VERSION } from '../version.js';
+import { appendMessage, refreshMenuSearch, setScreen } from './state.js';
 import {
   activateSetup, backSetup, beginSetup, handleSetupShortcut, handlesSetupScreen, submitSetupEditor,
 } from './setup-flow.js';
@@ -19,6 +20,7 @@ import { projectSummary } from '../ui/format.js';
 import { toggleActivityBlockAtRow, toggleActivityBlockAtScroll } from '../ui/activity.js';
 import { terminateActiveProcesses } from '../utils/process.js';
 import { removeIfExists } from '../utils/fs.js';
+import { clearRunSettings } from './runtime-settings.js';
 import {
   activateExport, backExport, beginCreateZip, handleExportShortcut, handlesExportScreen, submitExportEditor,
 } from './export-flow.js';
@@ -26,7 +28,7 @@ import { activateHistory, backHistory, handlesHistoryScreen, repeatLastArchive, 
 import { activateManual, backManual, beginManualChecks, beginManualDeploy, handlesManualScreen } from './manual-flow.js';
 import {
   acceptPathSuggestion, clearPathSuggestions, isPathEditorScreen, movePathSuggestion,
-  refreshPathSuggestions, resetPathSuggestionInput, selectPathSuggestion,
+  refreshPathSuggestions, resetPathSuggestionInput, selectPathSuggestion, showRecentArchiveSuggestions,
 } from './path-suggestions.js';
 
 export class ZipflowController {
@@ -39,6 +41,7 @@ export class ZipflowController {
 
   attachRuntime(runtime) {
     this.runtime = runtime;
+    this.state.overlays = runtime?.overlays ?? null;
   }
 
   async boot() {
@@ -61,6 +64,21 @@ export class ZipflowController {
 
   async handleKey(key) {
     const normalized = key.printable && key.text === ' ' ? { ...key, name: 'space' } : key;
+    if (this.state.helpToast) {
+      if (normalized.name === 'escape') {
+        this.state.helpToast = null;
+        return this.invalidate();
+      }
+      if (['up', 'down', 'page-up', 'page-down', 'home', 'end'].includes(normalized.name)) {
+        const toast = this.state.helpToast;
+        const amount = normalized.name === 'page-up' || normalized.name === 'page-down' ? 5 : 1;
+        if (normalized.name === 'home') toast.scroll = 0;
+        else if (normalized.name === 'end') toast.scroll = toast.maxScroll ?? 0;
+        else toast.scroll = Math.max(0, Math.min(toast.maxScroll ?? 0, (toast.scroll ?? 0) + (normalized.name === 'up' || normalized.name === 'page-up' ? -amount : amount)));
+        return this.invalidate();
+      }
+    }
+    if (this.state.menuSearch?.active) return this.handleMenuSearchKey(normalized);
     if (normalized.ctrl && normalized.name === 't') {
       const pointerEnabled = this.runtime?.togglePointerOverride?.();
       this.setStatus(pointerEnabled === false
@@ -75,6 +93,11 @@ export class ZipflowController {
     }
     if (isSettingsScreen(this.state.screen)) return handleSettingsKey(this, normalized);
     if (handleRunShortcut(this, normalized)) return this.invalidate();
+    if (normalized.name === 'escape' && this.state.exportAbortController) {
+      this.state.exportAbortController.abort();
+      this.setStatus('Cancelling ZIP preview preparation…');
+      return;
+    }
     if (normalized.name === 'escape' && this.state.llmAbortController) {
       this.state.llmAbortController.abort();
       if (this.state.llmRuntime) {
@@ -89,8 +112,18 @@ export class ZipflowController {
     if (normalized.printable && normalized.text === '?') return this.showContextHelp();
     if (normalized.name === 'page-up' || normalized.name === 'page-down') {
       const delta = normalized.name === 'page-up' ? -8 : 8;
-      this.state.transcriptScroll = Math.max(0, this.state.transcriptScroll + delta);
-      this.state.transcriptSticky = normalized.name === 'page-down';
+      const maxScroll = this.state.activityLayout?.maxScroll ?? Number.MAX_SAFE_INTEGER;
+      this.state.transcriptScroll = Math.max(0, Math.min(maxScroll, this.state.transcriptScroll + delta));
+      this.state.transcriptSticky = this.state.transcriptScroll >= maxScroll;
+      if (this.state.transcriptSticky) this.state.activityUnread = 0;
+      return this.invalidate();
+    }
+    if (normalized.name === 'end' && !isEditorScreen(this.state.screen)) {
+      this.followLatestActivity();
+      return this.invalidate();
+    }
+    if (normalized.printable && normalized.text === '/' && isSearchableScreen(this.state.screen)) {
+      this.beginMenuSearch();
       return this.invalidate();
     }
     if (normalized.printable && normalized.text?.toLowerCase() === 'e' && !isEditorScreen(this.state.screen)) {
@@ -108,13 +141,19 @@ export class ZipflowController {
     if (normalized.name === 'enter' || normalized.name === 'space') return this.activateSelected();
     if (normalized.name === 'escape') return this.back();
   }
-
   async dispatch(action) {
+    if (action.type === 'dismiss-help-toast') {
+      this.state.helpToast = null;
+      this.invalidate();
+      return;
+    }
+    if (action.type === 'activity-follow-latest') {
+      this.followLatestActivity();
+      this.invalidate();
+      return;
+    }
     if (action.type === 'activity-toggle-row') {
-      if (toggleActivityBlockAtRow(this.state, action.row)) {
-        this.setStatus('Activity block toggled');
-        this.invalidate();
-      }
+      if (toggleActivityBlockAtRow(this.state, action.row)) this.invalidate();
       return;
     }
     if (action.type === 'settings-select-setting') return selectSetting(this, action.index);
@@ -147,6 +186,18 @@ export class ZipflowController {
     if (handlesHistoryScreen(this.state.screen)) return activateHistory(this, item.id);
     if (handlesManualScreen(this.state.screen)) return activateManual(this, item.id);
     if (this.state.screen === 'error') {
+      if (item.id === 'retry-step') return this.retryRecovery();
+      if (item.id === 'choose-another-archive') return beginArchiveInput(this);
+      if (item.id === 'open-llm-settings') return openSettings(this, { categoryId: 'localLlm' });
+      if (item.id === 'continue-without-llm') return this.continueRecoveryWithoutLlm();
+      if (item.id === 'copy-diagnostics') {
+        const copied = await copyTextToClipboard(this.recoveryText(), { output: this.runtime?.output });
+        return copied ? this.toast('Diagnostics copied', 'success') : this.setStatus('Clipboard transfer unavailable');
+      }
+      if (item.id === 'view-report' && this.state.run) {
+        const { showRunDetails } = await import('./run-rollback.js');
+        return showRunDetails(this, this.state.run, { origin: 'error' });
+      }
       if (item.id === 'back-home') return this.showHome();
       if (item.id === 'exit') return this.exit(1);
     }
@@ -163,6 +214,7 @@ export class ZipflowController {
   showHome() {
     const { project, workflow } = this.state;
     this.state.run = null;
+    clearRunSettings(this.state);
     this.state.archive = null;
     this.state.archiveMetadata = null;
     this.state.archiveSafety = null;
@@ -216,8 +268,13 @@ export class ZipflowController {
     if (!isPathEditorScreen(screen)) clearPathSuggestions(this.state);
   }
 
-  message(title, lines = [], tone = 'info') {
-    appendMessage(this.state, title, lines, tone);
+  message(title, lines = [], tone = 'info', options = {}) {
+    appendMessage(this.state, title, lines, tone, options);
+    this.invalidate();
+  }
+
+  toast(message, level = 'info', ttl = 3, detail = '') {
+    this.state.overlays?.toast?.(message, level, ttl, detail);
     this.invalidate();
   }
 
@@ -238,9 +295,12 @@ export class ZipflowController {
     this.state.busy = false;
     await this.activeLock?.release?.().catch(() => {});
     this.activeLock = null;
-    this.message('Unexpected error', [error.message], 'error');
+    this.recovery = { error, kind: 'unexpected' };
+    this.message('Unexpected error', [error.message], 'error', { collapsedSummary: `Unexpected error · ${error.message}` });
     this.showMenu('error', [
-      { id: 'back-home', label: 'Return to project' },
+      { id: 'copy-diagnostics', label: 'Copy diagnostics', description: 'Copy the error, current screen, project, and run information' },
+      ...(this.state.run ? [{ id: 'view-report', label: 'View run report', description: `Open stored details for ${this.state.run.id}` }] : []),
+      { id: 'back-home', label: 'Return to project', description: 'Return to the project without retrying the failed action' },
       { id: 'exit', label: 'Exit' },
     ], 'Error');
   }
@@ -281,13 +341,84 @@ export class ZipflowController {
     if (!item) return;
     const lines = [item.description || 'No additional description is available for this action.'];
     if (item.help) lines.push('', item.help);
-    this.message(`Help · ${item.label}`, lines, 'info');
-    this.setStatus('Context help added to Activity');
+    this.state.helpToast = {
+      title: `Help · ${item.label}`,
+      lines,
+      level: 'info',
+      expiresAt: Date.now() + 12_000,
+    };
+    this.invalidate();
+  }
+
+  beginMenuSearch() {
+    const previousQuery = this.state.menuSearch?.screen === this.state.screen ? this.state.menuSearch.query : '';
+    this.state.menuSearch = { screen: this.state.screen, query: previousQuery, active: true };
+    this.state.searchEditor.set(previousQuery);
+    refreshMenuSearch(this.state, previousQuery);
+  }
+
+  handleMenuSearchKey(key) {
+    if (key.name === 'escape') {
+      if (this.state.searchEditor.value) {
+        this.state.searchEditor.set('');
+        refreshMenuSearch(this.state, '');
+      } else {
+        this.state.menuSearch.active = false;
+      }
+      return this.invalidate();
+    }
+    if (key.name === 'enter') {
+      this.state.menuSearch.active = false;
+      return this.invalidate();
+    }
+    if (key.name === 'up' || key.name === 'down') {
+      this.moveSelection(key.name === 'up' ? -1 : 1);
+      return this.invalidate();
+    }
+    handleInputEditorKey(this.state.searchEditor, key, { multiline: false });
+    refreshMenuSearch(this.state, this.state.searchEditor.value);
+    return this.invalidate();
+  }
+
+  followLatestActivity() {
+    const maxScroll = this.state.activityLayout?.maxScroll ?? this.state.transcriptScroll;
+    this.state.transcriptScroll = Math.max(0, maxScroll);
+    this.state.transcriptSticky = true;
+    this.state.activityUnread = 0;
+  }
+
+
+  recoveryText() {
+    const error = this.recovery?.error;
+    return [
+      `Zipflow ${ZIPFLOW_VERSION ?? ''}`.trim(),
+      `Screen: ${this.state.screen}`,
+      `Project: ${this.state.project?.root ?? 'unknown'}`,
+      `Run: ${this.state.run?.id ?? 'none'}`,
+      `Status: ${this.state.run?.status ?? this.state.status ?? 'unknown'}`,
+      `Error: ${error?.message ?? 'unknown'}`,
+      error?.stack ? `\n${error.stack}` : '',
+    ].filter(Boolean).join('\n');
+  }
+
+  async retryRecovery() {
+    const retry = this.recovery?.retry;
+    if (typeof retry !== 'function') return this.showHome();
+    return retry();
+  }
+
+  async continueRecoveryWithoutLlm() {
+    const action = this.recovery?.continueWithoutLlm;
+    if (typeof action !== 'function') return this.showHome();
+    return action();
   }
 
   async handleEditorKey(key) {
     if (key.name === 'escape') return this.back();
     const pathEditor = isPathEditorScreen(this.state.screen);
+    if (this.state.screen === 'archive-input' && key.name === 'tab' && !String(this.state.editor.value ?? '').trim()) {
+      if (await showRecentArchiveSuggestions(this)) return this.invalidate();
+    }
     if (pathEditor && (key.name === 'up' || key.name === 'down') && this.state.pathSuggestions?.items?.length) {
       movePathSuggestion(this.state, key.name === 'up' ? -1 : 1);
       return this.invalidate();
@@ -358,4 +489,11 @@ function shouldRecordChoice(screen, itemId) {
     'archive-safety', 'plan-review', 'conflict-summary', 'conflict-file', 'conflict-checkpoint', 'check-failed',
     'commit', 'deploy-prompt', 'deploy-failed', 'rollback-confirm', 'archive-duplicate',
   ].includes(screen);
+}
+
+
+function isSearchableScreen(screen) {
+  return new Set([
+    'plan-files', 'export-select', 'export-files', 'run-history', 'setup-checks', 'run-file-list',
+  ]).has(screen);
 }
