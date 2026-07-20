@@ -20,8 +20,7 @@ export async function refreshModels(controller, { quiet = false } = {}) {
   try {
     panel.models = await listLocalModelChoices(provider, { apiToken: state.settings.llmApiToken });
     panel.modelsProvider = provider;
-    const current = panel.models.find((item) => item.id === state.settings.llmModel)
-      ?? panel.models.find((item) => item.key === state.settings.llmModel);
+    const current = findConfiguredModel(panel.models, state.settings.llmModel);
     if (current && current.id !== state.settings.llmModel) {
       state.settings = await saveSettings({ ...state.settings, llmModel: current.id });
     } else if (!current && state.settings.llmModel) {
@@ -57,4 +56,12 @@ export function resetModelCache(panel) {
   panel.models = [];
   panel.modelsProvider = null;
   panel.modelError = null;
+}
+
+
+function findConfiguredModel(models, configuredModel) {
+  return models.find((item) => item.id === configuredModel || item.key === configuredModel)
+    ?? models.find((item) => item.loadedInstanceIds?.includes(configuredModel))
+    ?? models.find((item) => String(configuredModel ?? '').startsWith(`${item.key}:`))
+    ?? null;
 }

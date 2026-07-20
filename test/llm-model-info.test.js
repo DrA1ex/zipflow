@@ -20,7 +20,9 @@ test('LM Studio profile uses the loaded instance context and reasoning capabilit
   assert.equal(profile.maxContextLength, 131_072);
   assert.equal(profile.reasoningOffSupported, true);
   assert.equal(profile.source, 'loaded-instance');
-  assert.equal(profile.requestModel, 'custom-instance');
+  assert.equal(profile.requestModel, 'gemma');
+  assert.equal(profile.loadedInstanceId, 'custom-instance');
+  assert.equal(profile.configuredModel, 'gemma');
   assert.equal(profile.loadedModel, true);
 });
 
@@ -64,4 +66,20 @@ test('model profile uses a conservative fallback when metadata endpoints fail', 
   const profile = await getLocalModelProfile('lmstudio', 'missing', { fetchImpl });
   assert.equal(profile.contextLength, 16_384);
   assert.equal(profile.source, 'fallback');
+});
+
+
+test('LM Studio profile converts a saved numbered instance alias back to the catalog model key', async () => {
+  const fetchImpl = async () => jsonResponse({
+    models: [{
+      type: 'llm', key: 'gemma-4-e4b-it-mlx', max_context_length: 131_072,
+      loaded_instances: [{ id: 'gemma-4-e4b-it-mlx:2', config: { context_length: 32_768 } }],
+    }],
+  });
+
+  const profile = await getLocalModelProfile('lmstudio', 'gemma-4-e4b-it-mlx:2', { fetchImpl });
+  assert.equal(profile.modelKey, 'gemma-4-e4b-it-mlx');
+  assert.equal(profile.requestModel, 'gemma-4-e4b-it-mlx');
+  assert.equal(profile.loadedInstanceId, 'gemma-4-e4b-it-mlx:2');
+  assert.equal(profile.contextLength, 32_768);
 });

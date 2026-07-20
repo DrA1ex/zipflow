@@ -166,7 +166,7 @@ function modelChoices(state, parameter) {
       value: model.id,
       label: modelChoiceLabel(state, model),
       description: '',
-      selected: state.settings.llmModel === model.id || state.settings.llmModel === model.key,
+      selected: configuredModelMatches(state.settings.llmModel, model),
     })));
   } else result.push({
     id: 'no-models', label: panel?.modelError ? 'Models unavailable' : 'No models returned',
@@ -175,6 +175,13 @@ function modelChoices(state, parameter) {
   return result;
 }
 
+
+
+function configuredModelMatches(configuredModel, model) {
+  if (configuredModel === model.id || configuredModel === model.key) return true;
+  if (model.loadedInstanceIds?.includes(configuredModel)) return true;
+  return Boolean(model.key) && String(configuredModel ?? '').startsWith(`${model.key}:`);
+}
 
 function modelChoiceLabel(state, model) {
   const identity = [model.label, model.paramsString, model.quantization].filter(Boolean).join(' · ');

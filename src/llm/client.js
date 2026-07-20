@@ -354,8 +354,11 @@ function nativeRoleLabel(role) {
 function lmStudioChoices(models) {
   const choices = [];
   for (const item of models.filter((model) => model.type !== 'embedding')) {
-    const base = {
+    const loadedInstance = preferredLoadedInstance(item.loaded_instances ?? []);
+    choices.push({
+      id: item.key,
       key: item.key,
+      label: item.display_name || item.key,
       displayName: item.display_name || item.key,
       paramsString: item.params_string ?? null,
       quantization: item.quantization?.name ?? null,
@@ -363,27 +366,21 @@ function lmStudioChoices(models) {
       maxContextLength: Number(item.max_context_length ?? 0) || null,
       format: item.format ?? null,
       reasoningOptions: item.capabilities?.reasoning?.allowed_options ?? [],
-    };
-    const loaded = item.loaded_instances ?? [];
-    if (loaded.length) {
-      for (const instance of loaded) choices.push({
-        ...base,
-        id: instance.id,
-        label: base.displayName,
-        loaded: true,
-        contextLength: instance.config?.context_length ?? null,
-        config: instance.config ?? {},
-      });
-    } else choices.push({
-      ...base,
-      id: item.key,
-      label: base.displayName,
-      loaded: false,
-      contextLength: null,
-      config: {},
+      loaded: Boolean(loadedInstance),
+      loadedInstanceId: loadedInstance?.id ?? null,
+      loadedInstanceIds: (item.loaded_instances ?? []).map((instance) => instance.id).filter(Boolean),
+      contextLength: loadedInstance?.config?.context_length ?? null,
+      config: loadedInstance?.config ?? {},
     });
   }
   return choices.sort((left, right) => Number(right.loaded) - Number(left.loaded) || left.label.localeCompare(right.label));
+}
+
+function preferredLoadedInstance(instances) {
+  return [...instances].sort((left, right) => {
+    const contextDelta = Number(right.config?.context_length ?? 0) - Number(left.config?.context_length ?? 0);
+    return contextDelta || String(left.id ?? '').localeCompare(String(right.id ?? ''));
+  })[0] ?? null;
 }
 
 function compactObject(value) {

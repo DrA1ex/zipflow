@@ -50,7 +50,7 @@ test('LM Studio uses its native model catalog and excludes embedding models', as
     return jsonResponse(lmModels());
   };
 
-  assert.deepEqual(await listLocalModels('lmstudio', { fetchImpl }), ['gemma-loaded']);
+  assert.deepEqual(await listLocalModels('lmstudio', { fetchImpl }), ['gemma']);
   assert.equal(requested, 'http://127.0.0.1:1234/api/v1/models');
 });
 
@@ -107,7 +107,7 @@ test('LM Studio generation uses native streaming settings and a safe context len
   assert.match(chatBody.input, /Project: fixture/);
   assert.equal(chatBody.stream, true);
   assert.equal(chatBody.reasoning, 'off');
-  assert.equal(chatBody.model, 'gemma-loaded');
+  assert.equal(chatBody.model, 'gemma');
   assert.equal(chatBody.context_length, 16_384, 'loaded instances may use the Zipflow request context without loading another model');
 });
 
@@ -256,7 +256,7 @@ test('LM Studio reuses a loaded instance when the saved model is the catalog key
 
   const chat = requests.find((item) => item.url.endsWith('/api/v1/chat'));
   assert.ok(chat);
-  assert.equal(chat.body.model, 'gemma-loaded');
+  assert.equal(chat.body.model, 'gemma');
   assert.equal(chat.body.context_length, 16_384);
   assert.equal(result.diagnostics.profile.loadedModel, true);
 });
@@ -276,4 +276,30 @@ test('Escape cancellation aborts a local LLM stream with a dedicated error', asy
     assert.match(error.message, /cancelled/i);
     return true;
   });
+});
+
+
+test('LM Studio chat never sends a numbered loaded instance ID as the model identifier', async () => {
+  let chatBody;
+  const fetchImpl = async (url, options = {}) => {
+    if (url.endsWith('/api/v1/models')) return jsonResponse({
+      models: [{
+        type: 'llm', key: 'gemma-4-e4b-it-mlx', max_context_length: 131_072,
+        loaded_instances: [{ id: 'gemma-4-e4b-it-mlx:2', config: { context_length: 32_768 } }],
+      }],
+    });
+    chatBody = JSON.parse(options.body);
+    return nativeCompletion('{"summary":["Updated files"],"commitMessage":"Update files"}');
+  };
+
+  await generateChangeDescription({
+    settings: {
+      llmProvider: 'lmstudio', llmModel: 'gemma-4-e4b-it-mlx:2', llmLanguage: 'English', llmApiToken: '',
+    },
+    project: { name: 'fixture', labels: ['Node.js'] },
+    plan: { counts: { created: 0, updated: 1, deleted: 0 } },
+    patchContent: 'diff --git a/a.js b/a.js\n@@ -1 +1 @@\n-old\n+new\n',
+  }, { fetchImpl });
+
+  assert.equal(chatBody.model, 'gemma-4-e4b-it-mlx');
 });

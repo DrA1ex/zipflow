@@ -317,3 +317,7 @@ Unit and integration tests use temporary projects and Git repositories. Regressi
 - Path completion is an overlay. Archive input shows aligned `DIR` and `ZIP` markers and never submits a selected completion until the user confirms the completed path separately.
 - The framed project Activity message calculates all borders from one visible inner width. Complete historical patches use semantic diff coloring inside Activity.
 - The completed-run menu exposes one primary action for returning to archive waiting, avoiding synonymous duplicate actions.
+
+## LM Studio model identity
+
+Zipflow keeps LM Studio catalog model keys and loaded instance IDs separate. The catalog `key` returned by `GET /api/v1/models` is the only value sent in the `model` field of `POST /api/v1/chat` and stored as the selected model. A `loaded_instances[].id` value is runtime metadata used only to detect an already loaded model and display its active configuration. Legacy settings that stored a numbered instance ID are resolved against the current catalog before a request is sent.

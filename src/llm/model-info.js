@@ -53,7 +53,7 @@ export async function listLmStudioModelRecords({
 
 async function lmStudioProfile(model, options) {
   const records = await listLmStudioModelRecords(options);
-  const record = records.find((item) => item.ids.includes(model) || item.key === model);
+  const record = findLmStudioRecord(records, model);
   if (!record) return fallbackProfile('lmstudio', model);
   const loaded = chooseLoadedInstance(record, model);
   const contextLength = loaded?.contextLength ?? record.maxContextLength ?? FALLBACK_CONTEXT;
@@ -64,8 +64,9 @@ async function lmStudioProfile(model, options) {
     maxContextLength: record.maxContextLength ?? contextLength,
     source: loaded ? 'loaded-instance' : 'model-metadata',
     reasoningOffSupported: record.reasoningOptions.includes('off'),
-    requestModel: loaded?.id ?? record.key,
-    configuredModel: model,
+    requestModel: record.key,
+    configuredModel: record.key,
+    originalConfiguredModel: model,
     loadedModel: Boolean(loaded),
     loadedInstanceId: loaded?.id ?? null,
     displayName: record.displayName,
@@ -102,11 +103,21 @@ async function ollamaProfile(model, { fetchImpl, timeoutMs, apiToken, signal }) 
   };
 }
 
+function findLmStudioRecord(records, model) {
+  const exact = records.find((item) => item.key === model || item.loadedInstances.some((entry) => entry.id === model));
+  if (exact) return exact;
+  return records.find((item) => isLegacyInstanceAlias(model, item.key)) ?? null;
+}
+
 function chooseLoadedInstance(record, model) {
   const exact = record.loadedInstances.find((item) => item.id === model);
   if (exact) return exact;
-  if (model !== record.key || !record.loadedInstances.length) return null;
-  return [...record.loadedInstances].sort((left, right) => (right.contextLength ?? 0) - (left.contextLength ?? 0))[0];
+  if (model !== record.key && !isLegacyInstanceAlias(model, record.key)) return null;
+  return [...record.loadedInstances].sort((left, right) => (right.contextLength ?? 0) - (left.contextLength ?? 0))[0] ?? null;
+}
+
+function isLegacyInstanceAlias(value, modelKey) {
+  return Boolean(modelKey) && String(value ?? '').startsWith(`${modelKey}:`);
 }
 
 function fallbackProfile(provider, model = '') {

@@ -97,7 +97,7 @@ test('loaded LM Studio models keep load-only settings read-only but allow a requ
     const state = settingsState(modelChoices);
     const controller = new ZipflowController(state);
     controller.invalidate = () => {};
-    const loaded = modelChoices.find((item) => item.id === 'qwen-loaded');
+    const loaded = modelChoices.find((item) => item.key === 'qwen-27b');
     openModelConfiguration(controller, loaded);
 
     let view = settingsModelView(state);
@@ -109,7 +109,7 @@ test('loaded LM Studio models keep load-only settings read-only but allow a requ
     view = settingsModelView(state);
     await selectModelParameter(controller, view.parameters.findIndex((item) => item.id === 'use-model'));
 
-    assert.equal(state.settings.llmModel, 'qwen-loaded');
+    assert.equal(state.settings.llmModel, 'qwen-27b');
     assert.equal(state.settings.llmModelLoadConfigs['lmstudio:qwen-27b'].contextLength, 16_384);
   } finally {
     if (previousHome === undefined) delete process.env.ZIPFLOW_HOME;
@@ -159,11 +159,27 @@ test('unloaded LM Studio models open load configuration and apply selected param
     assert.equal(requestBody.model, 'gemma-12b');
     assert.equal(requestBody.context_length, 16_384);
     assert.equal(requestBody.echo_load_config, true);
-    assert.equal(state.settings.llmModel, 'gemma-custom');
+    assert.equal(state.settings.llmModel, 'gemma-12b');
+    assert.equal(state.settingsPanel.models[0].loadedInstanceId, 'gemma-custom');
     assert.equal(state.settingsPanel.focus, 'choices');
   } finally {
     globalThis.fetch = previousFetch;
     if (previousHome === undefined) delete process.env.ZIPFLOW_HOME;
     else process.env.ZIPFLOW_HOME = previousHome;
   }
+});
+
+
+test('LM Studio choices keep the catalog key as the selectable model ID', async () => {
+  const choices = await listLocalModelChoices('lmstudio', { fetchImpl: async () => jsonResponse({
+    models: [{
+      type: 'llm', key: 'gemma-4-e4b-it-mlx', display_name: 'Gemma 4 E4B Instruct',
+      loaded_instances: [{ id: 'gemma-4-e4b-it-mlx:2', config: { context_length: 32_768 } }],
+    }],
+  }) });
+
+  assert.equal(choices.length, 1);
+  assert.equal(choices[0].id, 'gemma-4-e4b-it-mlx');
+  assert.equal(choices[0].key, 'gemma-4-e4b-it-mlx');
+  assert.equal(choices[0].loadedInstanceId, 'gemma-4-e4b-it-mlx:2');
 });

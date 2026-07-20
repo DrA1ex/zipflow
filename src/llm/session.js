@@ -15,7 +15,7 @@ export async function resolveLocalLlmSession(settings, {
   applyConfiguredContext(settings, profile);
   return {
     provider: settings.llmProvider,
-    configuredModel: settings.llmModel,
+    configuredModel: profile.modelKey || settings.llmModel,
     apiToken,
     profile,
   };

@@ -144,11 +144,12 @@ async function useConfiguredModel(controller) {
   state.status = model.loaded ? 'Selecting loaded model' : 'Loading model in LM Studio';
   controller.invalidate();
   try {
-    let selectedId = model.id;
+    const selectedId = model.key;
+    let loadedInstanceId = model.loadedInstanceId ?? null;
     let appliedConfig = config.values;
     if (!model.loaded && state.settings.llmProvider === 'lmstudio') {
       const loaded = await loadLmStudioModel(model.key, config.values, { apiToken: state.settings.llmApiToken });
-      selectedId = loaded.instanceId;
+      loadedInstanceId = loaded.instanceId;
       appliedConfig = { ...config.values, ...normalizeApiConfig(loaded.config) };
     }
     const configKey = modelConfigKey(state.settings.llmProvider, model.key);
@@ -163,8 +164,10 @@ async function useConfiguredModel(controller) {
     if (!model.loaded) {
       const updated = {
         ...model,
-        id: selectedId,
+        id: model.key,
         loaded: true,
+        loadedInstanceId,
+        loadedInstanceIds: loadedInstanceId ? [loadedInstanceId] : [],
         contextLength: appliedConfig.contextLength ?? model.maxContextLength ?? null,
         config: {
           context_length: appliedConfig.contextLength,
@@ -176,7 +179,7 @@ async function useConfiguredModel(controller) {
       };
       state.settingsPanel.models = [
         updated,
-        ...state.settingsPanel.models.filter((item) => item.id !== selectedId && item.key !== model.key),
+        ...state.settingsPanel.models.filter((item) => item.key !== model.key),
       ];
     }
     state.settingsPanel.modelsProvider = state.settings.llmProvider;

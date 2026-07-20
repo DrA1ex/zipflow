@@ -83,7 +83,7 @@ test('structure guard sends project/archive trees and parses a conservative verd
   assert.match(chatBody.system_prompt, /Write reasons in Russian/);
   assert.equal(result.diagnostics.tree.projectFiles, 2);
   assert.equal(result.diagnostics.tree.archiveFiles, 3);
-  assert.equal(path.basename(chatBody.model), 'gemma-loaded');
+  assert.equal(chatBody.model, 'gemma');
 });
 
 import { generateChangeDescription, parseResponse } from '../src/llm/generate.js';
