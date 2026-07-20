@@ -163,10 +163,8 @@ function modelChoices(state, parameter) {
       model,
       settingId: state.settings.llmProvider === 'lmstudio' ? null : parameter.settingId,
       value: model.id,
-      label: modelDisplayLabel(model),
-      description: model.loaded
-        ? `Loaded · ${modelConfigSummary(state, model)}`
-        : modelConfigSummary(state, model),
+      label: modelChoiceLabel(state, model),
+      description: '',
       selected: state.settings.llmModel === model.id || state.settings.llmModel === model.key,
     })));
   } else result.push({
@@ -174,6 +172,16 @@ function modelChoices(state, parameter) {
     description: panel?.modelError ?? 'Refresh after starting the local LLM server.', disabled: true,
   });
   return result;
+}
+
+
+function modelChoiceLabel(state, model) {
+  const identity = [model.paramsString, model.quantization].filter(Boolean).join(' · ');
+  const config = modelConfigSummary(state, model);
+  const details = model.loaded
+    ? ['Loaded', identity, config].filter(Boolean).join(' · ')
+    : [identity, config ? `Configured · ${config}` : ''].filter(Boolean).join(' · ');
+  return details ? `${model.label}\n${details}` : model.label;
 }
 
 function modelDisplayLabel(model) {

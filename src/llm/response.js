@@ -73,28 +73,43 @@ function parseSections(source) {
   let section = null;
   for (const raw of source.split(/\r?\n/)) {
     const line = raw.trimEnd();
-    const heading = sectionHeading(line.trim());
+    const heading = parseSectionHeading(line.trim());
     if (heading) {
-      section = heading;
+      section = heading.section;
+      if (heading.value) appendSectionValue(result, section, heading.value);
       continue;
     }
     if (!section) continue;
-    if (section === 'assessment' || section === 'confidence') {
-      if (line.trim()) result[section] = line.trim();
-      continue;
-    }
-    result[section].push(line);
+    appendSectionValue(result, section, line);
   }
   return result;
 }
 
-function sectionHeading(line) {
-  if (/^summary\s*:?$/i.test(line)) return 'summary';
-  if (/^commit message\s*:?$/i.test(line)) return 'commitMessage';
-  if (/^(archive )?assessment\s*:?$/i.test(line)) return 'assessment';
-  if (/^confidence\s*:?$/i.test(line)) return 'confidence';
-  if (/^reasons\s*:?$/i.test(line)) return 'reasons';
+function parseSectionHeading(line) {
+  const patterns = [
+    ['summary', /^summary\s*:\s*(.*)$/i],
+    ['commitMessage', /^commit message\s*:\s*(.*)$/i],
+    ['assessment', /^(?:archive )?assessment\s*:\s*(.*)$/i],
+    ['confidence', /^confidence\s*:\s*(.*)$/i],
+    ['reasons', /^reasons\s*:\s*(.*)$/i],
+  ];
+  for (const [section, pattern] of patterns) {
+    const match = line.match(pattern);
+    if (match) return { section, value: match[1]?.trim() ?? '' };
+  }
+  if (/^summary\s*$/i.test(line)) return { section: 'summary', value: '' };
+  if (/^commit message\s*$/i.test(line)) return { section: 'commitMessage', value: '' };
+  if (/^(archive )?assessment\s*$/i.test(line)) return { section: 'assessment', value: '' };
+  if (/^confidence\s*$/i.test(line)) return { section: 'confidence', value: '' };
+  if (/^reasons\s*$/i.test(line)) return { section: 'reasons', value: '' };
   return null;
+}
+
+function appendSectionValue(result, section, value) {
+  const line = String(value ?? '').trimEnd();
+  if (!line.trim()) return;
+  if (section === 'assessment' || section === 'confidence') result[section] = line.trim();
+  else result[section].push(line);
 }
 
 function normalizeAssessment(parsed) {

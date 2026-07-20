@@ -1,4 +1,4 @@
-import { color, wrapText } from 'terlio.js';
+import { KeyValueBlock, color, renderNode, wrapText } from 'terlio.js';
 import { llmActivityLines } from '../app/llm-progress.js';
 
 export function transcriptLines(state, theme, width) {
@@ -74,17 +74,16 @@ function collapsedLines(lines = []) {
   return hidden ? [...visible, `… ${hidden} more lines · scroll here and press E to expand`] : visible;
 }
 
-function projectActivityBlock(message, theme, width) {
-  const innerWidth = Math.max(24, width - 7);
-  const title = ` ${message.title} `;
-  const top = `╭─${title}${'─'.repeat(Math.max(0, innerWidth - title.length - 1))}╮`;
-  const bottom = `╰${'─'.repeat(innerWidth)}╯`;
-  const content = (message.lines ?? []).flatMap((line) => wrapText(String(line ?? ''), innerWidth - 2));
-  return [
-    color(theme, 'accent', top),
-    ...content.map((line) => `${color(theme, 'accent', '│')} ${line.padEnd(innerWidth - 1)}${color(theme, 'accent', '│')}`),
-    color(theme, 'accent', bottom),
-  ];
+function projectActivityBlock(message, _theme, width) {
+  const rows = (message.lines ?? []).map((line) => splitProjectProperty(line));
+  return renderNode(KeyValueBlock({ title: ` ${message.title} `, rows }), Math.max(24, width - 4));
+}
+
+function splitProjectProperty(line) {
+  const value = String(line ?? '');
+  const separator = value.indexOf(':');
+  if (separator < 0) return ['', value];
+  return [value.slice(0, separator + 1), value.slice(separator + 1).trimStart()];
 }
 
 function activityTag(tone) {

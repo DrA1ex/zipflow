@@ -1,6 +1,5 @@
 import {
   BottomOverlay,
-  Box,
   Column,
   ProgressBar,
   RequireViewport,
@@ -83,7 +82,7 @@ function renderWorkflow(state, width, mainHeight, theme) {
 function renderPathSuggestionsOverlay(state, content, width, height, promptHeight, theme) {
   const completion = state.pathSuggestions;
   if (!completion?.items?.length || completion.owner === 'settings-modal' || !state.pathSuggestionActive) return content;
-  const overlayHeight = Math.min(7, Math.max(3, completion.items.length + 1));
+  const overlayHeight = Math.min(7, Math.max(4, completion.items.length + 2));
   const suggestions = PathCompletionPopup({ state, width: Math.max(36, width - 6), height: overlayHeight, theme });
   return BottomOverlay({
     content,
@@ -236,7 +235,7 @@ function runtimePane(title, lines, height, theme) {
     active: true,
     height,
     theme,
-    children: [Box({ border: true, padding: 1 }, ...lines.map((line) => Text(line, { wrap: true })))],
+    children: lines.map((line) => Text(line, { wrap: true })),
   });
 }
 
@@ -303,7 +302,7 @@ function screenTitle(state) {
     'setup-deletion-scope': 'Snapshot deletion', 'setup-git-checkpoint': 'Git checkpoint',
     'setup-git-result': 'Result commit', 'setup-git-message': 'Commit message source', 'commit-template': 'Commit template',
     'setup-deploy': 'Deployment', 'setup-deploy-command': 'Deploy command', 'deploy-command': 'Deploy command', 'setup-review': 'Review',
-    'archive-input': 'Archive', 'archive-duplicate': 'Archive already used', 'archive-safety': 'Archive safety', 'plan-review': 'Update plan', 'plan-details': 'Change groups', 'plan-files': 'Changed files', 'diff-view': 'Diff',
+    'archive-input': 'Archive', 'archive-duplicate': 'Archive already used', 'archive-root-choice': 'Archive root', 'archive-safety': 'Archive safety', 'plan-review': 'Update plan', 'plan-details': 'Change groups', 'plan-files': 'Changed files', 'diff-view': 'Diff',
     'conflict-summary': 'Conflict choices', 'conflict-checkpoint': 'Conflict checkpoint', 'conflict-file': 'Resolve conflict', conflicts: 'Choose files',
     applying: 'Applying update', 'checks-running': 'Checks', 'check-failed': 'Checks failed', commit: 'Commit',
     'commit-message': 'Commit message', 'deploy-prompt': 'Deployment', 'deploy-running': 'Deployment',
@@ -361,7 +360,7 @@ function headerStats(state) {
 
 function preferredPromptHeight(state) {
   if (state.screen === 'home') return 14;
-  if (['archive-safety', 'plan-review', 'plan-details', 'plan-files', 'conflict-summary', 'conflict-file', 'run-history', 'run-analytics', 'run-file-groups', 'run-file-list', 'export-preview', 'export-files'].includes(state.screen)) return 17;
+  if (['archive-root-choice', 'archive-safety', 'plan-review', 'plan-details', 'plan-files', 'conflict-summary', 'conflict-file', 'run-history', 'run-analytics', 'run-file-groups', 'run-file-list', 'export-preview', 'export-files'].includes(state.screen)) return 17;
   if (state.screen === 'setup-checks' || state.screen === 'conflicts' || state.screen === 'export-select') return 17;
   if (['checks-running', 'deploy-running'].includes(state.screen)) return 14;
   if (isEditorScreen(state.screen)) return 13;

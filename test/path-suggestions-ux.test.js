@@ -37,8 +37,8 @@ test('archive path editor keeps completion hidden until input starts, then overl
 
   assert.match(output, /one\.zip/);
   assert.match(output, /updates\//);
-  assert.match(output, /Path suggestions · 3/);
-  assert.match(output, /Tab\/Enter insert/);
+  assert.match(output, /Path suggestions 1\/3/);
+  assert.match(output, /DIR\s+updates\//);
 
   await controller.handleKey({ name: 'down' });
   await controller.handleKey({ name: 'down' });

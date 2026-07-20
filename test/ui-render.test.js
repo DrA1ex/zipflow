@@ -40,7 +40,7 @@ test('Project detected is a framed Activity block and the header does not show t
   setScreen(state, 'home', { items: [{ id: 'exit', label: 'Exit' }], status: 'Ready' });
 
   const output = renderToString(renderZipflow({ state, width: 100, height: 40 }), { width: 100, height: 40 });
-  assert.match(output, /╭─ Project detected/);
+  assert.match(output, /┌  Project detected/);
   assert.match(output, /Root: \/tmp\/fixture/);
   assert.match(output, /Detected: Node\.js · TypeScript/);
   assert.match(output, /Workflow: configured/);
@@ -124,7 +124,7 @@ test('Project detected frame uses the same visible width on every border line', 
   const visible = lines.map(stripAnsi);
   assert.equal(visible[0].length, visible.at(-1).length);
   for (const line of visible.slice(1, -1)) assert.equal(line.length, visible[0].length);
-  assert.ok(visible.at(-1).endsWith('╯'));
+  assert.ok(visible.at(-1).endsWith('┘'));
 });
 
 test('complete diff Activity lines retain added and removed line coloring', () => {

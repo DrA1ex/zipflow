@@ -111,7 +111,7 @@ export function runStatusLabel(status) {
 export function runStep(state) {
   if (!state.run && !['archive-input', 'archive-duplicate'].includes(state.screen)) return null;
   const stages = [
-    { number: 1, label: 'Archive', screens: ['archive-input', 'archive-duplicate', 'applying'] },
+    { number: 1, label: 'Archive', screens: ['archive-input', 'archive-duplicate', 'archive-root-choice', 'applying'] },
     { number: 2, label: 'Review', screens: ['archive-safety', 'plan-review', 'plan-details', 'plan-files', 'conflict-summary', 'conflict-file', 'conflict-checkpoint', 'diff-view'] },
     { number: 3, label: 'Apply', screens: ['applying'] },
     { number: 4, label: 'Checks', screens: ['checks-running', 'check-failed', 'commit-message', 'commit', 'deploy-prompt', 'deploy-running', 'deploy-failed'] },

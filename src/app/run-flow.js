@@ -33,11 +33,12 @@ import {
   activateReview, archiveConflictPaths, backReview, handleReviewKey, handlesReviewScreen,
   showArchiveSafetyReview, showConflictCheckpoint, showConflictSummary, showPlanReview,
 } from './run-review.js';
+import { prepareArchiveRootReview, selectArchiveRoot, showArchiveRootChoice } from './archive-root.js';
 
 export { showLastRun };
 
 export function handlesRunScreen(screen) {
-  return ['archive-input', 'archive-duplicate', 'applying', 'run-details', 'run-file-groups', 'run-file-list', 'rollback-confirm', 'rolling-back'].includes(screen)
+  return ['archive-input', 'archive-duplicate', 'archive-root-choice', 'applying', 'run-details', 'run-file-groups', 'run-file-list', 'rollback-confirm', 'rolling-back'].includes(screen)
     || handlesReviewScreen(screen) || isPostCheckScreen(screen);
 }
 
@@ -63,6 +64,7 @@ export async function submitRunEditor(controller) {
 export async function activateRun(controller, itemId) {
   const { state } = controller;
   if (state.screen === 'archive-duplicate') return activateDuplicate(controller, itemId);
+  if (state.screen === 'archive-root-choice') return activateArchiveRootChoice(controller, itemId);
   if (handlesReviewScreen(state.screen)) {
     return activateReview(controller, itemId, {
       startApply,
@@ -87,6 +89,7 @@ export function handleRunShortcut(controller, key) {
 export function backRun(controller) {
   const screen = controller.state.screen;
   if (screen === 'archive-input' || screen === 'archive-duplicate') return controller.showHome();
+  if (screen === 'archive-root-choice') return cancelRun(controller);
   if (screen === 'archive-safety' || screen === 'plan-review' || screen === 'conflict-summary') return cancelRun(controller);
   if (handlesReviewScreen(screen)) return backReview(controller);
   if (isPostCheckScreen(screen)) return backPostCheck(controller);
@@ -120,29 +123,50 @@ async function inspectArchive(controller, archivePath, archiveHash, archiveInfo)
   setBusy(controller, 'Inspecting archive', 1, 7, 'Reading ZIP entries');
   try {
     const extracted = await extractArchive(archivePath, temp);
-    setProgress(controller, 2, 7, 'Reading archive metadata');
+    const rootReview = await prepareArchiveRootReview({ project: state.project, workflow: state.workflow, extracted });
+    if (rootReview.prompt) {
+      state.pendingArchiveInspection = { archivePath, archiveHash, archiveInfo, rootReview };
+      state.busy = false;
+      return showArchiveRootChoice(controller, rootReview);
+    }
+    return continueArchiveInspection(controller, {
+      archivePath,
+      archiveHash,
+      archiveInfo,
+      extracted: rootReview.extracted,
+      plan: rootReview.plan,
+    });
+  } catch (error) {
+    await failRun(controller, error);
+  }
+}
+
+async function continueArchiveInspection(controller, { archivePath, archiveHash, archiveInfo, extracted, plan = null }) {
+  const { state } = controller;
+  try {
+    setBusy(controller, 'Inspecting archive', 2, 7, 'Reading archive metadata');
     const metadata = await readArchiveMetadata(extracted);
     setProgress(controller, 3, 7, 'Comparing project files');
-    const plan = await buildUpdatePlan({ project: state.project, workflow: state.workflow, extracted });
+    const resolvedPlan = plan ?? await buildUpdatePlan({ project: state.project, workflow: state.workflow, extracted });
     setProgress(controller, 4, 7, 'Creating changes.patch');
-    const patch = await createPlanPatch(runId, plan);
-    const llm = await generateLlmSummary(controller, { plan, patch, extracted });
+    const patch = await createPlanPatch(state.run.id, resolvedPlan);
+    const llm = await generateLlmSummary(controller, { plan: resolvedPlan, patch, extracted });
     const archiveRisk = await evaluateArchiveRisks({
       projectPath: state.project.root,
       workflow: state.workflow,
       archiveInfo,
       extracted,
-      plan,
+      plan: resolvedPlan,
     });
     setProgress(controller, 7, 7, 'Plan ready');
     state.archive = extracted;
     state.archiveMetadata = metadata;
-    state.plan = plan;
-    state.decisions = new Map(plan.conflicts.map((item) => [
+    state.plan = resolvedPlan;
+    state.decisions = new Map(resolvedPlan.conflicts.map((item) => [
       item.path,
       state.workflow.policy.conflictPolicy === 'overwrite' ? 'archive' : null,
     ]));
-    state.run.plan = serializePlan(plan);
+    state.run.plan = serializePlan(resolvedPlan);
     state.run.patch = { path: patch.path, omitted: patch.omitted };
     state.run.archiveInfo = { ...archiveInfo, fileCount: extracted.fileCount, totalSize: extracted.totalSize, rootPrefix: extracted.rootPrefix };
     state.run.llm = llm.record;
@@ -155,11 +179,12 @@ async function inspectArchive(controller, archivePath, archiveHash, archiveInfo)
     state.run.archiveMetadata = metadata.commitMessage ? { commitMessage: metadata.commitMessage, source: metadata.commitMessageSource } : null;
     state.run.status = 'planned';
     state.run = await saveRunRecord(state.run);
+    state.pendingArchiveInspection = null;
     controller.message('Archive inspected', [
       `${formatArchiveName(archivePath)} · ${extracted.fileCount} files${extracted.rootPrefix ? ` · root ${extracted.rootPrefix}/` : ''}`,
       ...(metadata.commitMessageSource ? [`Commit message found: ${metadata.commitMessageSource}`] : []),
     ], 'success');
-    controller.message('Update plan', [...planActivityLines(plan), `Patch: ${displayPath(patch.path)}`], plan.conflicts.length ? 'warning' : 'info');
+    controller.message('Update plan', [...planActivityLines(resolvedPlan), `Patch: ${displayPath(patch.path)}`], resolvedPlan.conflicts.length ? 'warning' : 'info');
     emitLlmResult(controller, llm, state.settings.llmArchiveReview);
     state.busy = false;
     if (requiresSafetyReview(state.archiveSafety)) return showArchiveSafetyReview(controller);
@@ -167,6 +192,27 @@ async function inspectArchive(controller, archivePath, archiveHash, archiveInfo)
   } catch (error) {
     await failRun(controller, error);
   }
+}
+
+
+async function activateArchiveRootChoice(controller, itemId) {
+  const pending = controller.state.pendingArchiveInspection;
+  if (!pending) return cancelRun(controller);
+  if (itemId === 'cancel-root-review') return cancelRun(controller);
+  const selection = selectArchiveRoot(pending.rootReview, itemId);
+  if (!selection) return false;
+  controller.message('Archive root selected', [
+    selection.useRoot
+      ? `${pending.rootReview.wrapper}/ will be treated as the project root.`
+      : `${pending.rootReview.wrapper}/ will remain a subdirectory inside the project.`,
+  ], 'choice');
+  return continueArchiveInspection(controller, {
+    archivePath: pending.archivePath,
+    archiveHash: pending.archiveHash,
+    archiveInfo: pending.archiveInfo,
+    extracted: selection.extracted,
+    plan: selection.plan,
+  });
 }
 
 async function generateLlmSummary(controller, { plan, patch, extracted }) {

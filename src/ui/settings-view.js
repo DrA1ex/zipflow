@@ -1,7 +1,7 @@
 import {
   BottomOverlay,
   Modal,
-  Row,
+  SplitPane,
   SelectList,
   Text,
   TextEditorView,
@@ -37,7 +37,17 @@ export function renderSettings(state, width, height, theme) {
   const right = view.modelConfig
     ? renderModelConfigPage(state, view.modelConfig, rightWidth, height, theme)
     : renderSettingsPage(state, view, rightWidth, height, theme);
-  const content = Row({ gap: 2, widths: [leftWidth, rightWidth], height }, categories, right);
+  const content = SplitPane({
+    orientation: 'horizontal',
+    gap: 2,
+    height,
+    focus: view.focus === 'categories' ? 'categories' : 'details',
+    theme,
+    panes: [
+      { id: 'categories', size: leftWidth, min: 24, node: categories },
+      { id: 'details', size: rightWidth, min: 26, grow: 1, node: right },
+    ],
+  });
   if (!view.modal) return content;
   return renderSettingsModal({ content, modal: view.modal, state, width, height, theme });
 }
@@ -170,7 +180,7 @@ function renderSettingsModal({ content, modal, state, width, height, theme }) {
   });
   const completion = state.pathSuggestions;
   if (!modal.field.path || completion?.owner !== 'settings-modal' || !completion.items?.length || !state.pathSuggestionActive) return modalLayer;
-  const overlayHeight = Math.min(6, Math.max(3, completion.items.length + 1));
+  const overlayHeight = Math.min(6, Math.max(4, completion.items.length + 2));
   const suggestions = PathCompletionPopup({ state, width: modalWidth, height: overlayHeight, theme });
   return BottomOverlay({
     content: modalLayer,

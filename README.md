@@ -87,6 +87,10 @@ Detected checks are shown as a multi-select list. `Space` or `Enter` toggles a c
 
 When adding a custom check, Zipflow first asks for the exact command and then asks for the short name displayed in the workflow and run results. Custom checks can later be edited or removed from the same list.
 
+## Archive root confirmation
+
+When a ZIP contains one top-level directory, Zipflow compares two interpretations before LLM review or filesystem changes: treating that directory as the project root, or keeping it as a literal subdirectory. If the literal interpretation would create one new folder while removing or replacing the existing project tree, Zipflow shows both compact plans and requires an explicit choice. Swift packages (`Package.swift`) and Xcode project/workspace markers participate in root detection.
+
 ## Applying an archive
 
 For a configured project, drag a ZIP file into the initial archive prompt or enter its path. Path input scans the entered location while you type and shows multiple matching directories and ZIP files in an overlay without shifting the layout. Use `Up`/`Down` to select a suggestion and `Tab` or `Enter` to insert it. A directory opens its contents; a ZIP file only fills the path. Press `Enter` again to submit the completed path, so completion never starts an update unexpectedly. Existing directory paths also expose an explicit **Use this directory** action in directory pickers. 

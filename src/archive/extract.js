@@ -55,13 +55,17 @@ export async function extractArchive(archivePath, destination, { limits = DEFAUL
   } finally {
     zip.close();
   }
-  const rootPrefix = detectSingleRoot(entries.map((entry) => entry.path));
+  const wrapperPrefix = detectSingleWrapper(entries.map((entry) => entry.path));
+  const rootPrefix = wrapperPrefix && containsProjectMarker(entries.map((entry) => entry.path), wrapperPrefix)
+    ? wrapperPrefix
+    : null;
   const root = rootPrefix ? path.join(destination, rootPrefix) : destination;
   return {
     archivePath,
     destination,
     root,
     rootPrefix,
+    wrapperPrefix,
     entries: entries.map((entry) => ({ ...entry, relativePath: stripPrefix(entry.path, rootPrefix) })),
     fileCount: entries.length,
     totalSize,
@@ -90,14 +94,35 @@ function safeJoin(root, relative) {
   return target;
 }
 
-function detectSingleRoot(paths) {
+export function rebaseExtractedArchive(extracted, rootPrefix = null) {
+  const prefix = rootPrefix || null;
+  return {
+    ...extracted,
+    root: prefix ? path.join(extracted.destination, prefix) : extracted.destination,
+    rootPrefix: prefix,
+    entries: extracted.entries.map((entry) => ({
+      ...entry,
+      relativePath: stripPrefix(entry.path, prefix),
+    })),
+  };
+}
+
+function detectSingleWrapper(paths) {
   if (!paths.length) return null;
   const firstSegments = new Set(paths.map((value) => value.split('/')[0]));
   if (firstSegments.size !== 1 || paths.some((value) => !value.includes('/'))) return null;
-  const segment = [...firstSegments][0];
-  const markers = new Set(['package.json', 'pyproject.toml', 'requirements.txt', 'CMakeLists.txt', 'go.mod', 'go.work']);
-  const stripped = paths.map((value) => value.slice(segment.length + 1));
-  return stripped.some((value) => markers.has(value)) ? segment : null;
+  return [...firstSegments][0];
+}
+
+function containsProjectMarker(paths, prefix) {
+  const stripped = paths.map((value) => value.slice(prefix.length + 1));
+  const exactMarkers = new Set([
+    'package.json', 'pyproject.toml', 'requirements.txt', 'CMakeLists.txt',
+    'go.mod', 'go.work', 'Package.swift', 'Cargo.toml',
+  ]);
+  return stripped.some((value) => exactMarkers.has(value)
+    || /^[^/]+\.xcodeproj\/project\.pbxproj$/i.test(value)
+    || /^[^/]+\.xcworkspace\/contents\.xcworkspacedata$/i.test(value));
 }
 
 function stripPrefix(value, prefix) {

@@ -34,6 +34,7 @@ export async function failRun(controller, error) {
 }
 
 export async function releaseRunResources(controller) {
+  controller.state.pendingArchiveInspection = null;
   await controller.activeLock?.release?.();
   controller.activeLock = null;
   if (controller.state.run?.id) await removeIfExists(path.join(getZipflowHome(), 'tmp', controller.state.run.id));

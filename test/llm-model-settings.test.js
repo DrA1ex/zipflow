@@ -55,9 +55,8 @@ test('LM Studio model list shows parameter counts and only loaded models show ru
   const state = settingsState(await models());
   const output = renderToString(renderZipflow({ state, width: 120, height: 32 }), { width: 120, height: 32 });
 
-  assert.match(output, /Gemma 12B · 12B · Q4_K_M/);
-  assert.match(output, /Qwen 27B · 27B · Q5_K_M/);
-  assert.match(output, /Loaded · context 24,000/);
+  assert.match(output, /Gemma 12B[\s\S]*12B · Q4_K_M/);
+  assert.match(output, /Qwen 27B[\s\S]*Loaded · 27B · Q5_K_M · context 24,000/);
   assert.doesNotMatch(output, /just-in-time/i);
   assert.doesNotMatch(output, /Read the models currently exposed/i);
 });

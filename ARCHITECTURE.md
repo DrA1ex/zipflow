@@ -49,6 +49,21 @@ Builds declarative Terlio views from application state.
 
 Rendering does not perform project mutations. Global settings use a stable two-panel category/page layout. Direct single-choice categories render their options immediately; multi-parameter categories render compact value rows and move explanatory text into the nested choice view. Nested selection replaces only the right pane and retains category, parameter, and current-value positions. LM Studio model selection can enter a dedicated right-pane configuration state without replacing the category pane; loaded instances are read-only while unloaded models persist and apply explicit native load parameters. Project discovery is stored as a framed Activity message rather than a permanent project panel. Activity uses Terlio's component-level text selection; `Ctrl+T` is the explicit escape hatch for native terminal selection elsewhere. Pointer callbacks dispatch the same actions used by keyboard input. The selected Terlio semantic theme is resolved from global settings on every render, so theme changes apply immediately.
 
+#### Terlio component ownership
+
+Zipflow delegates generic terminal UI behavior to Terlio instead of assembling terminal geometry itself:
+
+- `WorkspaceShell`, `WorkspacePane`, and `WorkspaceFooter` own the application frame;
+- `ScrollPane` owns Activity and diff scrolling, pointer-wheel dispatch, and selection;
+- `SelectList` owns project actions, settings choices, model lists, and path-completion rows;
+- `SplitPane` owns the persistent two-column settings layout;
+- `BottomOverlay` and `Modal` own completion and editor overlays without shifting the base layout;
+- `TextEditorView` and `handleInputEditorKey` own editable text behavior;
+- `KeyValueBlock` owns the framed `Project detected` summary;
+- `ProgressBar`, `RequireViewport`, and Terlio theme/color helpers own generic progress, viewport, and styling behavior.
+
+Custom rendering is limited to domain behavior Terlio does not provide: semantic unified/side-by-side source diffs with hunk offsets, typed/collapsible Activity history, and workflow-specific labels and state transitions. UI regression tests assert the selected Terlio node types and reject manual rounded-border construction in `src/ui`.
+
 ### `src/settings`
 
 Persists versioned global application settings in `~/.zipflow/settings.json`. Settings are deliberately separate from project workflows. They include the local LLM provider, optional bearer token, selected model, response language, archive-review mode, change-delivery strategy, failed-check analysis policy, and source-ZIP disposition policy.
@@ -89,6 +104,8 @@ Runs configured checks or deployment against the current local project without a
 ### `src/archive`
 
 Validates and extracts ZIP archives into an isolated temporary directory. It rejects traversal, absolute paths, `.git`, symbolic links, duplicate or case-colliding paths, and configured size-limit violations.
+
+A single top-level wrapper is evaluated before metadata, LLM review, or final planning. Zipflow compares the wrapper-as-root and literal-subdirectory plans. When the literal interpretation would create one new directory while deleting or replacing the real project tree, the user must choose the archive root explicitly or cancel.
 
 `disposition.js` owns the global post-run policy for the source ZIP. Move mode records only Zipflow-managed archives in `archive-index.json`; retention and size pruning can therefore never delete unrelated files from the selected directory.
 
