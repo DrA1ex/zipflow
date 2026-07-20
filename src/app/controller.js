@@ -40,7 +40,7 @@ export class ZipflowController {
       this.state.settings = await loadSettings();
       this.state.project = await discoverProject(process.cwd());
       this.state.workflow = await loadWorkflow(this.state.project.root);
-      this.message('Project detected', projectSummary(this.state.project, this.state.workflow), this.state.workflow ? 'success' : 'info');
+      this.message('Project detected', projectSummary(this.state.project, this.state.workflow), 'project');
       this.showHome();
     } catch (error) {
       this.message('Zipflow could not start', [error.message], 'error');

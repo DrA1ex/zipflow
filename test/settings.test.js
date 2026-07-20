@@ -101,10 +101,12 @@ test('settings keep categories on the left and the selected category page on the
 
   assert.equal(view.focus, 'categories');
   assert.deepEqual(view.definitions.map((item) => item.id), ['theme', 'checkOutput', 'localLlm', 'sourceArchive', 'managedHistory']);
-  assert.equal(view.parameters[0].id, 'theme');
+  assert.equal(view.direct, true);
+  assert.equal(view.activeParameter.id, 'theme');
+  assert.equal(view.choices[view.choiceIndex].id, 'theme:ocean');
   assert.match(output, /CATEGORIES/);
   assert.match(output, /THEME/);
-  assert.match(output, /Theme: Ocean/);
+  assert.match(output, /● Ocean/);
 });
 
 test('a choice replaces only the right pane and returns to the originating parameter on Enter', async () => withSettingsHome(async () => {
@@ -116,13 +118,57 @@ test('a choice replaces only the right pane and returns to the originating param
   assert.equal(view.choices[view.choiceIndex].id, 'archivePolicy:move');
   let output = renderToString(renderZipflow({ state, width: 110, height: 30 }), { width: 110, height: 30 });
   assert.match(output, /CATEGORIES/);
-  assert.match(output, /CHOOSE VALUE/i);
+  assert.match(output, /POLICY/);
+  assert.match(output, /Choose what Zipflow does with the source ZIP/);
 
   await chooseValue(controller, 'archivePolicy:keep');
   view = settingsViewModel(state);
   assert.equal(view.focus, 'parameters');
   assert.equal(view.parameters[view.parameterIndex].id, 'archivePolicy');
   assert.equal(state.settings.archivePolicy, 'keep');
+}));
+
+
+test('single-option setting categories open their choices directly and keep the active value selected', async () => withSettingsHome(async () => {
+  const { state, controller } = await settingsController({ theme: 'ocean' });
+
+  await handleSettingsKey(controller, { name: 'enter' });
+  let view = settingsViewModel(state);
+  assert.equal(view.direct, true);
+  assert.equal(view.focus, 'choices');
+  assert.equal(view.choices[view.choiceIndex].id, 'theme:ocean');
+
+  await chooseValue(controller, 'theme:matrix');
+  view = settingsViewModel(state);
+  assert.equal(state.settings.theme, 'matrix');
+  assert.equal(view.focus, 'choices');
+  assert.equal(view.choices[view.choiceIndex].id, 'theme:matrix');
+
+  await handleSettingsKey(controller, { name: 'escape' });
+  assert.equal(settingsViewModel(state).focus, 'categories');
+}));
+
+test('parameter pages stay compact and move help text into the nested value page', async () => withSettingsHome(async () => {
+  const { state, controller } = await settingsController({ llmProvider: 'disabled' });
+  await selectCategory(controller, 'localLlm');
+
+  let output = renderToString(renderZipflow({ state, width: 110, height: 30 }), { width: 110, height: 30 });
+  assert.match(output, /Provider: Disabled/);
+  assert.match(output, /Model: Not selected/);
+  assert.doesNotMatch(output, /Select the local LLM server implementation/);
+  assert.doesNotMatch(output, /Choose a model exposed by the selected provider/);
+
+  await openParameter(controller, 'llmProvider');
+  output = renderToString(renderZipflow({ state, width: 110, height: 30 }), { width: 110, height: 30 });
+  assert.match(output, /Select the local LLM server implementation/);
+}));
+
+test('managed history exposes keep and reset actions without an extra parameter screen', async () => withSettingsHome(async () => {
+  const { state, controller } = await settingsController();
+  const view = await selectCategory(controller, 'managedHistory');
+  assert.equal(view.direct, true);
+  assert.equal(view.focus, 'choices');
+  assert.deepEqual(view.choices.map((item) => item.id), ['history-cancel', 'history-reset-confirm']);
 }));
 
 test('Escape from a nested value list returns to the same parameter without changing it', async () => withSettingsHome(async () => {

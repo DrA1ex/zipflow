@@ -5,15 +5,16 @@ import { formatByteSize } from '../utils/size.js';
 
 export function settingsDefinitions(state) {
   const definitions = [
-    { id: 'theme', label: 'Theme', description: 'Color theme used by every project.' },
-    { id: 'checkOutput', label: 'Running checks', description: 'How much command output is shown while checks are running.' },
+    { id: 'theme', label: 'Theme', description: 'Choose the color theme used by every project.', directParameterId: 'theme' },
+    { id: 'checkOutput', label: 'Running checks', description: 'Choose how much command output is shown while checks run.', directParameterId: 'checkOutput' },
     { id: 'localLlm', label: 'Local LLM', description: 'Provider, model, response language, and authentication.' },
     { id: 'sourceArchive', label: 'Source archives', description: 'What happens to an uploaded ZIP after a completed update.' },
   ];
   if (state.project) definitions.push({
     id: 'managedHistory',
     label: 'Managed history',
-    description: 'Paths Zipflow may remove in managed-history snapshot mode.',
+    description: 'Choose whether to keep or reset paths recorded by Zipflow.',
+    directParameterId: 'managedHistoryReset',
   });
   return definitions;
 }

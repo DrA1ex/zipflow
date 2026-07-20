@@ -37,6 +37,8 @@ zipflow
 
 Zipflow determines the current project root, scans its project files, and prepares a recommended workflow.
 
+Project detection is recorded as a framed **Project detected** block in Activity. It contains the canonical root, detected technologies, Git state, workflow state, archive mode, selected checks, policy, commit behavior, and deployment behavior. It does not reserve permanent screen space and remains available through Activity scrolling.
+
 If the directory is not a Git repository, Zipflow first offers to initialize it. After `git init`, it can create a project-aware `.gitignore` only when the file does not already exist, and then add the existing non-ignored files to a first commit. An existing `.gitignore` is always preserved byte-for-byte. Continuing without Git remains possible.
 
 The wizard explains the purpose of each stage and lets you review:
@@ -226,7 +228,7 @@ Deployment stdout, stderr, exit code, and duration are saved in the run report. 
 
 ## Global settings
 
-Press `Ctrl+B` to open global settings. The two-panel layout remains visible at every level: categories stay on the left and the selected category page stays on the right. `Enter` moves from a category into its concise parameter list. Selecting a value parameter temporarily replaces only the right panel with its choices, focused on the current value. `Enter` applies the value and `Esc` cancels it; both return to the originating parameter without moving the cursor. `Esc` from the parameter page returns focus to the category list, and another `Esc` closes settings. Text, secret, path, and numeric values open in compact modal dialogs over both panels, with placeholders, validation, and unit hints where applicable.
+Press `Ctrl+B` to open global settings. The two-panel layout remains visible at every level: compact category names stay on the left and the selected category page stays on the right. Categories that contain one direct choice, such as **Theme**, **Running checks**, and **Managed history**, show their options immediately instead of adding a redundant parameter step. Multi-parameter categories show concise `Parameter: value` rows without inline help text. Selecting one temporarily replaces only the right panel with its choices and a short explanation, focused on the current value. `Enter` applies the value and `Esc` cancels it; both preserve the originating selection. Text, secret, path, and numeric values open in compact modal dialogs over both panels, with placeholders, validation, and unit hints where applicable.
 
 Current settings include:
 

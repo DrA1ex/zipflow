@@ -21,10 +21,10 @@ import {
 } from 'terlio.js';
 import { displayPath } from '../utils/paths.js';
 import { settingsViewModel } from '../app/settings-panel.js';
-import { llmActivityLines } from '../app/llm-progress.js';
 import { formatDuration, runStep } from './format.js';
 import { renderDiffDocument } from '../diff/hunks.js';
 import { ZIPFLOW_VERSION } from '../version.js';
+import { transcriptLines } from './activity.js';
 
 export function renderZipflow({ state, width, height }) {
   const theme = themes[state.settings?.theme] ?? themes.ocean;
@@ -80,7 +80,7 @@ function renderWorkflow(state, width, mainHeight, theme) {
 }
 
 function renderTranscript(state, width, height, theme) {
-  const lines = transcriptLines(state, theme);
+  const lines = transcriptLines(state, theme, width);
   const visibleRows = Math.max(1, height - 3);
   const maxScroll = Math.max(0, lines.length - visibleRows);
   if (state.transcriptSticky) state.transcriptScroll = maxScroll;
@@ -284,9 +284,9 @@ function renderSettings(state, width, height, theme) {
       selectedIndex: view.categoryIndex,
       windowSize: Math.max(2, height - 6),
       getLabel: (item) => item.label,
-      getDescription: (item) => item.description ?? '',
-      wrapItems: true,
-      maxItemLines: 3,
+      getDescription: () => '',
+      wrapItems: false,
+      maxItemLines: 1,
       theme,
       pointerId: 'zipflow:settings-categories',
       onSelect: (_item, index) => state.dispatch?.({ type: 'settings-select-setting', index }),
@@ -299,12 +299,13 @@ function renderSettings(state, width, height, theme) {
 }
 
 function renderSettingsPage(state, view, width, height, theme) {
-  const choosing = view.focus === 'choices';
-  const items = choosing ? view.choices : view.parameters;
-  const title = choosing
+  const showingChoices = view.direct || view.focus === 'choices';
+  const items = showingChoices ? view.choices : view.parameters;
+  const nestedChoice = showingChoices && !view.direct;
+  const title = nestedChoice
     ? ` ${view.activeParameter?.label?.toUpperCase() ?? 'SELECT'} `
     : ` ${view.selectedSetting.label.toUpperCase()} `;
-  const description = choosing
+  const description = nestedChoice
     ? view.activeParameter?.description ?? ''
     : view.selectedSetting.description;
   return WorkspacePane({
@@ -313,26 +314,28 @@ function renderSettingsPage(state, view, width, height, theme) {
     height,
     theme,
     children: [
-      Text(description, { wrap: true }),
-      Text(''),
+      description ? Text(color(theme, 'textMuted', description), { wrap: true }) : null,
+      description ? Text('') : null,
       SelectList({
-        title: choosing ? 'Choose value' : 'Parameters',
+        title: showingChoices ? 'Options' : 'Parameters',
         items,
-        selectedIndex: choosing ? view.choiceIndex : view.parameterIndex,
-        windowSize: Math.max(2, height - 8),
-        getLabel: (item) => choosing ? choiceLabel(state, item) : `${item.label}: ${item.value}`,
-        getDescription: (item) => item.disabled ? item.disabledReason ?? item.description ?? '' : item.description ?? '',
+        selectedIndex: showingChoices ? view.choiceIndex : view.parameterIndex,
+        windowSize: Math.max(2, height - (description ? 8 : 5)),
+        getLabel: (item) => showingChoices ? choiceLabel(state, item) : `${item.label}: ${item.value}`,
+        getDescription: (item) => showingChoices
+          ? item.description ?? ''
+          : item.disabled ? item.disabledReason ?? '' : '',
         getDisabled: (item) => item.disabled,
-        wrapItems: true,
-        maxItemLines: 3,
+        wrapItems: showingChoices,
+        maxItemLines: showingChoices ? 3 : 1,
         theme,
-        pointerId: choosing ? 'zipflow:settings-choices' : 'zipflow:settings-parameters',
+        pointerId: showingChoices ? 'zipflow:settings-choices' : 'zipflow:settings-parameters',
         onSelect: (_item, index) => state.dispatch?.({
-          type: choosing ? 'settings-select-choice' : 'settings-select-parameter',
+          type: showingChoices ? 'settings-select-choice' : 'settings-select-parameter',
           index,
         }),
       }),
-    ],
+    ].filter(Boolean),
   });
 }
 
@@ -380,19 +383,6 @@ function renderSettingsModal({ content, modal, state, width, height, theme }) {
   });
 }
 
-function transcriptLines(state, theme) {
-  const lines = [];
-  if (!state.messages.length && !state.llmRuntime) return ['Starting Zipflow…'];
-  for (const message of state.messages) {
-    const token = message.tone === 'error' ? 'danger' : message.tone === 'success' ? 'success' : message.tone === 'warning' ? 'warning' : message.tone === 'choice' ? 'accent' : 'title';
-    lines.push(color(theme, token, `${activityTag(message.tone)} ${message.title}`));
-    for (const line of message.lines ?? []) lines.push(`  ${line}`);
-    lines.push('');
-  }
-  if (state.llmRuntime) lines.push(...llmActivityLines(state.llmRuntime));
-  return lines;
-}
-
 function screenTitle(state) {
   const titles = {
     boot: 'Starting', home: 'Project', 'new-project': 'Project', 'setup-project': 'Project setup',
@@ -419,7 +409,10 @@ function screenTitle(state) {
 function footerHints(state) {
   if (state.screen === 'settings') {
     if (state.settingsPanel?.modal) return ['Enter save', 'Esc cancel', 'Tab complete path', 'Ctrl+B close settings'];
-    if (state.settingsPanel?.focus === 'choices') return ['↑/↓ choose', 'Enter apply', 'Esc return to parameter', 'Ctrl+B close'];
+    if (state.settingsPanel?.focus === 'choices') {
+      const destination = settingsViewModel(state).direct ? 'categories' : 'parameter';
+      return ['↑/↓ choose', 'Enter apply', `Esc return to ${destination}`, 'Ctrl+B close'];
+    }
     if (state.settingsPanel?.focus === 'parameters') return ['↑/↓ parameter', 'Enter open', 'Esc return to categories', 'Ctrl+B close'];
     return ['↑/↓ category', 'Enter open page', 'Esc or Ctrl+B close', 'Ctrl+T native select'];
   }
@@ -443,7 +436,6 @@ function headerStats(state) {
     { label: 'Policy', value: state.workflow?.policy?.label ?? state.draft?.policy?.label ?? 'Not configured' },
   ];
   if (step) stats.push({ label: 'Stage', value: `${step.number}/5 ${step.label}` });
-  else stats.push({ label: 'Theme', value: state.settings?.theme ?? 'ocean' });
   return stats;
 }
 
@@ -461,15 +453,6 @@ function isEditorScreen(screen) {
     'project-path-input', 'archive-input', 'custom-check-command', 'custom-check-name',
     'commit-message', 'commit-template', 'deploy-command', 'export-path', 'initial-commit-message',
   ].includes(screen);
-}
-
-function activityTag(tone) {
-  if (tone === 'success') return '[DONE]';
-  if (tone === 'warning') return '[WARN]';
-  if (tone === 'error') return '[FAIL]';
-  if (tone === 'choice') return '[YOU ]';
-  if (tone === 'process') return '[RUN ]';
-  return '[INFO]';
 }
 
 function clamp(value, min, max) {

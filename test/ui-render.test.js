@@ -5,6 +5,7 @@ import { createInitialState, appendMessage, setScreen } from '../src/app/state.j
 import { renderZipflow } from '../src/ui/render.js';
 import { ZipflowController } from '../src/app/controller.js';
 import { ZIPFLOW_VERSION } from '../src/version.js';
+import { projectSummary } from '../src/ui/format.js';
 
 test('renders the interactive project home without layout errors', () => {
   const state = createInitialState();
@@ -24,6 +25,25 @@ test('renders the interactive project home without layout errors', () => {
   assert.match(output, new RegExp(`Zipflow ${ZIPFLOW_VERSION.replaceAll('.', '\\.')}`));
   assert.match(output, /Start an update/);
   assert.match(output, /Project detected/);
+});
+
+
+test('Project detected is a framed Activity block and the header does not show the theme name', () => {
+  const state = createInitialState();
+  state.project = { name: 'fixture', root: '/tmp/fixture', labels: ['Node.js', 'TypeScript'], git: true };
+  state.workflow = {
+    archive: { mode: 'overlay' }, checks: [{ selected: true }, { selected: false }],
+    policy: { label: 'Practical' }, git: { resultCommit: 'ask' }, deploy: { policy: 'disabled' },
+  };
+  appendMessage(state, 'Project detected', projectSummary(state.project, state.workflow), 'project');
+  setScreen(state, 'home', { items: [{ id: 'exit', label: 'Exit' }], status: 'Ready' });
+
+  const output = renderToString(renderZipflow({ state, width: 100, height: 40 }), { width: 100, height: 40 });
+  assert.match(output, /╭─ Project detected/);
+  assert.match(output, /Root: \/tmp\/fixture/);
+  assert.match(output, /Detected: Node\.js · TypeScript/);
+  assert.match(output, /Workflow: configured/);
+  assert.doesNotMatch(output, /Theme:/);
 });
 
 test('Activity has an in-app selection state and Ctrl+T enables native selection elsewhere', async () => {

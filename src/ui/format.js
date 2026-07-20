@@ -2,14 +2,18 @@ import path from 'node:path';
 import { displayPath } from '../utils/paths.js';
 
 export function projectSummary(project, workflow = null) {
-  const lines = [displayPath(project.root), project.labels.length ? project.labels.join(' · ') : 'Project type not detected'];
-  if (project.git) lines[1] += ' · Git';
+  const labels = project.labels.length ? project.labels.join(' · ') : 'Project type not detected';
+  const lines = [
+    `Root: ${displayPath(project.root)}`,
+    `Detected: ${labels}`,
+    `Git: ${project.git ? 'repository detected' : 'not initialized'}`,
+    `Workflow: ${workflow ? 'configured' : 'not configured'}`,
+  ];
   if (workflow) {
     lines.push(`Archive: ${workflow.archive.mode === 'snapshot' ? 'Full snapshot' : 'Overlay'}`);
-    lines.push(`Checks: ${workflow.checks.filter((check) => check.selected).length}`);
+    lines.push(`Checks: ${workflow.checks.filter((check) => check.selected).length} selected`);
     lines.push(`Policy: ${workflow.policy.label}`);
-    lines.push(`Commit: ${formatCommitPolicy(workflow.git.resultCommit)}`);
-    lines.push(`Deploy: ${formatDeployPolicy(workflow.deploy?.policy)}`);
+    lines.push(`Commit: ${formatCommitPolicy(workflow.git.resultCommit)} · Deploy: ${formatDeployPolicy(workflow.deploy?.policy)}`);
   }
   return lines;
 }

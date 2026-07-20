@@ -47,7 +47,7 @@ Builds bounded per-file comparisons for review. Text files produce a shared line
 
 Builds declarative Terlio views from application state.
 
-Rendering does not perform project mutations. Global settings use a stable two-panel category/page layout; nested value selection replaces only the right pane and retains category, parameter, and current-value positions. Activity uses Terlio's component-level text selection; `Ctrl+T` is the explicit escape hatch for native terminal selection elsewhere. Pointer callbacks dispatch the same actions used by keyboard input. The selected Terlio semantic theme is resolved from global settings on every render, so theme changes apply immediately.
+Rendering does not perform project mutations. Global settings use a stable two-panel category/page layout. Direct single-choice categories render their options immediately; multi-parameter categories render compact value rows and move explanatory text into the nested choice view. Nested selection replaces only the right pane and retains category, parameter, and current-value positions. Project discovery is stored as a framed Activity message rather than a permanent project panel. Activity uses Terlio's component-level text selection; `Ctrl+T` is the explicit escape hatch for native terminal selection elsewhere. Pointer callbacks dispatch the same actions used by keyboard input. The selected Terlio semantic theme is resolved from global settings on every render, so theme changes apply immediately.
 
 ### `src/settings`
 
@@ -148,7 +148,7 @@ project
   -> review and atomic workflow replacement
 ```
 
-Global settings use a category/detail state machine. The category screen contains only stable top-level categories. Opening a category replaces it with that category's options and an explicit back item; returning restores the previous category selection, and reopening restores the last selected option for that category. Dependent controls are omitted when their parent feature is disabled, and input-like values open in a modal without replacing the current settings level.
+Global settings use a two-panel category/detail state machine. The left panel contains stable top-level categories without descriptions. The right panel either displays direct options for a single-choice category or concise `Parameter: value` rows for a multi-parameter category. Explanations are shown only inside the selected value page. Returning restores the previous category and parameter positions, and reopening restores the last selected value. Dependent controls are omitted when their parent feature is disabled, and input-like values open in a modal without replacing either panel.
 
 ## Interactive review model
 

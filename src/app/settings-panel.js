@@ -101,7 +101,7 @@ export async function handleSettingsKey(controller, key) {
     return true;
   }
   if (['enter', 'space', 'right', 'tab'].includes(key.name)) {
-    if (panel.focus === 'categories') return enterParameters(controller);
+    if (panel.focus === 'categories') return enterCategory(controller);
     if (panel.focus === 'parameters') return activateParameter(controller);
     return activateChoice(controller);
   }
@@ -113,8 +113,7 @@ export async function selectSetting(controller, index) {
   if (!panel) return;
   panel.categoryIndex = clamp(index, 0, settingsDefinitions(controller.state).length - 1);
   await ensureDefinitionData(controller, currentDefinition(controller.state));
-  panel.focus = 'parameters';
-  restoreParameter(controller.state);
+  enterSelectedCategory(controller.state);
   controller.state.status = currentDefinition(controller.state).label;
   controller.invalidate();
 }
@@ -139,10 +138,10 @@ export function settingsViewModel(state) {
   const selectedSetting = currentDefinition(state);
   const parameters = settingsParameters(state, selectedSetting);
   const parameterIndex = currentParameterIndex(state, parameters);
-  const activeParameter = panelParameter(state, parameters);
-  const choices = state.settingsPanel?.focus === 'choices' && activeParameter
-    ? settingsChoices(state, activeParameter)
-    : [];
+  const directParameter = directSettingParameter(selectedSetting, parameters);
+  const activeParameter = directParameter ?? panelParameter(state, parameters);
+  const showChoices = Boolean(directParameter) || state.settingsPanel?.focus === 'choices';
+  const choices = showChoices && activeParameter ? settingsChoices(state, activeParameter) : [];
   return {
     focus: state.settingsPanel?.focus ?? 'categories',
     definitions,
@@ -150,6 +149,7 @@ export function settingsViewModel(state) {
     parameters,
     choices,
     activeParameter,
+    direct: Boolean(directParameter),
     categoryIndex: state.settingsPanel?.categoryIndex ?? 0,
     parameterIndex,
     choiceIndex: currentChoiceIndex(state, choices, activeParameter),
@@ -160,9 +160,9 @@ export function settingsViewModel(state) {
 async function handleBack(controller) {
   const panel = controller.state.settingsPanel;
   if (panel.focus === 'choices') {
-    panel.focus = 'parameters';
+    panel.focus = isDirectDefinition(currentDefinition(controller.state)) ? 'categories' : 'parameters';
     panel.activeParameterId = null;
-    controller.state.status = currentDefinition(controller.state).label;
+    controller.state.status = panel.focus === 'categories' ? 'Global settings' : currentDefinition(controller.state).label;
     controller.invalidate();
     return true;
   }
@@ -185,11 +185,10 @@ async function moveCategory(controller, delta) {
   state.status = currentDefinition(state).label;
 }
 
-async function enterParameters(controller) {
+async function enterCategory(controller) {
   const { state } = controller;
   await ensureDefinitionData(controller, currentDefinition(state));
-  state.settingsPanel.focus = 'parameters';
-  restoreParameter(state);
+  enterSelectedCategory(state);
   state.status = currentDefinition(state).label;
   controller.invalidate();
   return true;
@@ -230,12 +229,12 @@ async function activateChoice(controller) {
     controller.invalidate();
     return true;
   }
-  if (option.action === 'history-cancel') return returnToParameters(controller, parameter.id, 'Managed-file history was not changed');
+  if (option.action === 'history-cancel') return returnAfterChoice(controller, parameter.id, 'Managed-file history was not changed');
   if (option.action === 'history-reset-confirm') {
     const result = await resetManagedHistory(state.project.root);
     state.settingsPanel.managedCount = 0;
     controller.message('Managed-file history reset', [`${result.removed} recorded paths removed.`], 'warning');
-    return returnToParameters(controller, parameter.id, 'Managed-file history reset');
+    return returnAfterChoice(controller, parameter.id, 'Managed-file history reset');
   }
   if (option.settingId) {
     state.settings = await saveSettings({ ...state.settings, [option.settingId]: option.value });
@@ -246,16 +245,24 @@ async function activateChoice(controller) {
       resetModelCache(state.settingsPanel);
       if (option.value !== 'disabled') await refreshModels(controller, { quiet: true });
     }
-    return returnToParameters(controller, parameter.id, `${option.label} selected`);
+    return returnAfterChoice(controller, parameter.id, `${option.label} selected`);
   }
   return true;
 }
 
-function returnToParameters(controller, parameterId, status) {
+function returnAfterChoice(controller, parameterId, status) {
   const { state } = controller;
-  state.settingsPanel.focus = 'parameters';
-  state.settingsPanel.activeParameterId = null;
-  restoreParameter(state, parameterId);
+  if (isDirectDefinition(currentDefinition(state))) {
+    state.settingsPanel.focus = 'choices';
+    state.settingsPanel.activeParameterId = parameterId;
+    const parameter = panelParameter(state);
+    const choices = parameter ? settingsChoices(state, parameter) : [];
+    state.settingsPanel.choiceIndices[parameterId] = selectedChoiceIndex(state, choices, parameter);
+  } else {
+    state.settingsPanel.focus = 'parameters';
+    state.settingsPanel.activeParameterId = null;
+    restoreParameter(state, parameterId);
+  }
   state.status = status;
   controller.invalidate();
   return true;
@@ -440,6 +447,32 @@ function restoreParameter(state, parameterId = null) {
     if (index >= 0) state.settingsPanel.parameterIndices[categoryId] = index;
   }
   currentParameterIndex(state, items);
+}
+
+function enterSelectedCategory(state) {
+  const definition = currentDefinition(state);
+  restoreParameter(state);
+  if (isDirectDefinition(definition)) {
+    const parameter = panelParameter(state);
+    state.settingsPanel.focus = 'choices';
+    state.settingsPanel.activeParameterId = parameter?.id ?? null;
+    if (parameter) {
+      const choices = settingsChoices(state, parameter);
+      state.settingsPanel.choiceIndices[parameter.id] = currentChoiceIndex(state, choices, parameter);
+    }
+  } else {
+    state.settingsPanel.focus = 'parameters';
+    state.settingsPanel.activeParameterId = null;
+  }
+}
+
+function directSettingParameter(definition, parameters) {
+  if (!definition?.directParameterId) return null;
+  return parameters.find((item) => item.id === definition.directParameterId) ?? null;
+}
+
+function isDirectDefinition(definition) {
+  return Boolean(definition?.directParameterId);
 }
 
 function resetModelCache(panel) {
