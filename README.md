@@ -73,7 +73,7 @@ During an update, the header shows the current five-stage progression:
 Archive -> Review -> Apply -> Checks -> Finish
 ```
 
-Activity entries use stable `INFO`, `RUN`, `DONE`, `WARN`, `FAIL`, `YOU`, and `SUM` roles so current work, completed work, problems, user decisions, and the final result remain distinguishable. Any durable block longer than three lines starts collapsed with a visible arrow; scroll to it and press `E` to expand or collapse it. Project discovery and the final summary stay expanded. Long-running LLM and check steps explain what result is expected before they start.
+Activity entries use stable `INFO`, `RUN`, `DONE`, `WARN`, `FAIL`, `YOU`, and `SUM` roles so current work, completed work, problems, user decisions, and the final result remain distinguishable. Expanded large logs use Terlio 1.1.2 viewport rendering together with a cached Zipflow transcript, so scrolling a 10,000-line test output does not repeatedly wrap and recolor the whole block. Any durable block longer than three lines starts collapsed with a visible arrow; scroll to it and press `E` to expand or collapse it. Project discovery and the final summary stay expanded. Long-running LLM and check steps explain what result is expected before they start.
 
 ## Supported project workflows
 
@@ -173,7 +173,7 @@ COMMIT_MESSAGE
 COMMIT_MESSAGE.txt
 ```
 
-Metadata files are never copied into the project. In fact, the entire `.zipflow/` tree is protected from archive application. Multi-line commit messages are supported.
+Metadata files are never copied into the project. In fact, the entire `.zipflow/` tree is protected from archive application. Snapshot deletion also always preserves `.gitignore` and locally sensitive data such as credential files, private keys, secret-bearing configuration, and local databases, even when they are absent from the incoming archive. Multi-line commit messages are supported.
 
 When archive metadata is selected and no supported file exists, Zipflow falls back to:
 
@@ -195,7 +195,7 @@ Ollama:    http://127.0.0.1:11434
 LM Studio: http://127.0.0.1:1234
 ```
 
-**Test selected model** offers a quick compatibility check and a read-only historical replay. Replay first shows the selected archive update and safety scope, then opens a dimmed modal workspace only after explicit confirmation. Streaming stages remain visible as separate colored blocks; mouse wheel, arrows, Page Up/Page Down, Home, and End work while generation is active. When the user scrolls away from the latest output, new logical blocks are counted without forcing the view downward.
+**Test selected model** offers a quick compatibility check and a read-only historical replay. Replay first shows the selected archive update and safety scope, then opens a dimmed modal workspace only after explicit confirmation. The current status and elapsed time stay in a fixed modal header while streaming stages remain visible as separate colored blocks in the scrollable body; mouse wheel, arrows, Page Up/Page Down, Home, and End work while generation is active. When the user scrolls away from the latest output, new logical blocks are counted without forcing the view downward.
 
 The **Archive review** setting controls whether the model also judges archive suitability:
 

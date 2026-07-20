@@ -8,6 +8,7 @@ import { loadManagedHistory } from '../history/managed.js';
 import { isArchiveControlPath } from '../archive/metadata.js';
 import { isProtectedProjectPath } from '../archive/protected.js';
 import { createPathMatcher, normalizeRelativePath } from './matcher.js';
+import { deletionProtectionReason, isDeletionProtectedProjectPath } from './deletion-protection.js';
 
 export async function buildUpdatePlan({ project, workflow, extracted }) {
   const excluded = createPathMatcher(workflow.exclude);
@@ -75,13 +76,14 @@ export async function buildUpdatePlan({ project, workflow, extracted }) {
 async function findSnapshotChanges({ project, workflow, excluded, incomingSet }) {
   const allManaged = await walkManagedFiles(project.root, excluded);
   const ignored = await ignoredPaths(project, allManaged);
-  const eligible = allManaged.filter((relative) => !ignored.has(relative));
+  const protectedMissing = deletionProtectedPreserved(allManaged, incomingSet);
+  const eligible = allManaged.filter((relative) => !ignored.has(relative) && !isDeletionProtectedProjectPath(relative));
   if (workflow.deletion.scope === 'all') {
     const deleted = await collectDeleted(project.root, eligible, incomingSet, excluded);
-    const preserved = allManaged
+    const policyPreserved = allManaged
       .filter((relative) => ignored.has(relative) && !incomingSet.has(relative))
       .map((relative) => ({ path: relative, reason: 'ignored local file kept by .gitignore policy' }));
-    return { deleted, preserved };
+    return { deleted, preserved: mergePreserved(protectedMissing, policyPreserved) };
   }
   if (workflow.deletion.scope === 'managed-history') {
     const history = await loadManagedHistory(project.root);
@@ -92,7 +94,7 @@ async function findSnapshotChanges({ project, workflow, excluded, incomingSet })
       incomingSet,
       excluded,
     );
-    const preserved = allManaged
+    const policyPreserved = allManaged
       .filter((relative) => !incomingSet.has(relative) && (ignored.has(relative) || !managed.has(relative)))
       .sort((left, right) => left.localeCompare(right))
       .map((relative) => ({
@@ -101,15 +103,13 @@ async function findSnapshotChanges({ project, workflow, excluded, incomingSet })
           ? 'ignored local file kept by .gitignore policy'
           : 'local file kept because Zipflow has not previously created or updated it',
       }));
-    return { deleted, preserved };
+    return { deleted, preserved: mergePreserved(protectedMissing, policyPreserved) };
   }
   if (!project.git) {
-    return {
-      deleted: [],
-      preserved: eligible
-        .filter((relative) => !incomingSet.has(relative))
-        .map((relative) => ({ path: relative, reason: 'local file kept because tracked-only snapshot requires Git' })),
-    };
+    const policyPreserved = eligible
+      .filter((relative) => !incomingSet.has(relative))
+      .map((relative) => ({ path: relative, reason: 'local file kept because tracked-only snapshot requires Git' }));
+    return { deleted: [], preserved: mergePreserved(protectedMissing, policyPreserved) };
   }
   const tracked = new Set((await listTrackedFiles(project.root)).map(normalizeRelativePath));
   const deleted = await collectDeleted(
@@ -118,7 +118,7 @@ async function findSnapshotChanges({ project, workflow, excluded, incomingSet })
     incomingSet,
     excluded,
   );
-  const preserved = allManaged
+  const policyPreserved = allManaged
     .filter((relative) => !incomingSet.has(relative) && (!tracked.has(relative) || ignored.has(relative)))
     .sort((left, right) => left.localeCompare(right))
     .map((relative) => ({
@@ -127,7 +127,23 @@ async function findSnapshotChanges({ project, workflow, excluded, incomingSet })
         ? 'ignored local file kept by .gitignore policy'
         : 'untracked local file kept by tracked-only snapshot policy',
     }));
-  return { deleted, preserved };
+  return { deleted, preserved: mergePreserved(protectedMissing, policyPreserved) };
+}
+
+function deletionProtectedPreserved(paths, incomingSet) {
+  return paths.flatMap((relative) => {
+    if (incomingSet.has(relative)) return [];
+    const reason = deletionProtectionReason(relative);
+    return reason ? [{ path: relative, reason }] : [];
+  });
+}
+
+function mergePreserved(...groups) {
+  const byPath = new Map();
+  for (const item of groups.flat()) {
+    if (!byPath.has(item.path)) byPath.set(item.path, item);
+  }
+  return [...byPath.values()].sort((left, right) => left.path.localeCompare(right.path));
 }
 
 async function ignoredPaths(project, paths) {
@@ -148,7 +164,7 @@ async function collectDeleted(root, candidates, incomingSet, excluded) {
   const deleted = [];
   for (const relative of candidates) {
     const normalized = normalizeRelativePath(relative);
-    if (excluded(normalized) || isProtectedProjectPath(normalized) || incomingSet.has(normalized)) continue;
+    if (excluded(normalized) || isProtectedProjectPath(normalized) || isDeletionProtectedProjectPath(normalized) || incomingSet.has(normalized)) continue;
     const currentPath = path.join(root, normalized);
     if (!(await exists(currentPath))) continue;
     const currentStat = await stat(currentPath);

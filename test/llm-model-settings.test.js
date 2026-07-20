@@ -66,8 +66,7 @@ test('LM Studio model list uses radio selection and muted loaded state metadata'
 test('model refresh renders the Terlio inline spinner in the refresh row', async () => {
   const state = settingsState(await models());
   state.settingsPanel.loadingModels = true;
-  state.uiAnimationFrame = 1;
-  const output = renderToString(renderZipflow({ state, width: 120, height: 32 }), { width: 120, height: 32 });
+  const output = renderToString(renderZipflow({ state, width: 120, height: 32, animationFrame: 1 }), { width: 120, height: 32 });
 
   assert.match(output, /⠙ Refreshing available models/);
   assert.doesNotMatch(output, /Refreshing available models ×/);

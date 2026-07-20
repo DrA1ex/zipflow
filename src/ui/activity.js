@@ -1,24 +1,54 @@
 import { PropertyRows, color, renderNode, wrapText } from 'terlio.js';
 import { llmActivityLines } from '../app/llm-progress.js';
 
+const transcriptCache = new WeakMap();
+const messageLineCache = new WeakMap();
+
 export function transcriptLines(state, theme, width) {
   return buildTranscript(state, theme, width).lines;
 }
 
 export function buildTranscript(state, theme, width) {
+  const signature = transcriptSignature(state);
+  const cached = transcriptCache.get(state);
+  if (!state.llmRuntime && cached?.theme === theme && cached.width === width && cached.signature === signature) {
+    return cached.result;
+  }
   const lines = [];
   const ranges = [];
   if (!state.messages.length && !state.llmRuntime) return { lines: ['Starting Zipflow…'], ranges };
   for (const message of state.messages) {
     const start = lines.length;
-    if (message.tone === 'project') lines.push(...projectActivityBlock(message, theme, width));
-    else lines.push(...standardActivityMessage(message, theme, width));
+    lines.push(...activityMessageLines(message, theme, width));
     const end = Math.max(start, lines.length - 1);
     ranges.push({ messageId: message.id, start, end, collapsible: message.collapsible, collapsed: message.collapsed });
     lines.push('');
   }
   if (state.llmRuntime) lines.push(...llmActivityLines(state.llmRuntime, width));
-  return { lines, ranges };
+  const result = { lines, ranges };
+  if (!state.llmRuntime) transcriptCache.set(state, { theme, width, signature, result });
+  return result;
+}
+
+function activityMessageLines(message, theme, width) {
+  const cached = messageLineCache.get(message);
+  if (cached?.theme === theme && cached.width === width && cached.at === message.at
+    && cached.collapsed === message.collapsed && cached.linesRef === message.lines
+    && cached.title === message.title && cached.tone === message.tone) return cached.result;
+  const result = message.tone === 'project'
+    ? projectActivityBlock(message, theme, width)
+    : standardActivityMessage(message, theme, width);
+  messageLineCache.set(message, {
+    theme, width, at: message.at, collapsed: message.collapsed, linesRef: message.lines,
+    title: message.title, tone: message.tone, result,
+  });
+  return result;
+}
+
+function transcriptSignature(state) {
+  return state.messages.map((message) => [
+    message.id, message.at, message.collapsed ? 1 : 0, message.lines?.length ?? 0,
+  ].join(':')).join('|');
 }
 
 export function toggleActivityBlockAtScroll(state) {

@@ -16,7 +16,7 @@ import { settingsPageSummary } from '../app/settings-options.js';
 import { PathCompletionPopup } from './path-completion.js';
 import { renderModelReplayWorkspace } from './model-replay-view.js';
 
-export function renderSettings(state, width, height, theme) {
+export function renderSettings(state, width, height, theme, animationFrame = 0) {
   const view = settingsViewModel(state);
   const leftWidth = Math.max(24, Math.min(34, Math.floor(width * 0.3)));
   const rightWidth = Math.max(26, width - leftWidth - 2);
@@ -40,8 +40,8 @@ export function renderSettings(state, width, height, theme) {
     })],
   });
   const right = view.modelConfig
-    ? renderModelConfigPage(state, view.modelConfig, rightWidth, height, theme)
-    : renderSettingsPage(state, view, rightWidth, height, theme);
+    ? renderModelConfigPage(state, view.modelConfig, rightWidth, height, theme, animationFrame)
+    : renderSettingsPage(state, view, rightWidth, height, theme, animationFrame);
   const content = SplitPane({
     orientation: 'horizontal',
     gap: 2,
@@ -79,7 +79,7 @@ function renderChoiceSearch({ content, state, width, height, theme }) {
   });
 }
 
-function renderSettingsPage(state, view, width, height, theme) {
+function renderSettingsPage(state, view, width, height, theme, animationFrame) {
   const showingChoices = view.direct || view.focus === 'choices';
   const items = showingChoices ? view.choices : view.parameters;
   const nestedChoice = showingChoices && !view.direct;
@@ -110,7 +110,9 @@ function renderSettingsPage(state, view, width, height, theme) {
         items,
         selectedIndex: showingChoices ? view.choiceIndex : view.parameterIndex,
         windowSize: Math.max(2, height - (description ? 8 : 5) - summary.length - (parameterDescription ? 3 : 0)),
-        getLabel: (item) => showingChoices ? choiceLabel(state, item, theme) : parameterLabel(state, item, theme),
+        getLabel: (item) => showingChoices
+          ? choiceLabel(state, item, theme, animationFrame)
+          : parameterLabel(state, item, theme, animationFrame),
         getDescription: () => '',
         getDisabled: (item) => item.disabled && !item.loading,
         wrapItems: false,
@@ -127,7 +129,7 @@ function renderSettingsPage(state, view, width, height, theme) {
   });
 }
 
-function renderModelConfigPage(state, view, width, height, theme) {
+function renderModelConfigPage(state, view, width, height, theme, animationFrame) {
   const choices = view.focus === 'choices';
   const items = choices ? view.choices : view.parameters;
   const model = view.model;
@@ -156,7 +158,7 @@ function renderModelConfigPage(state, view, width, height, theme) {
         windowSize: Math.max(2, height - (description || view.error ? 8 : 5)),
         getLabel: (item) => {
           if (!choices && item.id === 'use-model' && view.loading) {
-            return spinnerLabel(state, item.label);
+            return spinnerLabel(animationFrame, item.label);
           }
           return choices
             ? `${item.value === view.values[view.activeParameter.id] ? '●' : '○'} ${item.label}`
@@ -178,21 +180,21 @@ function renderModelConfigPage(state, view, width, height, theme) {
   });
 }
 
-function spinnerLabel(state, label) {
-  return renderNode(Spinner({ frame: state.uiAnimationFrame ?? 0, label }), Math.max(8, String(label ?? '').length + 4))[0].trimEnd();
+function spinnerLabel(animationFrame, label) {
+  return renderNode(Spinner({ frame: animationFrame, label }), Math.max(8, String(label ?? '').length + 4))[0].trimEnd();
 }
 
-function parameterLabel(state, item, theme) {
-  if (item.loading) return spinnerLabel(state, item.label);
+function parameterLabel(state, item, theme, animationFrame) {
+  if (item.loading) return spinnerLabel(animationFrame, item.label);
   if (item.type === 'section') return color(theme, 'accent', `── ${item.label} ──`);
   if (item.type === 'stat') return `${color(theme, 'textMuted', item.label)}: ${item.value}`;
   return item.value ? `${item.label}: ${item.value}` : item.label;
 }
 
-function choiceLabel(state, item, theme) {
+function choiceLabel(state, item, theme, animationFrame) {
   if (item.action === 'refresh-models' && item.loading) {
     return renderNode(Spinner({
-      frame: state.uiAnimationFrame ?? 0,
+      frame: animationFrame,
       label: 'Refreshing available models',
     }), 48)[0].trimEnd();
   }

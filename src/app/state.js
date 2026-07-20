@@ -64,7 +64,6 @@ export function createInitialState() {
     settingsPanel: null,
     overlays: null,
     helpToast: null,
-    uiAnimationFrame: 0,
     dispatch: null,
   };
 }

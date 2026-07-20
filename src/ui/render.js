@@ -30,7 +30,7 @@ import { settingsViewModel } from '../app/settings-panel.js';
 import { PathCompletionPopup } from './path-completion.js';
 import { runSettingsStatus } from '../app/runtime-settings.js';
 
-export function renderZipflow({ state, width, height }) {
+export function renderZipflow({ state, width, height, animationFrame = 0 }) {
   const theme = themes[state.settings?.theme] ?? themes.ocean;
   const title = state.project?.name ? `Zipflow ${ZIPFLOW_VERSION} · ${state.project.name}` : `Zipflow ${ZIPFLOW_VERSION}`;
   const subtitle = state.project ? displayPath(state.project.root) : 'Safe source archive updates';
@@ -51,7 +51,7 @@ export function renderZipflow({ state, width, height }) {
     minMainHeight: 3,
   });
   const main = state.screen === 'settings'
-    ? renderSettings(state, width, mainHeight, theme)
+    ? renderSettings(state, width, mainHeight, theme, animationFrame)
     : state.screen === 'diff-view'
       ? renderDiffView(state, width, mainHeight, theme)
       : renderWorkflow(state, width, mainHeight, theme);

@@ -4,7 +4,6 @@ import { renderToString, Text, themes } from 'terlio.js';
 import { createInitialState } from '../src/app/state.js';
 import { ZipflowController } from '../src/app/controller.js';
 import { beginArchiveInput } from '../src/app/run-flow.js';
-import { advanceUiAnimation, uiAnimationActive } from '../src/app/ui-animation.js';
 import { renderZipflow } from '../src/ui/render.js';
 import { renderModelReplayWorkspace } from '../src/ui/model-replay-view.js';
 import {
@@ -51,17 +50,10 @@ test('archive input starts with one concise instruction', () => {
   assert.doesNotMatch(state.editorContext.instructions.join('\n'), /Recent|Next:|Tab|patch/i);
 });
 
-test('shared UI animation advances active model operations and spinner rows have no disabled suffix', () => {
+test('Terlio animation frames advance active model operations without a disabled suffix', () => {
   const state = settingsState();
-  assert.equal(uiAnimationActive(state), true);
-  const frame = state.uiAnimationFrame;
-  assert.equal(advanceUiAnimation(state), true);
-  assert.equal(state.uiAnimationFrame, frame + 1);
-
-  state.uiAnimationFrame = 0;
-  const first = stripAnsi(renderToString(renderZipflow({ state, width: 100, height: 28 }), { width: 100, height: 28 }));
-  state.uiAnimationFrame = 1;
-  const second = stripAnsi(renderToString(renderZipflow({ state, width: 100, height: 28 }), { width: 100, height: 28 }));
+  const first = stripAnsi(renderToString(renderZipflow({ state, width: 100, height: 28, animationFrame: 0 }), { width: 100, height: 28 }));
+  const second = stripAnsi(renderToString(renderZipflow({ state, width: 100, height: 28, animationFrame: 1 }), { width: 100, height: 28 }));
   assert.notEqual(first, second);
   assert.match(second, /Testing connection/);
   assert.doesNotMatch(second, /Testing connection…\s+×|Testing connection ×/);
@@ -79,10 +71,8 @@ test('model Save and select loader animates while configuration is being applied
   state.settingsPanel.modelConfig.loading = true;
   state.settingsPanel.modelConfig.progressLabel = 'Loading Gemma…';
 
-  state.uiAnimationFrame = 0;
-  const first = stripAnsi(renderToString(renderZipflow({ state, width: 100, height: 28 }), { width: 100, height: 28 }));
-  state.uiAnimationFrame = 1;
-  const second = stripAnsi(renderToString(renderZipflow({ state, width: 100, height: 28 }), { width: 100, height: 28 }));
+  const first = stripAnsi(renderToString(renderZipflow({ state, width: 100, height: 28, animationFrame: 0 }), { width: 100, height: 28 }));
+  const second = stripAnsi(renderToString(renderZipflow({ state, width: 100, height: 28, animationFrame: 1 }), { width: 100, height: 28 }));
   assert.notEqual(first, second);
   assert.match(second, /Loading Gemma/);
   assert.doesNotMatch(second, /Loading Gemma…\s+×|Loading Gemma ×/);

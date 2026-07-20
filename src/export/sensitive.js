@@ -14,7 +14,11 @@ const SAFE_ENV_SUFFIXES = ['.example', '.sample', '.template', '.dist', '.defaul
 const GENERATED_DIRECTORIES = new Set(['node_modules', '.cache', 'coverage', '.next', '.nuxt', '.turbo', 'dist', 'build', 'target']);
 
 export function inspectPotentiallySensitivePaths(paths, { pathSizes = new Map() } = {}) {
-  return paths.map((relative) => inspectPath(relative, pathSizes.get(relative) ?? 0)).filter(Boolean);
+  return paths.map((relative) => inspectPotentiallySensitivePath(relative, { size: pathSizes.get(relative) ?? 0 })).filter(Boolean);
+}
+
+export function inspectPotentiallySensitivePath(relative, { size = 0 } = {}) {
+  return inspectPath(relative, size);
 }
 
 export function sensitivePathMap(records) {
