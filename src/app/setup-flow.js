@@ -88,7 +88,7 @@ export function backSetup(controller) {
   if (screen === 'setup-git-message') return showResultCommitStep(controller);
   if (screen === 'setup-deploy') return isEditingSection(controller, 'deploy') ? showWorkflowSections(controller) : previousBeforeDeploy(controller);
   if (screen === 'setup-deploy-command') return showDeployPolicyStep(controller);
-  if (screen === 'setup-review') return showDeployPolicyStep(controller);
+  if (screen === 'setup-review') return controller.state.setupEditing ? showWorkflowSections(controller, 'review') : showDeployPolicyStep(controller);
   if (screen.startsWith('custom-check')) return showChecksStep(controller);
   if (screen === 'project-path-input') return showProjectStep(controller);
   if (screen === 'commit-template') return showMessageStrategyStep(controller);
@@ -214,16 +214,27 @@ function activateArchiveMode(controller, itemId) {
 }
 
 function showDeletionScopeStep(controller) {
+  const recording = controller.state.settings?.managedHistoryPolicy !== 'disabled';
+  if (!recording && controller.state.draft.deletion.scope === 'managed-history') controller.state.draft.deletion.scope = 'tracked-only';
   const scope = controller.state.draft.deletion.scope;
+  const managed = choice('delete-managed', scope === 'managed-history', 'Only files previously managed by Zipflow',
+    recording
+      ? 'Delete a missing file only if an earlier Zipflow run created or updated it.'
+      : 'Enable managed-file recording in Ctrl+B settings before using this deletion policy.');
+  managed.disabled = !recording;
   controller.showMenu('setup-deletion-scope', [
     choice('delete-tracked', scope === 'tracked-only', 'Only clean Git-tracked files', 'Delete a missing file only when Git tracks it and it has no local changes. Untracked local files are kept and reported.'),
-    choice('delete-managed', scope === 'managed-history', 'Only files previously managed by Zipflow', 'Delete a missing file only if an earlier Zipflow run created or updated it. The managed-file history can be reset from Ctrl+B settings.'),
+    managed,
     choice('delete-all', scope === 'all', 'All files in the managed scope', 'Also delete untracked files missing from the archive. Protected and excluded paths are still kept.'),
     { id: 'deletion-continue', label: 'Continue', description: deletionScopeDescription(scope) },
   ], 'Which missing files may snapshot mode delete?', setupContinueIndex(controller, 'setup-deletion-scope', 3));
 }
 
 function activateDeletionScope(controller, itemId) {
+  if (itemId === 'delete-managed' && controller.state.settings?.managedHistoryPolicy === 'disabled') {
+    controller.toast('Enable managed-file recording first', 'warning');
+    return showDeletionScopeStep(controller);
+  }
   if (['delete-tracked', 'delete-managed', 'delete-all'].includes(itemId)) {
     controller.state.draft.deletion.scope = itemId === 'delete-tracked' ? 'tracked-only' : itemId === 'delete-managed' ? 'managed-history' : 'all';
     return showDeletionScopeStep(controller);
@@ -304,33 +315,17 @@ function activateMessageStrategy(controller, itemId) {
 
 function showReviewStep(controller) {
   const workflow = controller.state.draft;
-  controller.message('Workflow ready', [
-    `${workflow.projectLabels.join(' · ') || 'Custom project'} · ${workflow.checks.filter((check) => check.selected).length} checks`,
-    `${workflow.policy.label} · ${workflow.archive.mode === 'overlay' ? 'Overlay archive' : deletionReviewLabel(workflow.deletion.scope)}`,
-    ...(controller.state.project.git ? [
-      `Checkpoint: ${checkpointLabel(workflow.git.checkpoint)}`,
-      `Result commit: ${resultCommitLabel(workflow.git.resultCommit)}${workflow.git.resultCommit === 'never' ? '' : ` · ${messageStrategyLabel(workflow.git.messageStrategy)}`}`,
-    ] : ['Git: not initialized · file backups only']),
-    `Deploy: ${deployPolicyDescription(workflow.deploy.policy)}${workflow.deploy.commandText ? ` · ${workflow.deploy.commandText}` : ''}`,
-  ], 'success');
+  const actionLabel = controller.state.workflow ? 'Replace existing workflow' : 'Save workflow';
   controller.showMenu('setup-review', [
-    { id: 'save-workflow', label: controller.state.workflow ? 'Replace existing workflow' : 'Save workflow', description: 'The previous workflow remains active until this succeeds' },
-    { id: 'edit-project', label: 'Edit project' },
-    { id: 'edit-checks', label: 'Edit checks' },
-    { id: 'edit-policy', label: 'Edit update policy' },
-    ...(controller.state.project.git ? [{ id: 'edit-git', label: 'Edit Git settings' }] : []),
-    { id: 'edit-deploy', label: 'Edit deployment' },
-    { id: 'cancel-setup', label: 'Cancel' },
-  ], 'Review workflow');
+    { id: 'save-workflow', label: actionLabel, description: 'Save this complete configuration and make it active for the next update.' },
+    { id: 'review-back', label: 'Back', description: controller.state.setupEditing ? 'Return to workflow sections without discarding the draft.' : 'Return to the previous setup step.' },
+  ], 'Review workflow', 0, workflowReviewLines(controller.state, workflow));
 }
 
 async function activateReview(controller, itemId) {
-  if (itemId === 'edit-project') return openWorkflowSection(controller, 'project');
-  if (itemId === 'edit-checks') return openWorkflowSection(controller, 'checks');
-  if (itemId === 'edit-policy') return openWorkflowSection(controller, 'policy');
-  if (itemId === 'edit-git') return openWorkflowSection(controller, 'git');
-  if (itemId === 'edit-deploy') return openWorkflowSection(controller, 'deploy');
-  if (itemId === 'cancel-setup') return controller.showHome();
+  if (itemId === 'review-back') {
+    return controller.state.setupEditing ? showWorkflowSections(controller, 'review') : showDeployPolicyStep(controller);
+  }
   if (itemId === 'save-workflow') {
     controller.state.workflow = await saveWorkflow(controller.state.draft);
     controller.state.draft = null;
@@ -338,6 +333,53 @@ async function activateReview(controller, itemId) {
     const { beginArchiveInput } = await import('./run-flow.js');
     beginArchiveInput(controller);
   }
+}
+
+function workflowReviewLines(state, workflow) {
+  const selectedChecks = workflow.checks.filter((check) => check.selected);
+  const lines = [
+    'PROJECT',
+    `  ${displayPath(state.project.root)}`,
+    `  ${detectedLine(state.project)}`,
+    '',
+    'CHECKS',
+    `  ${selectedChecks.length} enabled`,
+    ...selectedChecks.map((check) => `  • ${check.name}${check.commandText ? ` · ${check.commandText}` : ''}`),
+    '',
+    'UPDATE POLICY',
+    `  ${workflow.policy.label}`,
+    `  ${policyReviewDescription(workflow.policy.id)}`,
+    '',
+    'ARCHIVE INTERPRETATION',
+    `  ${workflow.archive.mode === 'overlay' ? 'Overlay archive' : 'Full project snapshot'}`,
+    `  ${archiveReviewDescription(workflow)}`,
+  ];
+  if (state.project.git) lines.push(
+    '',
+    'GIT',
+    `  Checkpoint: ${checkpointLabel(workflow.git.checkpoint)}`,
+    `  Result commit: ${resultCommitLabel(workflow.git.resultCommit)}`,
+    ...(workflow.git.resultCommit === 'never' ? [] : [`  Message: ${messageStrategyLabel(workflow.git.messageStrategy)}`]),
+  );
+  else lines.push('', 'GIT', '  Repository not initialized · Zipflow file backups remain enabled');
+  lines.push(
+    '',
+    'DEPLOYMENT',
+    `  ${deployPolicyDescription(workflow.deploy.policy)}`,
+    ...(workflow.deploy.commandText ? [`  Command: ${workflow.deploy.commandText}`] : []),
+  );
+  return lines;
+}
+
+function policyReviewDescription(value) {
+  if (value === 'safe') return 'Review every plan and ask before replacing local changes.';
+  if (value === 'trust') return 'Back up and replace conflicts without an additional confirmation.';
+  return 'Apply safe plans directly and ask only when local work is affected.';
+}
+
+function archiveReviewDescription(workflow) {
+  if (workflow.archive.mode === 'overlay') return 'Files from the ZIP are added or updated; missing local files stay untouched.';
+  return deletionScopeDescription(workflow.deletion.scope);
 }
 
 function previousBeforeCheckpoint(controller) {

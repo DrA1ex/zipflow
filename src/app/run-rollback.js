@@ -1,6 +1,7 @@
 import { inspectRollback, rollbackRun } from '../apply/rollback.js';
 import { copyTextToClipboard } from 'terlio.js';
 import { displayPath } from '../utils/paths.js';
+import { runTypeDescription, runTypeTag } from '../history/presentation.js';
 import { loadRunRecord, runReportPath, saveRunRecord } from '../runs/store.js';
 import { compactPlanLine, compactPlanMeta, formatArchiveName, planSummary, runStatusLabel } from '../ui/format.js';
 import { restoreManagedHistory } from '../history/managed.js';
@@ -63,8 +64,8 @@ export function showRunDetails(controller, run, { origin = null, announce = true
   controller.state.runDetailsOrigin = origin ?? controller.state.runDetailsOrigin ?? 'home';
   const lines = [
     `Run: ${run.id}`,
+    `Type: ${runTypeTag(run)}${run.kind ? ` · ${manualActionLabel(run.kind)}` : ' · Archive update'}`,
     `Status: ${runStatusLabel(run.status)}`,
-    ...(run.kind ? [`Action: ${manualActionLabel(run.kind)}`] : []),
     ...(run.archivePath ? [`Archive: ${formatArchiveName(run.archivePath)}`, `Source ZIP: ${archiveDispositionSummary(run.archiveDisposition)}`] : []),
     ...(run.plan?.counts ? planSummary({ counts: run.plan.counts }) : []),
     `Checks: ${run.checks ? `${run.checks.passed} passed · ${run.checks.failed} failed` : 'not run'}`,
@@ -73,6 +74,7 @@ export function showRunDetails(controller, run, { origin = null, announce = true
     `Commit: ${run.commit ? `${run.commit.revision} ${firstLine(run.commit.message)}` : 'none'}`,
     `Deploy: ${deploySummary(run.deploy)}`,
     `Decisions: ${run.decisions?.length ?? 0}`,
+    ...(run.applied ? [`Rollback: ${run.applied.backupAvailable === false ? `unavailable · backup removed (${run.applied.backupRemovalReason || 'storage cleanup'})` : 'available while the backup remains stored'}`] : []),
     `Report: ${displayPath(runReportPath(run.id))}`,
   ];
   if (announce) controller.message('Run details', lines);
@@ -84,14 +86,16 @@ export function showRunDetails(controller, run, { origin = null, announce = true
       { id: 'copy-run-summary', label: 'Copy run summary', description: 'Copy changes, checks, commit, deployment, and report details' },
     );
   }
-  if (run.applied && run.rollback?.status !== 'completed') items.push({ id: 'rollback', label: 'Roll back this update' });
+  if (run.applied && run.applied.backupAvailable !== false && run.rollback?.status !== 'completed') {
+    items.push({ id: 'rollback', label: 'Roll back this update' });
+  }
   items.push(
     { id: 'another-archive', label: run.kind ? 'Start an update' : 'Apply another archive' },
     { id: 'back-home', label: controller.state.runDetailsOrigin === 'history' ? 'Back to run history' : 'Back to project' },
   );
   const intro = run.plan?.counts
-    ? [compactPlanLine({ counts: run.plan.counts }), compactPlanMeta({ counts: run.plan.counts }), `Status: ${runStatusLabel(run.status)}`]
-    : [`Status: ${runStatusLabel(run.status)}`];
+    ? [`[${runTypeTag(run)}] Archive update`, compactPlanLine({ counts: run.plan.counts }), compactPlanMeta({ counts: run.plan.counts }), `Status: ${runStatusLabel(run.status)}`]
+    : [`[${runTypeTag(run)}] ${runTypeDescription(run)}`, `Status: ${runStatusLabel(run.status)}`];
   controller.showMenu('run-details', items, 'Run details', 0, intro);
 }
 

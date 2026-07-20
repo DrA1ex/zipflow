@@ -65,6 +65,21 @@ export async function loadLmStudioModel(model, config = {}, {
   };
 }
 
+export async function unloadLmStudioModel(instanceId, {
+  fetchImpl = fetch,
+  timeoutMs = 120_000,
+  apiToken = '',
+  signal = null,
+} = {}) {
+  if (!String(instanceId ?? '').trim()) return false;
+  const definition = requireProvider('lmstudio');
+  const response = await request(fetchImpl, `${definition.nativeBaseUrl}/models/unload`, {
+    method: 'POST', headers: headers(apiToken), body: JSON.stringify({ instance_id: instanceId }),
+  }, timeoutMs, { allowHttpFailure: true, provider: 'lmstudio', signal });
+  if (!response.ok) throw await responseError(response, 'lmstudio');
+  return true;
+}
+
 export async function listLocalModels(provider, options = {}) {
   return (await listLocalModelChoices(provider, options)).map((item) => item.id);
 }

@@ -3,6 +3,10 @@ const RUN_SETTING_KEYS = Object.freeze([
   'llmProvider',
   'llmModel',
   'llmLanguage',
+  'llmPromptLanguage',
+  'llmSummaryLanguage',
+  'llmCommitLanguage',
+  'llmSelectedInstanceId',
   'llmApiToken',
   'llmArchiveReview',
   'llmChangeDelivery',
@@ -12,6 +16,10 @@ const RUN_SETTING_KEYS = Object.freeze([
   'archiveDirectory',
   'archiveRetentionDays',
   'archiveMaxBytes',
+  'backupRetentionPolicy',
+  'backupRetentionDays',
+  'backupMaxBytes',
+  'managedHistoryPolicy',
 ]);
 
 export function captureRunSettings(state) {

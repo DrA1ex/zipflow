@@ -3,52 +3,82 @@ import { displayPath } from '../utils/paths.js';
 import { listProjectRuns, loadRunRecord } from '../runs/store.js';
 import { compactPlanLine, formatDuration, runStatusLabel } from '../ui/format.js';
 import { buildRunAnalytics } from '../history/analytics.js';
+import {
+  RUN_STATUS_FILTERS,
+  RUN_TYPE_FILTERS,
+  matchesRunStatus,
+  matchesRunType,
+  runStatusFilterDescription,
+  runStatusFilterLabel,
+  runTypeFilterDescription,
+  runTypeLabel,
+  runTypeTag,
+} from '../history/presentation.js';
 import { showRunDetails } from './run-rollback.js';
 
 export function handlesHistoryScreen(screen) {
-  return ['run-history', 'run-history-filter', 'run-analytics'].includes(screen);
+  return ['run-history', 'run-history-type-filter', 'run-history-status-filter', 'run-analytics'].includes(screen);
 }
 
 export async function showRunHistory(controller, selectedIndex = null) {
+  normalizeLegacyFilter(controller.state);
   const runs = await listProjectRuns(controller.state.project.root, { limit: 40 });
   controller.state.historyRuns = runs;
-  const filtered = runs.filter((run) => matchesHistoryFilter(run, controller.state.historyFilter));
+  const filtered = runs.filter((run) => matchesRunType(run, controller.state.historyTypeFilter)
+    && matchesRunStatus(run, controller.state.historyStatusFilter));
   const items = [{
-    id: 'history-filter',
-    label: `Filter: ${historyFilterLabel(controller.state.historyFilter)}`,
-    description: `${filtered.length} of ${runs.length} runs shown`,
+    id: 'history-type-filter',
+    label: `Type: ${runTypeLabel(controller.state.historyTypeFilter)}`,
+    description: `${filtered.length} of ${runs.length} runs shown after both filters`,
+  }, {
+    id: 'history-status-filter',
+    label: `Result: ${runStatusFilterLabel(controller.state.historyStatusFilter)}`,
+    description: 'Filter success, failure, or rollback independently from the run type',
   }, {
     id: 'history-analytics',
     label: 'Performance analytics',
     description: 'Check and local LLM duration history, success rate, medians, and recent trend',
   }, ...filtered.map((run) => ({
     id: `history:${run.id}`,
-    label: `${runStatusLabel(run.status)} · ${formatWhen(run.createdAt)}`,
+    label: `[${runTypeTag(run)}] ${runStatusLabel(run.status)} · ${formatWhen(run.createdAt)}`,
     description: historyDescription(run),
-    searchText: `${run.id} ${run.archivePath ?? ''} ${run.commit?.message ?? ''} ${run.commit?.revision ?? ''}`,
+    searchText: `${runTypeTag(run)} ${run.id} ${run.archivePath ?? ''} ${run.commit?.message ?? ''} ${run.commit?.revision ?? ''}`,
   }))];
-  if (filtered.length === 0) items.push({ id: 'history-empty', label: 'No runs match this filter', disabled: true });
+  if (filtered.length === 0) items.push({ id: 'history-empty', label: 'No runs match these filters', disabled: true });
   items.push({ id: 'history-back', label: 'Back to project' });
   controller.showMenu('run-history', items, 'Project run history', selectedIndex, [
     `${filtered.length} of ${runs.length} recent run${runs.length === 1 ? '' : 's'} shown`,
-    'Use / to search by archive, run ID, commit message, or revision.',
+    'Run type is shown first. Manual tests and deployments do not contain archive file diffs.',
+    'Use / to search by type, archive, run ID, commit message, or revision.',
   ]);
 }
 
-function showHistoryFilter(controller) {
-  const filters = ['all', 'successful', 'failed', 'rolled-back', 'manual-checks', 'deployment'];
-  controller.showMenu('run-history-filter', filters.map((value) => ({
-    id: `history-filter:${value}`,
-    label: `${controller.state.historyFilter === value ? '●' : '○'} ${historyFilterLabel(value)}`,
-    description: historyFilterDescription(value),
-  })), 'Filter run history', filters.indexOf(controller.state.historyFilter));
+function showTypeFilter(controller) {
+  controller.showMenu('run-history-type-filter', RUN_TYPE_FILTERS.map((value) => ({
+    id: `history-type:${value}`,
+    label: `${controller.state.historyTypeFilter === value ? '●' : '○'} ${runTypeLabel(value)}`,
+    description: runTypeFilterDescription(value),
+  })), 'Filter run type', Math.max(0, RUN_TYPE_FILTERS.indexOf(controller.state.historyTypeFilter)));
+}
+
+function showStatusFilter(controller) {
+  controller.showMenu('run-history-status-filter', RUN_STATUS_FILTERS.map((value) => ({
+    id: `history-status:${value}`,
+    label: `${controller.state.historyStatusFilter === value ? '●' : '○'} ${runStatusFilterLabel(value)}`,
+    description: runStatusFilterDescription(value),
+  })), 'Filter run result', Math.max(0, RUN_STATUS_FILTERS.indexOf(controller.state.historyStatusFilter)));
 }
 
 export async function activateHistory(controller, itemId) {
   if (itemId === 'history-back') return controller.showHome();
-  if (itemId === 'history-filter') return showHistoryFilter(controller);
-  if (itemId.startsWith('history-filter:')) {
-    controller.state.historyFilter = itemId.slice(15);
+  if (itemId === 'history-type-filter') return showTypeFilter(controller);
+  if (itemId === 'history-status-filter') return showStatusFilter(controller);
+  if (itemId.startsWith('history-type:')) {
+    controller.state.historyTypeFilter = itemId.slice(13);
+    return showRunHistory(controller);
+  }
+  if (itemId.startsWith('history-status:')) {
+    controller.state.historyStatusFilter = itemId.slice(15);
     return showRunHistory(controller);
   }
   if (itemId === 'history-analytics') return showRunAnalytics(controller);
@@ -67,7 +97,9 @@ export async function activateHistory(controller, itemId) {
 }
 
 export function backHistory(controller) {
-  if (controller.state.screen === 'run-analytics' || controller.state.screen === 'run-history-filter') return showRunHistory(controller, controller.state.historyReturnIndex ?? null);
+  if (['run-analytics', 'run-history-type-filter', 'run-history-status-filter'].includes(controller.state.screen)) {
+    return showRunHistory(controller, controller.state.historyReturnIndex ?? null);
+  }
   if (controller.state.screen === 'run-history') return controller.showHome();
   return false;
 }
@@ -142,9 +174,9 @@ function formatWhen(value) {
 function historyDescription(run) {
   if (run.kind === 'manual-checks') {
     const checks = run.checks;
-    return `Manual tests · ${checks ? `${checks.passed} passed · ${checks.failed} failed` : 'No result recorded'}`;
+    return `${checks ? `${checks.passed} passed · ${checks.failed} failed` : 'No result recorded'} · no archive diff`;
   }
-  if (run.kind === 'manual-deploy') return `Manual deployment · ${run.deploy?.ok ? 'passed' : run.deploy ? 'failed' : 'No result recorded'}`;
+  if (run.kind === 'manual-deploy') return `${run.deploy?.ok ? 'Deployment passed' : run.deploy ? 'Deployment failed' : 'No result recorded'} · no archive diff`;
   const commit = run.commit?.message ? ` · ${firstLine(run.commit.message)}` : '';
   return `${archiveName(run)} · ${run.plan?.counts ? compactPlanLine({ counts: run.plan.counts }) : 'No plan recorded'}${commit}`;
 }
@@ -154,27 +186,15 @@ function archiveName(run) {
   return String(value || 'archive.zip').split(/[\\/]/).at(-1);
 }
 
-
-function matchesHistoryFilter(run, filter) {
-  if (filter === 'successful') return ['completed', 'checks_passed'].includes(run.status);
-  if (filter === 'failed') return ['failed', 'checks_failed', 'completed_with_errors'].includes(run.status) || run.deploy?.ok === false;
-  if (filter === 'rolled-back') return run.status === 'rolled_back' || run.rollback?.status === 'completed';
-  if (filter === 'manual-checks') return run.kind === 'manual-checks';
-  if (filter === 'deployment') return run.kind === 'manual-deploy' || Boolean(run.deploy);
-  return true;
-}
-
-function historyFilterLabel(value) {
-  return ({ all: 'All', successful: 'Successful', failed: 'Failed', 'rolled-back': 'Rolled back', 'manual-checks': 'Manual tests', deployment: 'Deployment' })[value] ?? 'All';
-}
-
-function historyFilterDescription(value) {
-  return ({
-    all: 'Show every recent run', successful: 'Completed runs without required failures',
-    failed: 'Failed runs, failed checks, and completed runs with errors',
-    'rolled-back': 'Runs whose applied files were restored',
-    'manual-checks': 'Manual test runs only', deployment: 'Update or manual runs with deployment activity',
-  })[value] ?? '';
+function normalizeLegacyFilter(state) {
+  if (!state.historyStatusFilter || state.historyStatusFilter === 'all') {
+    if (['successful', 'failed', 'rolled-back'].includes(state.historyFilter)) state.historyStatusFilter = state.historyFilter;
+  }
+  if (!state.historyTypeFilter || state.historyTypeFilter === 'all') {
+    if (state.historyFilter === 'manual-checks') state.historyTypeFilter = 'test';
+    if (state.historyFilter === 'deployment') state.historyTypeFilter = 'deploy';
+  }
+  state.historyFilter = 'all';
 }
 
 function firstLine(value) {

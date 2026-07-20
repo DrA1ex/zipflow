@@ -10,15 +10,15 @@ export async function validateSettingValue(field, entered) {
     await ensureDir(absolute);
     return entered;
   }
-  if (field.id === 'archiveRetentionDays') {
+  if (['archiveRetentionDays', 'backupRetentionDays'].includes(field.id)) {
     if (!/^\d+$/.test(entered)) throw new Error('Enter retention as a whole number of days.');
     const value = Number(entered);
     if (value > 36_500) throw new Error('Retention cannot exceed 36,500 days.');
     return value;
   }
-  if (field.id === 'archiveMaxBytes') {
+  if (['archiveMaxBytes', 'backupMaxBytes'].includes(field.id)) {
     const value = parseByteSize(entered);
-    if (value > Number.MAX_SAFE_INTEGER) throw new Error('Archive size limit is too large.');
+    if (value > Number.MAX_SAFE_INTEGER) throw new Error('Storage size limit is too large.');
     return value;
   }
   if (field.id === 'llmApiToken') return entered;

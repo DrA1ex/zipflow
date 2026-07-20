@@ -5,6 +5,7 @@ import { createRootGitignoreMatcher } from '../git/ignore.js';
 import { listIgnoredPaths } from '../git/repository.js';
 import { isProtectedProjectPath } from '../archive/protected.js';
 import { createLocalCompletion } from './client.js';
+import { promptLanguage, promptLanguageDirective, summaryLanguage } from './language.js';
 import { resolveLocalLlmSession } from './session.js';
 import { parseAssessmentResponse } from './response.js';
 
@@ -45,7 +46,7 @@ export async function reviewArchiveStructure({ settings, project, workflow, extr
     model: profile.requestModel,
     loadedModel: profile.loadedModel,
     messages: [
-      { role: 'system', content: systemPrompt(settings.llmLanguage || 'English') },
+      { role: 'system', content: systemPrompt(promptLanguage(settings), summaryLanguage(settings)) },
       { role: 'user', content: userPrompt(project, plan, prompt.text) },
     ],
     responseSchema: null,
@@ -176,8 +177,9 @@ function treeHeader(label, record) {
   return `${label}: ${record.fileCount} files · ${record.directoryCount} directories\nTop level: ${record.topLevel.join(', ') || '(empty)'}`;
 }
 
-function systemPrompt(language) {
+function systemPrompt(promptLang, outputLanguage) {
   return [
+    promptLanguageDirective(promptLang),
     'You are a conservative archive-suitability reviewer for a local source-code update tool.',
     'Compare the current project tree with the incoming archive tree and decide whether the archive plausibly belongs to this project.',
     'Do not reject an archive merely because generated, ignored, cache, environment, build, or dependency files are missing.',
@@ -187,7 +189,7 @@ function systemPrompt(language) {
     'ASSESSMENT: followed by suitable, suspicious, or unsuitable.',
     'CONFIDENCE: followed by low, medium, or high.',
     'REASONS: followed by one to five concise bullet points.',
-    `Write reasons in ${language}; assessment and confidence remain English enum values.`,
+    `Write reasons in ${outputLanguage}; assessment and confidence remain English enum values.`,
   ].join(' ');
 }
 

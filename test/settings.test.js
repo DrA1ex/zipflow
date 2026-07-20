@@ -166,14 +166,46 @@ test('parameter pages stay compact and move help text into the nested value page
   assert.match(output, /Choose the local server Zipflow should contact/);
 }));
 
-test('managed history exposes keep and reset actions without an extra parameter screen', async () => withSettingsHome(async () => {
+test('managed history separates recording policy from destructive clearing', async () => withSettingsHome(async () => {
   const { state, controller } = await settingsController();
-  const view = await selectCategory(controller, 'managedHistory');
-  assert.equal(view.direct, true);
-  assert.equal(view.focus, 'choices');
-  assert.deepEqual(view.choices.map((item) => item.id), ['history-cancel', 'history-reset-confirm']);
+  let view = await selectCategory(controller, 'managedHistory');
+  assert.equal(view.direct, false);
+  assert.equal(view.focus, 'parameters');
+  assert.deepEqual(view.parameters.map((item) => item.id), [
+    'managed-recording-section', 'managedHistoryPolicy',
+    'managed-current-section', 'managed-count', 'managed-updated', 'managedHistoryClear',
+  ]);
+
+  view = await openParameter(controller, 'managedHistoryPolicy');
+  assert.deepEqual(view.choices.map((item) => item.id), [
+    'managedHistoryPolicy:record', 'managedHistoryPolicy:disabled',
+  ]);
+  await chooseValue(controller, 'managedHistoryPolicy:disabled');
+  assert.equal(state.settings.managedHistoryPolicy, 'disabled');
+  assert.equal(settingsViewModel(state).parameters.some((item) => item.id === 'managedHistoryClear'), true);
 }));
 
+
+
+test('Tab switches Settings panes without activating the focused item', async () => withSettingsHome(async () => {
+  const { state, controller } = await settingsController({ archivePolicy: 'move' });
+  await selectCategory(controller, 'sourceArchive');
+  let view = settingsViewModel(state);
+  assert.equal(view.focus, 'parameters');
+  assert.equal(view.parameters[view.parameterIndex].id, 'archivePolicy');
+
+  await handleSettingsKey(controller, { name: 'tab' });
+  view = settingsViewModel(state);
+  assert.equal(view.focus, 'categories');
+  assert.equal(state.settings.archivePolicy, 'move');
+  assert.equal(state.settingsPanel.modal, null);
+
+  await handleSettingsKey(controller, { name: 'tab' });
+  view = settingsViewModel(state);
+  assert.equal(view.focus, 'parameters');
+  assert.equal(view.parameters[view.parameterIndex].id, 'archivePolicy');
+  assert.equal(state.settings.archivePolicy, 'move');
+}));
 test('Escape from a nested value list returns to the same parameter without changing it', async () => withSettingsHome(async () => {
   const { state, controller } = await settingsController({ archivePolicy: 'move' });
   await selectCategory(controller, 'sourceArchive');
@@ -187,27 +219,38 @@ test('Escape from a nested value list returns to the same parameter without chan
   assert.equal(state.settings.archivePolicy, 'move');
 }));
 
-test('language choice opens with the current language selected and returns to Language', async () => withSettingsHome(async () => {
+test('LLM languages are configured independently and return to the language page', async () => withSettingsHome(async () => {
   const { state, controller } = await settingsController();
-  state.settings = { ...state.settings, llmProvider: 'ollama', llmModel: 'qwen', llmLanguage: 'Russian' };
+  state.settings = {
+    ...state.settings,
+    llmProvider: 'ollama', llmModel: 'qwen',
+    llmPromptLanguage: 'English', llmSummaryLanguage: 'Russian', llmCommitLanguage: 'English',
+  };
   state.settingsPanel.modelsProvider = 'ollama';
   state.settingsPanel.models = [{ id: 'qwen', key: 'qwen', label: 'qwen', loaded: true }];
   await selectCategory(controller, 'localLlm');
-  let view = await openParameter(controller, 'llmLanguage');
+  await openParameter(controller, 'llmLanguages');
+  let view = await openParameter(controller, 'llmSummaryLanguage');
 
-  assert.equal(view.choices[view.choiceIndex].id, 'llmLanguage:Russian');
-  await chooseValue(controller, 'llmLanguage:English');
+  assert.equal(view.choices[view.choiceIndex].id, 'llmSummaryLanguage:Russian');
+  await chooseValue(controller, 'llmSummaryLanguage:English');
   view = settingsViewModel(state);
   assert.equal(view.focus, 'parameters');
-  assert.equal(view.parameters[view.parameterIndex].id, 'llmLanguage');
-  assert.equal(state.settings.llmLanguage, 'English');
+  assert.equal(view.parameters[view.parameterIndex].id, 'llmSummaryLanguage');
+  assert.equal(state.settings.llmSummaryLanguage, 'English');
+  assert.equal(state.settings.llmPromptLanguage, 'English');
+  assert.equal(state.settings.llmCommitLanguage, 'English');
 }));
 
 test('archive storage parameters stay on one page and input values open in a modal', async () => withSettingsHome(async () => {
   const { state, controller } = await settingsController({ archivePolicy: 'move' });
   const view = await selectCategory(controller, 'sourceArchive');
   assert.deepEqual(view.parameters.map((item) => item.id), [
-    'archivePolicy', 'archiveDirectory', 'archiveRetentionDays', 'archiveMaxBytes',
+    'source-policy-section', 'archivePolicy', 'archiveDirectory', 'archiveRetentionDays', 'archiveMaxBytes',
+    'source-storage-section', 'archive-files', 'archive-used', 'archive-oldest', 'archive-path',
+    'archiveStorageRefresh', 'archiveStorageClear',
+    'backup-storage-section', 'backupRetentionPolicy', 'backupRetentionDays', 'backupMaxBytes',
+    'backup-directory', 'backup-count', 'backup-used', 'backup-oldest', 'backupStorageClear',
   ]);
 
   await openParameter(controller, 'archiveDirectory');

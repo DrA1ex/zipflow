@@ -31,7 +31,12 @@ Owns the interactive state machine.
 - `run-rollback.js` owns run details and exact rollback.
 - `run-lifecycle.js` owns cancellation, failure reporting, locks, and temporary cleanup.
 - `settings-panel.js` owns global settings navigation, modal editor state, validation, persistence, and model refreshes.
-- `settings-options.js` declares stable left-pane sections, dependent right-pane controls, and reusable field metadata for modal editors.
+- `settings-panel-state.js` owns reusable category/detail focus transitions and nested-panel restoration.
+- `settings-options.js` declares stable left-pane sections, dependent right-pane controls, non-focusable section/stat rows, and reusable field metadata for modal editors.
+- `settings-model.js` owns atomic model selection and LM Studio unload/reload behavior.
+- `settings-model-check.js` owns connection and protocol compatibility tests.
+- `settings-model-replay.js` owns read-only historical patch replay and its streaming workspace.
+- `settings-storage.js` owns source-archive and backup statistics, cleanup, and retention actions.
 - `llm-progress.js` maps streaming model events into a transient Activity view.
 - `archive-policy.js` applies the global source-ZIP disposition after a run is kept.
 - `export-flow.js` owns the interactive Create ZIP workflow.
@@ -47,7 +52,7 @@ Builds bounded per-file comparisons for review. Text files produce a shared line
 
 Builds declarative Terlio views from application state.
 
-Rendering does not perform project mutations. Global settings use a stable two-panel category/page layout. Direct single-choice categories render their options immediately; multi-parameter categories render compact value rows and move explanatory text into the nested choice view. Nested selection replaces only the right pane and retains category, parameter, and current-value positions. LM Studio model selection can enter a dedicated right-pane configuration state without replacing the category pane; loaded instances are read-only while unloaded models persist and apply explicit native load parameters. Project discovery is stored as a framed Activity message rather than a permanent project panel. Activity uses Terlio's component-level text selection; `Ctrl+T` is the explicit escape hatch for native terminal selection elsewhere. Pointer callbacks dispatch the same actions used by keyboard input. The selected Terlio semantic theme is resolved from global settings on every render, so theme changes apply immediately.
+Rendering does not perform project mutations. Global settings use a stable two-panel category/page layout. `Tab` changes pane focus without activating an item. Multi-parameter categories render compact value rows, non-focusable section/stat rows, and one explanation below the list. Nested selection replaces only the right pane and retains category, parameter, and current-value positions. LM Studio model selection can enter a dedicated right-pane configuration state without replacing the category pane; the radio marker communicates selection while loaded state is muted secondary metadata. Load-time settings remain editable and are applied through an explicit unload/reload cycle when needed. Project discovery is stored as a framed Activity message rather than a permanent project panel. Activity uses Terlio's component-level text selection; `Ctrl+T` is the explicit escape hatch for native terminal selection elsewhere. Pointer callbacks dispatch the same actions used by keyboard input. The selected Terlio semantic theme is resolved from global settings on every render, so theme changes apply immediately.
 
 #### Terlio component ownership
 
@@ -66,11 +71,11 @@ Custom rendering is limited to domain behavior Terlio does not provide: semantic
 
 ### `src/settings`
 
-Persists versioned global application settings in `~/.zipflow/settings.json`. Settings are deliberately separate from project workflows. They include the local LLM provider, optional bearer token, selected model, response language, archive-review mode, change-delivery strategy, failed-check analysis policy, and source-ZIP disposition policy.
+Persists versioned global application settings in `~/.zipflow/settings.json`. Settings are deliberately separate from project workflows. They include the local LLM provider, optional bearer token, selected model and instance, separate prompt/summary/commit languages, archive-review mode, change-delivery strategy, failed-check analysis policy, source-ZIP disposition and retention, backup retention, and managed-file recording policy. Migration preserves the legacy single output language for summaries and commit messages while defaulting prompts to English.
 
 ### `src/llm`
 
-Uses provider-specific adapters. LM Studio model metadata comes from the native `/api/v1/models` endpoint, including parameter counts and loaded-instance configuration. `settings-model.js` persists optional per-model load parameters and invokes `/api/v1/models/load` only for an unloaded selection; generation uses only the native `/api/v1/chat` stream, including model-load, prompt-processing, reasoning, message, and error events. Ollama model metadata comes from `/api/ps` and `/api/show`; generation uses its OpenAI-compatible chat-completion stream. Loaded LM Studio instances are resolved before generation and addressed by instance ID. Model metadata, the resolved instance, context configuration, and bearer token are captured once per LLM run and reused by structure review, patch analysis, chunk synthesis, and repair requests; a successful generation is never invalidated by a later metadata refresh. Load-time settings are not repeated, while an optional saved request-context override is passed to `/api/v1/chat`. API tokens are applied only as authorization headers and are never emitted through Activity events. An `AbortSignal` is threaded through metadata, request, and SSE consumption so `Esc` cancels only LLM generation while the archive plan continues.
+Uses provider-specific adapters. LM Studio model metadata comes from the native `/api/v1/models` endpoint, including parameter counts and loaded-instance configuration. `settings-model.js` persists optional per-model load parameters, unloads stale LLM instances, and invokes `/api/v1/models/load` to make the selected configuration active; generation uses only the native `/api/v1/chat` stream, including model-load, prompt-processing, reasoning, message, and error events. Ollama model metadata comes from `/api/ps` and `/api/show`; generation uses its OpenAI-compatible chat-completion stream. Loaded LM Studio instances are resolved before generation and addressed by instance ID. Model metadata, the resolved instance, context configuration, and bearer token are captured once per LLM run and reused by structure review, patch analysis, chunk synthesis, and repair requests; a successful generation is never invalidated by a later metadata refresh. Load-time settings are not repeated, while an optional saved request-context override is passed to `/api/v1/chat`. API tokens are applied only as authorization headers and are never emitted through Activity events. An `AbortSignal` is threaded through metadata, request, and SSE consumption so `Esc` cancels only LLM generation while the archive plan continues.
 
 `model-info.js` resolves the active or configured context size with a conservative fallback. `patch-budget.js` reserves context for instructions and output, keeps a complete changed-file manifest, and distributes available diff hunks across files. Context overflow and local compute-memory errors trigger progressively smaller-patch retries. `diagnostics.js` stores a bounded, sanitized request/result/error record in the run directory.
 
@@ -82,7 +87,7 @@ Builds and persists `changes.patch` from the pre-apply project snapshot and extr
 
 ### `src/history`
 
-Persists per-project paths previously created or updated by Zipflow. `analytics.js` aggregates recent check and provider/model timing samples into medians, averages, success rates, retry/truncation counts, and recent trends. Managed-history snapshot deletion intersects missing local paths with this set. Applying updates advances the set; rollback restores its previous state; global settings can reset it explicitly.
+Persists per-project paths previously created or updated by Zipflow. Recording can be disabled without deleting existing data; clearing is a separate confirmed action. Managed-history snapshot deletion is unavailable while recording is disabled, and recording cannot be disabled while an active workflow depends on that deletion scope. `analytics.js` aggregates recent check and provider/model timing samples into medians, averages, success rates, retry/truncation counts, and recent trends. Applying updates advances the set only when recording is enabled; rollback restores its previous state.
 
 ### `src/project`
 
@@ -170,7 +175,7 @@ project
   -> review and atomic workflow replacement
 ```
 
-Global settings use a two-panel category/detail state machine. The left panel contains stable top-level categories without descriptions. The right panel either displays direct options for a single-choice category or concise `Parameter: value` rows for a multi-parameter category. Explanations are shown only inside the selected value page. Returning restores the previous category and parameter positions, and reopening restores the last selected value. Dependent controls are omitted when their parent feature is disabled, and input-like values open in a modal without replacing either panel.
+Global settings use a two-panel category/detail state machine. The left panel contains stable top-level categories without descriptions. The right panel displays concise `Parameter: value` rows, section headings, and read-only statistics; only actionable rows receive focus. Explanations appear below the focused list. `Tab` switches pane focus, `Enter` or `Space` activates, and returning restores prior category, parameter, and value positions. Dependent controls are omitted or disabled with an explicit reason, and input-like values open in a modal without replacing either panel.
 
 ## Interactive review model
 
@@ -188,9 +193,9 @@ compact plan
 
 Conflict review uses a queue over the plan's conflicting items. A decision removes one item from the queue and advances to the next; bulk choices populate the same decision map without duplicating application logic. Diff views store their originating screen, item list, selected index, and introduction text so returning never loses the user's position.
 
-Activity messages are typed as information, running state, success, warning, error, user choice, or final summary. Durable blocks longer than three lines start collapsed with visible disclosure markers and can be toggled at the current scroll position; project discovery and the final summary remain expanded. Live LLM text preserves provider line breaks and is wrapped with Terlio's width-aware text utility before rendering. The current five-stage run position is derived from application state and displayed separately in the header.
+Activity messages are typed as information, running state, success, warning, error, user choice, or final summary. Durable blocks longer than three lines start collapsed with semantic summaries and can be toggled at the current scroll position; project discovery and the final summary remain expanded. When the reader is above the bottom, appended entries preserve position and expose a full-width clickable unread indicator; streaming replacement does not count every token as a new entry. Live LLM text preserves provider line breaks and is wrapped with Terlio's width-aware text utility before rendering. The current five-stage run position is derived from application state and displayed separately in the header.
 
-Run history is persisted in existing run records rather than a second event database. Archive hashes support duplicate warnings, and workflow `lastRunId` resolves the deliberate repeat-last action.
+Run history is persisted in existing run records rather than a second event database. Presentation separates archive updates, manual tests, and manual deployments, with independent type and status filters. Archive hashes support duplicate warnings, and workflow `lastRunId` resolves the deliberate repeat-last action.
 
 ## Run lifecycle
 
@@ -291,12 +296,13 @@ Unit and integration tests use temporary projects and Git repositories. Regressi
 - child-process cleanup;
 - custom-check prompt order;
 - stable radio selection and Space activation;
-- global settings persistence and rendering;
-- LM Studio and Ollama model metadata, context budgeting, structural patch truncation, adaptive/full/path-list/file-batch delivery, optional authorization, native and OpenAI-compatible streams, readable wrapped progress, context/OOM retries, reasoning-only responses, hidden repair requests, failure explanations, and diagnostics;
-- source archive keep, move, delete, retention, and size-limit behavior;
+- global settings persistence, schema migration, pane-focus navigation, section/stat rendering, and compact descriptions;
+- LM Studio and Ollama model metadata, atomic model selection, unload/reload configuration, separate prompt/summary/commit languages, compatibility tests, read-only historical replay, context budgeting, structural patch truncation, adaptive/full/path-list/file-batch delivery, optional authorization, native and OpenAI-compatible streams, readable wrapped progress, context/OOM retries, reasoning-only responses, hidden repair requests, failure explanations, and diagnostics;
+- source archive keep, move, delete, statistics, indexed cleanup, retention, and size-limit behavior;
+- backup statistics, guarded cleanup, retention by age/size, active-run protection, and rollback availability;
 - commit-message editor fallback, typing, deletion, and multiline input;
 - patch creation from archive-versus-snapshot changes;
-- managed-file deletion history and reset;
+- managed-file recording policy, guarded deletion scope, and separate clear action;
 - Git initialization, ignore generation, and first commit;
 - all four ZIP export modes;
 - copyable and collapsible Activity, readable LLM streaming, final-summary ordering, and native-selection fallback;

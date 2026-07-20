@@ -53,6 +53,8 @@ export function createInitialState() {
     reviewActions: null,
     historyRuns: [],
     historyFilter: 'all',
+    historyTypeFilter: 'all',
+    historyStatusFilter: 'all',
     runDetailsOrigin: null,
     pendingArchive: null,
     recoveryContext: null,

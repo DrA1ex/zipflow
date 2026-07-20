@@ -120,7 +120,7 @@ function renderTranscript(state, width, height, theme) {
   const activityTitle = unread && !state.transcriptSticky
     ? ` Activity · ${unread} new ↓ `
     : ' Activity ';
-  return ScrollPane({
+  const pane = ScrollPane({
     title: activityTitle,
     lines,
     width,
@@ -154,6 +154,19 @@ function renderTranscript(state, width, height, theme) {
       return result.copied;
     },
   });
+  if (!unread || state.transcriptSticky) return pane;
+  const indicator = PointerRegion({
+    pointerId: 'zipflow:activity-unread',
+    pointerWidth: 'fill',
+    onClick: (event) => {
+      state.dispatch?.({ type: 'activity-follow-latest' });
+      event.preventDefault();
+      event.stopPropagation?.();
+    },
+  }, Box({ border: true, padding: { left: 1, right: 1 } },
+    Text(color(theme, 'accent', `↓ ${unread} new Activity entr${unread === 1 ? 'y' : 'ies'} · click or press End`), { wrap: false }),
+  ));
+  return BottomOverlay({ content: pane, overlay: indicator, height, bottom: 1, left: 2, right: 2, align: 'center', opaque: true });
 }
 
 function renderCurrent(state, width, height, theme) {
@@ -380,6 +393,8 @@ function headerStats(state) {
 function preferredPromptHeight(state, width = 80, mainHeight = 20) {
   const maximum = Math.max(7, Math.floor(mainHeight * 0.6));
   if (state.busy) return Math.min(maximum, 8);
+  if (state.screen === 'setup-review') return Math.min(maximum, Math.max(15, Math.floor(mainHeight * 0.58)));
+  if (isWorkflowSetupScreen(state.screen)) return Math.min(maximum, Math.max(13, Math.floor(mainHeight * 0.48)));
   if (['checks-running', 'manual-checks-running'].includes(state.screen)) {
     return Math.min(maximum, Math.max(8, (state.checkRuntime?.checks?.length ?? 0) + 5));
   }
@@ -457,7 +472,11 @@ function renderHelpToastOverlay(state, content, width, height, theme) {
 }
 
 function showsInlineDescriptions(screen) {
-  return new Set(['setup-policy', 'setup-archive-mode', 'setup-deletion-scope', 'setup-git-checkpoint', 'setup-git-result', 'setup-git-message', 'setup-deploy', 'archive-safety']).has(screen);
+  return screen === 'archive-safety';
+}
+
+function isWorkflowSetupScreen(screen) {
+  return String(screen ?? '').startsWith('setup-') || String(screen ?? '').startsWith('custom-check');
 }
 
 function isSearchableScreen(screen) {

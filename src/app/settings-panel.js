@@ -15,11 +15,20 @@ import {
 import { validateSettingValue } from './settings-validation.js';
 import { testSelectedModel } from './settings-model-check.js';
 import {
+  handleModelReplayWorkspaceKey, loadModelReplayRuns, startHistoricalModelReplay,
+} from './settings-model-replay.js';
+import { clearArchiveStorage, clearBackups, refreshSettingsStorage } from './settings-storage.js';
+import {
   canSearchSettingsChoices, filterSettingsChoices, handleSettingsChoiceSearchKey,
 } from './settings-choice-search.js';
 import {
-  settingsChoices, settingsDefinitions, settingsEditorValue, settingsFieldDefinition, settingsParameters,
+  settingsChoices, settingsDefinitions, settingsEditorValue, settingsFieldDefinition, settingsPageTitle, settingsParameters,
 } from './settings-options.js';
+import {
+  clamp, currentChoiceIndex, currentChoices, currentDefinition, currentParameterIndex, directSettingParameter,
+  enterSelectedCategory, isDirectDefinition, moveChoice, moveParameter, panelParameter, rememberParameter,
+  restoreParameter, selectedChoiceIndex, setParameterIndex, wrap,
+} from './settings-panel-state.js';
 
 export function isSettingsScreen(screen) {
   return screen === 'settings';
@@ -49,12 +58,18 @@ export async function openSettings(controller, { categoryId = null } = {}) {
     modelError: null,
     loadingModels: false,
     managedCount: history.paths.length,
+    managedHistory: history,
+    storageStats: null,
+    loadingStorage: false,
+    storageError: null,
     modal: null,
     modelConfig: null,
     choiceSearch: null,
+    subpage: null,
   };
   setScreen(state, 'settings', { status: 'Global settings' });
   controller.invalidate();
+  await refreshSettingsStorage(controller, { quiet: true });
   if (state.settings.llmProvider !== 'disabled') await refreshModels(controller, { quiet: true });
   return true;
 }
@@ -109,6 +124,7 @@ export async function submitSettingsEditor(controller) {
 export async function handleSettingsKey(controller, key) {
   const panel = controller.state.settingsPanel;
   if (!panel) return false;
+  if (panel.modelTestWorkspace) return handleModelReplayWorkspaceKey(controller, key);
   if (panel.modelTest?.running && key.name === 'escape') {
     controller.state.settingsTestAbortController?.abort();
     controller.setStatus('Cancelling model test…');
@@ -116,6 +132,7 @@ export async function handleSettingsKey(controller, key) {
   }
   if (panel.modal) return handleModalKey(controller, key);
   if (panel.choiceSearch?.active) return handleSettingsChoiceSearchKey(controller, key, (delta) => moveChoice(controller.state, delta));
+  if (key.name === 'tab') return toggleSettingsPane(controller);
   if (panel.focus?.startsWith('model-config')) return handleModelSettingsKey(controller, key);
   if (key.printable && key.text === '/' && canSearchSettingsChoices(controller.state)) {
     panel.choiceSearch = { active: true, query: '' };
@@ -133,7 +150,7 @@ export async function handleSettingsKey(controller, key) {
     controller.invalidate();
     return true;
   }
-  if (['enter', 'space', 'right', 'tab'].includes(key.name)) {
+  if (['enter', 'space', 'right'].includes(key.name)) {
     if (panel.focus === 'categories') return enterCategory(controller);
     if (panel.focus === 'parameters') return activateParameter(controller);
     return activateChoice(controller);
@@ -145,6 +162,8 @@ export async function selectSetting(controller, index) {
   const panel = controller.state.settingsPanel;
   if (!panel) return;
   panel.categoryIndex = clamp(index, 0, settingsDefinitions(controller.state).length - 1);
+  panel.modelConfig = null;
+  panel.subpage = null;
   await ensureDefinitionData(controller, currentDefinition(controller.state));
   enterSelectedCategory(controller.state);
   controller.state.status = currentDefinition(controller.state).label;
@@ -187,6 +206,7 @@ export function settingsViewModel(state) {
     focus: state.settingsPanel?.focus ?? 'categories',
     definitions,
     selectedSetting,
+    pageTitle: settingsPageTitle(state, selectedSetting),
     parameters,
     choices,
     activeParameter,
@@ -200,6 +220,21 @@ export function settingsViewModel(state) {
   };
 }
 
+function toggleSettingsPane(controller) {
+  const { state } = controller;
+  const panel = state.settingsPanel;
+  if (panel.focus === 'categories') {
+    if (panel.modelConfig) panel.focus = 'model-config';
+    else enterSelectedCategory(state);
+    state.status = currentDefinition(state).label;
+  } else {
+    panel.focus = 'categories';
+    state.status = 'Global settings';
+  }
+  controller.invalidate();
+  return true;
+}
+
 async function handleBack(controller) {
   const panel = controller.state.settingsPanel;
   if (panel.focus === 'choices') {
@@ -211,8 +246,21 @@ async function handleBack(controller) {
     return true;
   }
   if (panel.focus === 'parameters') {
-    panel.focus = 'categories';
-    controller.state.status = 'Global settings';
+    if (panel.subpage) {
+      if (panel.subpage === 'llmModelReplay') {
+        panel.subpage = 'llmModelTests';
+        panel.parameterIndices[currentDefinition(controller.state).id] = 1;
+        controller.state.status = 'Model tests';
+      } else {
+        const previousId = panel.subpage === 'llmLanguages' ? 'llmLanguages' : 'llmModelTests';
+        panel.subpage = null;
+        restoreParameter(controller.state, previousId);
+        controller.state.status = currentDefinition(controller.state).label;
+      }
+    } else {
+      panel.focus = 'categories';
+      controller.state.status = 'Global settings';
+    }
     controller.invalidate();
     return true;
   }
@@ -224,6 +272,8 @@ async function moveCategory(controller, delta) {
   const { state } = controller;
   const definitions = settingsDefinitions(state);
   state.settingsPanel.categoryIndex = wrap(state.settingsPanel.categoryIndex + delta, definitions.length);
+  state.settingsPanel.modelConfig = null;
+  state.settingsPanel.subpage = null;
   await ensureDefinitionData(controller, currentDefinition(state));
   restoreParameter(state);
   state.status = currentDefinition(state).label;
@@ -231,6 +281,7 @@ async function moveCategory(controller, delta) {
 
 async function enterCategory(controller) {
   const { state } = controller;
+  state.settingsPanel.modelConfig = null;
   await ensureDefinitionData(controller, currentDefinition(state));
   enterSelectedCategory(state);
   state.status = currentDefinition(state).label;
@@ -244,7 +295,37 @@ async function activateParameter(controller) {
   if (!parameter || parameter.disabled) return true;
   rememberParameter(state, parameter.id);
   if (parameter.type === 'action') {
-    if (parameter.id === 'llmModelTest') await testSelectedModel(controller);
+    if (parameter.action === 'storage-refresh') await refreshSettingsStorage(controller);
+    else if (parameter.action === 'model-test-connection') await testSelectedModel(controller);
+    else if (parameter.action === 'model-test-replay') {
+      state.status = 'Loading historical updates';
+      await loadModelReplayRuns(controller);
+      state.settingsPanel.subpage = 'llmModelReplay';
+      state.settingsPanel.parameterIndices[currentDefinition(state).id] = 0;
+      state.status = 'Historical model replay';
+      controller.invalidate();
+    } else if (parameter.action === 'model-replay-run') {
+      await startHistoricalModelReplay(controller, parameter.runId);
+    } else if (parameter.action === 'model-replay-back') {
+      state.settingsPanel.subpage = 'llmModelTests';
+      state.settingsPanel.parameterIndices[currentDefinition(state).id] = 1;
+      state.status = 'Model tests';
+      controller.invalidate();
+    } else if (parameter.action === 'subpage-back') {
+      const previousId = state.settingsPanel.subpage === 'llmLanguages' ? 'llmLanguages' : 'llmModelTests';
+      state.settingsPanel.subpage = null;
+      restoreParameter(state, previousId);
+      state.status = currentDefinition(state).label;
+      controller.invalidate();
+    }
+    return true;
+  }
+  if (parameter.type === 'subpage') {
+    state.settingsPanel.subpage = parameter.id;
+    state.settingsPanel.focus = 'parameters';
+    state.settingsPanel.parameterIndices[currentDefinition(state).id] = 0;
+    state.status = parameter.label;
+    controller.invalidate();
     return true;
   }
   if (parameter.type === 'input') {
@@ -282,12 +363,20 @@ async function activateChoice(controller) {
     controller.invalidate();
     return true;
   }
-  if (option.action === 'history-cancel') return returnAfterChoice(controller, parameter.id, 'Managed-file history was not changed');
-  if (option.action === 'history-reset-confirm') {
+  if (option.action === 'clear-cancel') return returnAfterChoice(controller, parameter.id, 'Nothing was deleted');
+  if (option.action === 'archive-storage-clear-confirm') {
+    await clearArchiveStorage(controller);
+    return returnAfterChoice(controller, parameter.id, 'Source archive storage updated');
+  }
+  if (option.action === 'backup-storage-clear-confirm') {
+    await clearBackups(controller);
+    return returnAfterChoice(controller, parameter.id, 'Backup storage updated');
+  }
+  if (option.action === 'managed-history-clear-confirm') {
     const result = await resetManagedHistory(state.project.root);
+    state.settingsPanel.managedHistory = { ...state.settingsPanel.managedHistory, paths: [], updatedAt: new Date().toISOString() };
     state.settingsPanel.managedCount = 0;
-    controller.message('Managed-file history reset', [`${result.removed} recorded paths removed.`], 'warning');
-    return returnAfterChoice(controller, parameter.id, 'Managed-file history reset');
+    return returnAfterChoice(controller, parameter.id, `${result.removed} managed path${result.removed === 1 ? '' : 's'} cleared`);
   }
   if (option.settingId) {
     state.settings = await saveSettings({ ...state.settings, [option.settingId]: option.value });
@@ -364,122 +453,3 @@ function openSettingModal(controller, fieldId, returnParameterId) {
   controller.invalidate();
 }
 
-function currentDefinition(state) {
-  const definitions = settingsDefinitions(state);
-  const index = clamp(state.settingsPanel?.categoryIndex ?? 0, 0, Math.max(0, definitions.length - 1));
-  if (state.settingsPanel) state.settingsPanel.categoryIndex = index;
-  return definitions[index];
-}
-
-function panelParameter(state, parameters = null) {
-  const items = parameters ?? settingsParameters(state, currentDefinition(state));
-  if (!items.length) return null;
-  return items[currentParameterIndex(state, items)] ?? items[0];
-}
-
-function currentParameterIndex(state, parameters = null) {
-  const items = parameters ?? settingsParameters(state, currentDefinition(state));
-  const categoryId = currentDefinition(state).id;
-  const index = clamp(state.settingsPanel?.parameterIndices?.[categoryId] ?? 0, 0, Math.max(0, items.length - 1));
-  if (state.settingsPanel) state.settingsPanel.parameterIndices[categoryId] = index;
-  return index;
-}
-
-function setParameterIndex(state, index) {
-  const items = settingsParameters(state, currentDefinition(state));
-  state.settingsPanel.parameterIndices[currentDefinition(state).id] = clamp(index, 0, Math.max(0, items.length - 1));
-}
-
-function moveParameter(state, delta) {
-  const items = settingsParameters(state, currentDefinition(state));
-  if (!items.length) return;
-  let index = currentParameterIndex(state, items);
-  for (let attempts = 0; attempts < items.length; attempts += 1) {
-    index = wrap(index + delta, items.length);
-    if (!items[index].disabled) break;
-  }
-  setParameterIndex(state, index);
-}
-
-function moveChoice(state, delta) {
-  const choices = currentChoices(state);
-  if (!choices.length) return;
-  const parameter = panelParameter(state);
-  let index = currentChoiceIndex(state, choices, parameter);
-  for (let attempts = 0; attempts < choices.length; attempts += 1) {
-    index = wrap(index + delta, choices.length);
-    if (!choices[index].disabled) break;
-  }
-  state.settingsPanel.choiceIndices[parameter.id] = index;
-}
-
-function currentChoices(state) {
-  const parameter = panelParameter(state);
-  return parameter ? filterSettingsChoices(state, settingsChoices(state, parameter), parameter) : [];
-}
-
-function currentChoiceIndex(state, choices, parameter) {
-  if (!parameter || !choices.length) return 0;
-  const saved = state.settingsPanel?.choiceIndices?.[parameter.id];
-  if (Number.isInteger(saved) && choices[saved] && !choices[saved].disabled) return saved;
-  return selectedChoiceIndex(state, choices, parameter);
-}
-
-function selectedChoiceIndex(state, choices, parameter) {
-  const selected = choices.findIndex((item) => item.settingId === parameter.settingId
-    && (item.value === state.settings[parameter.settingId] || item.selected));
-  if (selected >= 0) return selected;
-  if (parameter.settingId === 'llmModel') {
-    const firstModel = choices.findIndex((item) => item.model && !item.disabled);
-    if (firstModel >= 0) return firstModel;
-  }
-  return choices.findIndex((item) => !item.disabled) >= 0 ? choices.findIndex((item) => !item.disabled) : 0;
-}
-
-function rememberParameter(state, parameterId) {
-  restoreParameter(state, parameterId);
-}
-
-function restoreParameter(state, parameterId = null) {
-  const items = settingsParameters(state, currentDefinition(state));
-  const categoryId = currentDefinition(state).id;
-  if (parameterId) {
-    const index = items.findIndex((item) => item.id === parameterId);
-    if (index >= 0) state.settingsPanel.parameterIndices[categoryId] = index;
-  }
-  currentParameterIndex(state, items);
-}
-
-function enterSelectedCategory(state) {
-  const definition = currentDefinition(state);
-  restoreParameter(state);
-  if (isDirectDefinition(definition)) {
-    const parameter = panelParameter(state);
-    state.settingsPanel.focus = 'choices';
-    state.settingsPanel.activeParameterId = parameter?.id ?? null;
-    if (parameter) {
-      const choices = settingsChoices(state, parameter);
-      state.settingsPanel.choiceIndices[parameter.id] = currentChoiceIndex(state, choices, parameter);
-    }
-  } else {
-    state.settingsPanel.focus = 'parameters';
-    state.settingsPanel.activeParameterId = null;
-  }
-}
-
-function directSettingParameter(definition, parameters) {
-  if (!definition?.directParameterId) return null;
-  return parameters.find((item) => item.id === definition.directParameterId) ?? null;
-}
-
-function isDirectDefinition(definition) {
-  return Boolean(definition?.directParameterId);
-}
-
-function wrap(value, length) {
-  return length ? (value + length) % length : 0;
-}
-
-function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
-}

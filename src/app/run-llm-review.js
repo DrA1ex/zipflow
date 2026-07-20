@@ -170,7 +170,8 @@ async function generateLlmSummary(controller, { plan, patch, extracted }) {
           durationMs: Date.now() - startedAt,
           provider: settings.llmProvider,
           model: settings.llmModel,
-          language: settings.llmLanguage,
+          language: settings.llmSummaryLanguage || settings.llmLanguage,
+          languages: llmLanguages(settings),
           cancelled: true,
           diagnosticsPath,
         }
@@ -178,7 +179,8 @@ async function generateLlmSummary(controller, { plan, patch, extracted }) {
           durationMs: Date.now() - startedAt,
           provider: settings.llmProvider,
           model: settings.llmModel,
-          language: settings.llmLanguage,
+          language: settings.llmSummaryLanguage || settings.llmLanguage,
+          languages: llmLanguages(settings),
           error: error.message,
           diagnosticsPath,
         },
@@ -232,7 +234,8 @@ function llmRecord(state, result, diagnosticsPath, durationMs = 0) {
     durationMs,
     provider: settings.llmProvider,
     model: settings.llmModel,
-    language: settings.llmLanguage,
+    language: settings.llmSummaryLanguage || settings.llmLanguage,
+    languages: llmLanguages(settings),
     summary: result.summary,
     commitMessage: result.commitMessage || null,
     warning: result.warning || null,
@@ -243,6 +246,14 @@ function llmRecord(state, result, diagnosticsPath, durationMs = 0) {
     diagnosticsPath,
     contextText: result.contextText ?? null,
     delivery: result.diagnostics?.delivery ?? null,
+  };
+}
+
+function llmLanguages(settings) {
+  return {
+    prompt: settings.llmPromptLanguage || 'English',
+    summary: settings.llmSummaryLanguage || settings.llmLanguage || 'English',
+    commit: settings.llmCommitLanguage || settings.llmLanguage || 'English',
   };
 }
 

@@ -251,11 +251,14 @@ export async function startApply(controller, { checkpointCreated = false } = {})
       runId: state.run.id, projectPath: state.project.root, plan: state.plan, decisions: state.decisions,
       onProgress: (progress) => setProgress(controller, progress.current, progress.total, `${progress.stage}${progress.path ? ` · ${progress.path}` : ''}`),
     });
-    const managedHistory = await updateManagedHistory(state.project.root, applied.applied);
+    const managedHistory = await updateManagedHistory(state.project.root, applied.applied, {
+      enabled: activeRunSettings(state).managedHistoryPolicy !== 'disabled',
+    });
     state.run.applied = {
       paths: applied.applied.map((item) => item.path),
       changedPaths: applied.applied.filter((item) => item.kind !== 'deleted').map((item) => item.path),
       backupPath: applied.backup.root,
+      backupAvailable: true,
       skippedConflicts: applied.skippedConflicts.map((item) => item.path),
       preservedPaths: state.plan.preserved.map((item) => item.path),
     };

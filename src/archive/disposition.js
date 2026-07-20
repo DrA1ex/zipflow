@@ -63,6 +63,45 @@ export async function pruneManagedArchives(index, { now = new Date(), retentionD
   return pruned;
 }
 
+export async function inspectManagedArchives() {
+  const index = await loadArchiveIndex();
+  const records = [];
+  for (const record of index.records ?? []) {
+    if (!(await exists(record.path))) continue;
+    const actual = await stat(record.path);
+    records.push({ ...record, size: actual.size });
+  }
+  records.sort((left, right) => new Date(left.addedAt) - new Date(right.addedAt));
+  if (records.length !== (index.records ?? []).length) {
+    index.records = records;
+    await saveArchiveIndex(index);
+  }
+  return {
+    count: records.length,
+    totalBytes: records.reduce((sum, record) => sum + record.size, 0),
+    oldestAt: records[0]?.addedAt ?? null,
+    records,
+  };
+}
+
+export async function clearManagedArchives() {
+  const index = await loadArchiveIndex();
+  const removed = [];
+  const failed = [];
+  for (const record of index.records ?? []) {
+    try {
+      if (await exists(record.path)) await unlink(record.path);
+      removed.push(record);
+    } catch (error) {
+      failed.push({ record, error: error.message });
+    }
+  }
+  index.records = failed.map((item) => item.record);
+  index.updatedAt = new Date().toISOString();
+  await saveArchiveIndex(index);
+  return { removed, failed, totalBytes: removed.reduce((sum, record) => sum + Number(record.size ?? 0), 0) };
+}
+
 export function archiveIndexPath() {
   return path.join(getZipflowHome(), 'archive-index.json');
 }

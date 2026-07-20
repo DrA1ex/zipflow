@@ -88,12 +88,14 @@ test('LM Studio generation uses native streaming settings and a safe context len
     chatBody = JSON.parse(options.body);
     return nativeCompletion(JSON.stringify({
       summary: ['Добавлена проверка конфигурации.'],
-      commitMessage: 'Добавить проверку конфигурации',
+      commitMessage: 'Add configuration validation',
     }));
   };
 
   const result = await generateChangeDescription({
-    settings: { llmProvider: 'lmstudio', llmModel: 'gemma-loaded', llmLanguage: 'Russian', llmApiToken: '' },
+    settings: { llmProvider: 'lmstudio', llmModel: 'gemma-loaded', llmPromptLanguage: 'Russian',
+      llmSummaryLanguage: 'Russian',
+      llmCommitLanguage: 'English', llmApiToken: '' },
     project: { name: 'fixture', labels: ['Node.js'] },
     plan: { counts: { created: 0, updated: 1, deleted: 0 } },
     patchContent: 'diff --git a/a.js b/a.js\n@@ -1 +1 @@\n-old\n+new\n',
@@ -101,9 +103,9 @@ test('LM Studio generation uses native streaming settings and a safe context len
 
   assert.equal(chatUrl, 'http://127.0.0.1:1234/api/v1/chat');
   assert.deepEqual(result.summary, ['Добавлена проверка конфигурации.']);
-  assert.equal(result.commitMessage, 'Добавить проверку конфигурации');
-  assert.match(chatBody.system_prompt, /You analyze source-code patches/);
-  assert.match(chatBody.system_prompt, /Write both summary and commitMessage in Russian/);
+  assert.equal(result.commitMessage, 'Add configuration validation');
+  assert.match(chatBody.system_prompt, /Интерпретируй и выполняй следующие инструкции/);
+  assert.match(chatBody.system_prompt, /Write summary and reasons in Russian[\s\S]*Write commitMessage in English/);
   assert.match(chatBody.input, /Project: fixture/);
   assert.equal(chatBody.stream, true);
   assert.equal(chatBody.reasoning, 'off');
@@ -171,7 +173,9 @@ test('reasoning-only LM Studio response is repaired instead of reported as empty
   };
 
   const result = await generateChangeDescription({
-    settings: { llmProvider: 'lmstudio', llmModel: 'gemma-loaded', llmLanguage: 'Russian', llmApiToken: 'token' },
+    settings: { llmProvider: 'lmstudio', llmModel: 'gemma-loaded', llmPromptLanguage: 'English',
+      llmSummaryLanguage: 'Russian',
+      llmCommitLanguage: 'Russian', llmApiToken: 'token' },
     project: { name: 'zipflow', labels: ['Node.js'] },
     plan: { counts: { created: 0, updated: 5, deleted: 0 } },
     patchContent: 'diff --git a/a.js b/a.js\n@@ -1 +1 @@\n-old\n+new\n',

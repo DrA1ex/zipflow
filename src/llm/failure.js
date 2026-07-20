@@ -1,5 +1,6 @@
 import { createLocalCompletion } from './client.js';
 import { getLocalModelProfile } from './model-info.js';
+import { promptLanguage, promptLanguageDirective, summaryLanguage } from './language.js';
 
 const MAX_FAILURE_OUTPUT_CHARS = 24_000;
 
@@ -16,7 +17,7 @@ export async function explainCheckFailure({ settings, project, run, failedCheck 
   notify({ type: 'model-profile', profile });
   const sameContext = settings.llmFailureAnalysis === 'same-context' && run.llm?.contextText;
   const messages = [
-    { role: 'system', content: failureSystemPrompt(settings.llmLanguage || 'English') },
+    { role: 'system', content: failureSystemPrompt(promptLanguage(settings), summaryLanguage(settings)) },
     ...(sameContext ? [{ role: 'assistant', content: run.llm.contextText }] : []),
     { role: 'user', content: failureUserPrompt(project, run, failedCheck, sameContext) },
   ];
@@ -46,15 +47,16 @@ export async function explainCheckFailure({ settings, project, run, failedCheck 
   };
 }
 
-function failureSystemPrompt(language) {
+function failureSystemPrompt(promptLang, outputLanguage) {
   return [
+    promptLanguageDirective(promptLang),
     'You explain failed developer checks after a source-code update.',
     'Return readable plain text, not JSON and not Markdown fences.',
     'Use exactly these headings: ERROR EXPLANATION:, LIKELY CAUSE:, NEXT STEPS:.',
     'Under NEXT STEPS use one to five short bullet points.',
     'Distinguish evidence from guesses. Do not claim a fix is certain when the output is ambiguous.',
     'Do not repeat the entire command output.',
-    `Write the explanation in ${language}.`,
+    `Write the explanation in ${outputLanguage}.`,
   ].join('\n');
 }
 

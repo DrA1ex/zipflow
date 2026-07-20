@@ -65,7 +65,9 @@ test('archive inspection persists changes.patch and records the local LLM result
       ...DEFAULT_SETTINGS,
       llmProvider: 'ollama',
       llmModel: 'qwen-coder',
-      llmLanguage: 'Russian',
+      llmPromptLanguage: 'English',
+      llmSummaryLanguage: 'Russian',
+      llmCommitLanguage: 'Russian',
       llmArchiveReview: 'patch',
     };
     const controller = new ZipflowController(state);
@@ -91,7 +93,7 @@ test('archive inspection persists changes.patch and records the local LLM result
     assert.match(suitability.lines.join(' '), /Suitable/i);
     assert.match(suitability.lines.join(' '), /high confidence/i);
     assert.match(suitability.lines.join(' '), /Структура и маркеры проекта совпадают/);
-    assert.match(requestBody.messages[0].content, /Write both summary and commitMessage in Russian/);
+    assert.match(requestBody.messages[0].content, /Write summary and reasons in Russian[\s\S]*Write commitMessage in Russian/);
     assert.equal('response_format' in requestBody, false, 'visible generation must stream readable text instead of JSON');
     assert.match(requestBody.messages[1].content, /src\/index\.js/);
 

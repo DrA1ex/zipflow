@@ -1,6 +1,7 @@
 import {
   BottomOverlay,
   Modal,
+  ScrollPane,
   SplitPane,
   SelectList,
   Spinner,
@@ -50,11 +51,52 @@ export function renderSettings(state, width, height, theme) {
       { id: 'details', size: rightWidth, min: 26, grow: 1, node: right },
     ],
   });
+  if (state.settingsPanel?.modelTestWorkspace) {
+    return renderModelReplayWorkspace({ content, state, width, height, theme });
+  }
   if (!view.modal && !view.choiceSearch?.active) return content;
   if (!view.modal && view.choiceSearch?.active) return renderChoiceSearch({ content, state, width, height, theme });
   return renderSettingsModal({ content, modal: view.modal, state, width, height, theme });
 }
 
+
+function renderModelReplayWorkspace({ content, state, width, height, theme }) {
+  const workspace = state.settingsPanel.modelTestWorkspace;
+  const overlayWidth = Math.max(48, Math.min(width - 4, Math.floor(width * 0.9)));
+  const overlayHeight = Math.max(12, Math.min(height - 2, Math.floor(height * 0.88)));
+  const lines = [
+    `${workspace.status} · ${(workspace.elapsedMs / 1000).toFixed(1)}s`,
+    '',
+    ...workspace.blocks.flatMap((block) => [
+      `${block.streaming ? '●' : '■'} ${block.title}`,
+      ...block.lines.map((line) => `  ${line}`),
+      ...(block.reasoning ? ['  Analysis:', ...String(block.reasoning).split('\n').map((line) => `    ${line}`)] : []),
+      ...(block.content ? ['  Model response:', ...String(block.content).split('\n').map((line) => `    ${line}`)] : []),
+      '',
+    ]),
+  ];
+  const visibleRows = Math.max(4, overlayHeight - 4);
+  workspace.maxScroll = Math.max(0, lines.length - visibleRows);
+  workspace.scroll = Math.max(0, Math.min(workspace.scroll ?? 0, workspace.maxScroll));
+  if (workspace.running) workspace.scroll = workspace.maxScroll;
+  const overlay = ScrollPane({
+    title: ` HISTORICAL MODEL REPLAY · ${workspace.runId} `,
+    lines, width: overlayWidth, height: overlayHeight, scroll: workspace.scroll, theme,
+    footer: workspace.running
+      ? '↑/↓ scroll · Esc cancel · project files remain unchanged'
+      : '↑/↓ scroll · C copy result · D copy diagnostics · Esc close',
+    pointerId: 'zipflow:model-replay-workspace',
+    onWheel: (event) => {
+      workspace.scroll = Math.max(0, Math.min(workspace.maxScroll, workspace.scroll + Math.sign(event.deltaY) * 3));
+      event.preventDefault();
+      event.stopPropagation?.();
+    },
+  });
+  return BottomOverlay({
+    content, overlay, height, bottom: Math.max(1, Math.floor((height - overlayHeight) / 2)),
+    left: 2, right: 2, width: overlayWidth, align: 'center', opaque: true,
+  });
+}
 
 function renderChoiceSearch({ content, state, width, height, theme }) {
   const overlayWidth = Math.max(34, Math.min(72, width - 6));
@@ -79,14 +121,15 @@ function renderSettingsPage(state, view, width, height, theme) {
   const nestedChoice = showingChoices && !view.direct;
   const title = nestedChoice
     ? ` ${view.activeParameter?.label?.toUpperCase() ?? 'SELECT'} `
-    : ` ${view.selectedSetting.label.toUpperCase()} `;
+    : ` ${(view.pageTitle ?? view.selectedSetting.label).toUpperCase()} `;
   const selectedParameter = !showingChoices ? items[view.parameterIndex] : null;
   const description = nestedChoice
     ? view.activeParameter?.description ?? ''
     : view.selectedSetting.description;
-  const parameterDescription = selectedParameter?.disabled
-    ? selectedParameter.disabledReason ?? ''
-    : selectedParameter?.description ?? '';
+  const selectedChoice = showingChoices ? items[view.choiceIndex] : null;
+  const parameterDescription = showingChoices
+    ? selectedChoice?.disabled ? selectedChoice.disabledReason ?? '' : selectedChoice?.description ?? ''
+    : selectedParameter?.disabled ? selectedParameter.disabledReason ?? '' : selectedParameter?.description ?? '';
   return WorkspacePane({
     title,
     active: view.focus !== 'categories' && !view.modal,
@@ -100,13 +143,11 @@ function renderSettingsPage(state, view, width, height, theme) {
         items,
         selectedIndex: showingChoices ? view.choiceIndex : view.parameterIndex,
         windowSize: Math.max(2, height - (description ? 8 : 5) - (parameterDescription ? 2 : 0)),
-        getLabel: (item) => showingChoices ? choiceLabel(state, item) : `${item.label}: ${item.value}`,
-        getDescription: (item) => showingChoices
-          ? item.description ?? ''
-          : item.disabled ? item.disabledReason ?? '' : '',
+        getLabel: (item) => showingChoices ? choiceLabel(state, item, theme) : parameterLabel(state, item, theme),
+        getDescription: () => '',
         getDisabled: (item) => item.disabled,
-        wrapItems: showingChoices,
-        maxItemLines: showingChoices ? 3 : 1,
+        wrapItems: false,
+        maxItemLines: 1,
         theme,
         pointerId: showingChoices ? 'zipflow:settings-choices' : 'zipflow:settings-parameters',
         onSelect: (_item, index) => state.dispatch?.({
@@ -129,7 +170,9 @@ function renderModelConfigPage(state, view, width, height, theme) {
     model.loaded ? 'Loaded instance' : 'Not loaded',
     model.maxContextLength ? `maximum context ${model.maxContextLength.toLocaleString('en-US')}` : null,
   ].filter(Boolean).join(' · ');
+  const selectedParameter = !choices ? items[view.parameterIndex] : null;
   const description = choices ? view.activeParameter?.description ?? '' : info;
+  const parameterDescription = choices ? '' : selectedParameter?.description ?? '';
   return WorkspacePane({
     title: ` ${model.label.toUpperCase()} `,
     active: !state.settingsPanel?.modal,
@@ -144,9 +187,14 @@ function renderModelConfigPage(state, view, width, height, theme) {
         items,
         selectedIndex: choices ? view.choiceIndex : view.parameterIndex,
         windowSize: Math.max(2, height - (description || view.error ? 8 : 5)),
-        getLabel: (item) => choices
-          ? `${item.value === view.values[view.activeParameter.id] ? '●' : '○'} ${item.label}`
-          : `${item.label}${item.value ? `: ${item.value}` : ''}`,
+        getLabel: (item) => {
+          if (!choices && item.id === 'use-model' && view.loading) {
+            return renderNode(Spinner({ frame: state.settingsPanel?.modelRefreshFrame ?? 0, label: item.label }), 64)[0];
+          }
+          return choices
+            ? `${item.value === view.values[view.activeParameter.id] ? '●' : '○'} ${item.label}`
+            : `${item.label}${item.value ? `: ${item.value}` : ''}`;
+        },
         getDescription: () => '',
         getDisabled: (item) => item.disabled || view.loading,
         wrapItems: false,
@@ -158,16 +206,29 @@ function renderModelConfigPage(state, view, width, height, theme) {
           index,
         }),
       }),
+      parameterDescription ? Text(color(theme, 'textMuted', parameterDescription), { wrap: true }) : null,
     ].filter(Boolean),
   });
 }
 
-function choiceLabel(state, item) {
+function parameterLabel(state, item, theme) {
+  if (item.loading) return renderNode(Spinner({ frame: state.settingsPanel?.modelRefreshFrame ?? 0, label: item.label }), 64)[0];
+  if (item.type === 'section') return color(theme, 'accent', `── ${item.label} ──`);
+  if (item.type === 'stat') return `${color(theme, 'textMuted', item.label)}: ${item.value}`;
+  return item.value ? `${item.label}: ${item.value}` : item.label;
+}
+
+function choiceLabel(state, item, theme) {
   if (item.action === 'refresh-models' && item.loading) {
     return renderNode(Spinner({
       frame: state.settingsPanel?.modelRefreshFrame ?? 0,
       label: 'Refreshing available models',
     }), 48)[0];
+  }
+  if (item.model) {
+    const selected = Boolean(item.selected);
+    const status = item.model.loaded ? 'Loaded' : 'Not loaded';
+    return `${selected ? '●' : '○'} ${item.label} ${color(theme, 'textMuted', `· ${status}`)}`;
   }
   if (!item.settingId) return item.label;
   const selected = item.selected || state.settings[item.settingId] === item.value;

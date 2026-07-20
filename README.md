@@ -186,7 +186,7 @@ Other supported message sources are the archive filename, a generated run identi
 
 ## Local LLM summaries and commit messages
 
-Zipflow supports Ollama and LM Studio with provider-specific adapters. LM Studio uses its native model catalog and streaming chat API so Zipflow can read model parameter counts, loaded-instance configuration, context size, and model-load or prompt-processing progress. The model list keeps unloaded entries compact and marks loaded entries with their active context. Selecting an LM Studio model opens a configuration page with the primary **Use this model** action selected. Unloaded models allow load-time tuning for context length, evaluation batch size, Flash Attention, KV-cache placement, and expert count when supported. Loaded models retain their load-time settings but allow a Zipflow request-context override. Saved choices are shown beside the model on later visits. Ollama uses its native model metadata endpoints to discover the active or configured context size, then uses its OpenAI-compatible chat-completion stream for generation. Configure the provider, optional bearer token, model, and response language in `Ctrl+B` settings.
+Zipflow supports Ollama and LM Studio with provider-specific adapters. LM Studio uses its native model catalog and streaming chat API so Zipflow can read model parameter counts, loaded-instance configuration, context size, and model-load or prompt-processing progress. The model list uses a radio marker for the selected model and shows `Loaded` or `Not loaded` as muted secondary information. Selecting a model opens a configuration page where context length, evaluation batch size, Flash Attention, KV-cache placement, and expert count can be edited even when the model is already loaded. **Save and select** unloads stale LM Studio LLM instances when necessary and reloads the selected model with the saved configuration, leaving one active LLM instance. Ollama uses its native model metadata endpoints to discover the active or configured context size, then uses its OpenAI-compatible chat-completion stream for generation. Configure the provider, optional bearer token, selected model, and separate prompt, summary, and commit-message languages in `Ctrl+B` settings.
 
 Default local endpoints:
 
@@ -221,9 +221,9 @@ When enabled, every inspected archive with content changes produces:
 
 The first durable LLM result is available as soon as archive analysis finishes, so the proposed commit message can be judged against the visible summary. The final block repeats the useful conclusion beside the actual check and deployment outcome. If no local model is enabled or generation is cancelled, the final block still contains the concise check result.
 
-The system and user prompts are always English. The selected language applies only to generated user-facing text. Primary generation uses a readable text protocol with `SUMMARY`, `COMMIT MESSAGE`, and optional assessment sections. Activity streams only human-readable reasoning and response text, preserves model line breaks, and wraps long lines to the current Terlio pane width; internal JSON repair is hidden from Activity. Long Activity entries can be expanded with `E` or by clicking the collapsed block. The view also shows the exact transport and endpoint, model-load progress, prompt-processing progress when the provider exposes it, elapsed time, delivery mode, and current file batch. Press `Esc` during generation to cancel only the local LLM request; archive analysis then continues with the normal commit-message fallbacks.
+Prompt, summary, and commit-message languages are configured separately. New installations default to English prompts, while migrated installations preserve the previous output language for summaries and commit messages. Primary generation uses a readable text protocol with `SUMMARY`, `COMMIT MESSAGE`, and optional assessment sections. Activity streams only human-readable reasoning and response text, preserves model line breaks, and wraps long lines to the current Terlio pane width; internal JSON repair is hidden from Activity. Long Activity entries can be expanded with `E` or by clicking the collapsed block. The view also shows the exact transport and endpoint, model-load progress, prompt-processing progress when the provider exposes it, elapsed time, delivery mode, and current file batch. Press `Esc` during generation to cancel only the local LLM request; archive analysis then continues with the normal commit-message fallbacks.
 
-Before generation, Zipflow discovers the model context size and loaded instances when possible and calculates a conservative prompt budget. For LM Studio, an already loaded instance ID is used directly, so Zipflow does not intentionally load a duplicate model. A saved request-context override is sent to the native chat endpoint without repeating the model-load request. The prompt budget reserves space for instructions and output. The complete `changes.patch` remains stored in the run, while the model receives a structurally shortened patch when necessary: the complete changed-file manifest is retained and diff hunks are distributed across files instead of cutting text at an arbitrary byte boundary. Zipflow also caps the effective prompt context conservatively to reduce local GPU-memory pressure. Context-overflow and out-of-memory responses trigger a smaller-patch retry and are reported explicitly rather than as `No usable output`.
+Before generation, Zipflow discovers the model context size and loaded instances when possible and calculates a conservative prompt budget. For LM Studio, the selected loaded instance ID is used directly. Changing load-time configuration performs an explicit unload and reload, and selecting another model unloads other loaded LLM instances so Zipflow does not accumulate duplicate active models. The prompt budget reserves space for instructions and output. The complete `changes.patch` remains stored in the run, while the model receives a structurally shortened patch when necessary: the complete changed-file manifest is retained and diff hunks are distributed across files instead of cutting text at an arbitrary byte boundary. Zipflow also caps the effective prompt context conservatively to reduce local GPU-memory pressure. Context-overflow and out-of-memory responses trigger a smaller-patch retry and are reported explicitly rather than as `No usable output`.
 
 Zipflow parses the readable section protocol and validates the resulting summary, commit message, and optional verdict. If a model ignores the requested format or spends its output budget on reasoning, Zipflow performs a hidden compact JSON-repair request against the generated draft. If only a useful summary can be recovered, that summary is kept while the commit message uses the configured fallback. Provider errors and sanitized raw diagnostics are saved in `~/.zipflow/runs/<run-id>/llm-diagnostics.json`. Local LLM failures never block archive application.
 
@@ -261,7 +261,7 @@ Deployment stdout, stderr, exit code, and duration are saved in the run report. 
 
 ## Global settings
 
-Press `Ctrl+B` to open global settings. The two-panel layout remains visible at every level: compact category names stay on the left and the selected category page stays on the right. Categories that contain one direct choice, such as **Theme**, **Running checks**, and **Managed history**, show their options immediately instead of adding a redundant parameter step. Multi-parameter categories show concise `Parameter: value` rows without inline help text. Selecting one temporarily replaces only the right panel with its choices and a short explanation, focused on the current value. `Enter` applies the value and `Esc` cancels it; both preserve the originating selection. Text, secret, path, and numeric values open in compact modal dialogs over both panels, with placeholders, validation, and unit hints where applicable.
+Press `Ctrl+B` to open global settings. The two-panel layout remains visible at every level: compact category names stay on the left and the selected category page stays on the right. `Tab` and `Shift+Tab` move focus between those panes without activating the current item; `Enter` or `Space` opens or applies it. Multi-parameter categories show concise `Parameter: value` rows, non-focusable section headings, and storage statistics. The explanation for the focused item appears below the list instead of being repeated in every row. `Esc` returns one level and preserves the previous category and item selection. Text, secret, path, and numeric values open in compact modal dialogs over both panels, with placeholders, validation, and unit hints where applicable.
 
 Current settings include:
 
@@ -270,10 +270,12 @@ Current settings include:
 - local LLM provider: Disabled, Ollama, or LM Studio;
 - an optional bearer token used for both model discovery and generation;
 - a model fetched from the selected server's model list;
-- the language used for generated summaries and commit messages;
+- separate languages for prompts, summaries, and generated commit messages;
+- a quick model connection/compatibility test and a read-only replay of a historical archive update using the current LLM settings;
 - the post-run source ZIP policy: leave in place, move to archive storage, or delete;
-- archive directory, retention period in days, and maximum managed archive size when move mode is enabled;
-- a guarded action to reset the current project's managed-file history.
+- archive directory, retention period, maximum managed archive size, current usage statistics, and a guarded managed-only cleanup action;
+- backup retention policy, age and size limits, current backup usage, and a guarded cleanup action for the fixed Zipflow backup directory;
+- a managed-file recording policy that is separate from the explicit **Clear now** action.
 
 Settings are saved immediately in:
 
@@ -290,7 +292,9 @@ Global settings control what happens to the uploaded source archive after an upd
 - **Move to archive storage** — move it to `~/zipflow-archive` by default;
 - **Delete source ZIP** — remove it after completion.
 
-Move mode creates its directory when selected or first used. Its directory, retention, and size controls appear in the same right-hand pane as the move policy. Retention accepts whole days; maximum size accepts B, KB, MB, GB, KiB, MiB, or GiB. The default retention is 30 days and the default maximum size is 1 GB. Cleanup removes the oldest entries first, but it only touches archives recorded in Zipflow's own archive index. Unrelated files in the same directory are never deleted. Cancelled runs, failures before application, and rollbacks before a run is kept do not consume the source archive.
+Move mode creates its directory when selected or first used. Its directory, retention, and size controls appear beside current storage statistics: managed file count, used space, oldest archive, and storage directory. **Clear now** shows the amount to be removed and touches only archives recorded in Zipflow's own archive index; unrelated files in the same directory are never deleted. Retention accepts whole days; maximum size accepts B, KB, MB, GB, KiB, MiB, or GiB. The default retention is 30 days and the default maximum size is 1 GB. Cancelled runs, failures before application, and rollbacks before a run is kept do not consume the source archive.
+
+The same settings page contains a separate backup block. Backups always live in `~/.zipflow/backups` (or the active `ZIPFLOW_HOME`) and the directory is read-only in the UI. Zipflow can keep all backups or prune them by age and total size. Automatic pruning never removes the backup of the active run. Manual cleanup warns that affected history entries will lose rollback capability, and those entries subsequently show `Rollback unavailable` instead of failing late.
 
 ## Supported project detection
 
@@ -313,7 +317,7 @@ Zipflow suggests formatting, vet, test, and build checks.
 
 ## Run history and repeated archives
 
-Every run stores its archive hash, archive metadata, safety warnings, LLM assessment, user decisions, plan, checks, commit, deployment, archive disposition, and rollback status. The project home exposes a compact history list and allows opening the full run details.
+Every run stores its archive hash, archive metadata, safety warnings, LLM assessment, user decisions, plan, checks, commit, deployment, archive disposition, and rollback status. History marks archive updates, manual tests, and manual deployments as different record types and provides independent type and status filters. Manual records explain why they do not contain a file diff or rollback action. Archive-update details can open the stored multi-file diff workspace when a patch is available.
 
 **Performance analytics** aggregates recent history with medians, averages, success rates, minimum/maximum duration, and a recent trend for each check and each provider/model pair. It also reports how often LLM inputs were reduced and the average number of generation attempts. Previous medians are used as estimates while checks and LLM analysis are running.
 
@@ -357,7 +361,7 @@ Set `ZIPFLOW_HOME` to use a different location, for example in tests or an isola
 
 ## Controls
 
-Context-sensitive `?` help adds a short explanation for the currently selected action to Activity. Diff review also exposes direct local shortcuts for archive/local decisions, while every action remains available through the normal menu.
+Context-sensitive `?` help opens an adaptive toast instead of adding an Activity entry. The toast wraps to the available terminal size, becomes scrollable when necessary, closes on click or `Esc`, and expires automatically. When Activity receives new entries while the user is reading older content, a prominent clickable indicator appears; clicking it or pressing `End` returns to the latest entry. Diff review also exposes direct local shortcuts for archive/local decisions, while every action remains available through the normal menu.
 
 
 ```text
@@ -366,7 +370,7 @@ Space       toggle or select the current option
 Enter       select, toggle, continue, or submit an editor
 Ctrl+Enter  insert a new line in the commit-message editor
 Esc         go back
-Tab         complete paths or open the selected settings category
+Tab         complete paths, or switch Settings pane focus
 ← / →       return from or open a settings category
 Page Up     scroll activity upward
 Page Down   scroll activity downward

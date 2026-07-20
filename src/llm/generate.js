@@ -7,6 +7,7 @@ import {
 import {
   extractUnstructuredResponse, parseChangeResponse, readableResponseInstructions,
 } from './response.js';
+import { commitLanguage, promptLanguage, promptLanguageDirective, summaryLanguage } from './language.js';
 
 const RESPONSE_SCHEMA = {
   type: 'object', additionalProperties: false,
@@ -37,10 +38,12 @@ export function isLocalLlmEnabled(settings) {
 export async function generateChangeDescription({ settings, project, plan, patchContent }, options = {}) {
   if (!isLocalLlmEnabled(settings)) return null;
   const notify = options.onEvent ?? (() => {});
-  const language = settings.llmLanguage || 'English';
+  const languages = {
+    prompt: promptLanguage(settings), summary: summaryLanguage(settings), commit: commitLanguage(settings),
+  };
   const reviewArchive = settings.llmArchiveReview === 'patch';
   const responseSchema = reviewArchive ? REVIEW_RESPONSE_SCHEMA : RESPONSE_SCHEMA;
-  const system = buildSystemPrompt(language, reviewArchive);
+  const system = buildSystemPrompt(languages, reviewArchive);
   const fixedUser = buildUserPrompt(project, plan, { kind: 'change-list', content: createChangeList(plan) });
   let session = options.session;
   if (!session) {
@@ -82,7 +85,7 @@ export async function generateChangeDescription({ settings, project, plan, patch
         contextLength: Math.min(budget.effectiveContextTokens, 8_192),
         responseSchema,
         messages: [
-          { role: 'system', content: repairPrompt(language, reviewArchive) },
+          { role: 'system', content: repairPrompt(languages, reviewArchive) },
           { role: 'user', content: `DRAFT START\n${draft}\nDRAFT END` },
         ],
       }, options, (event) => notify({ ...event, stage: 'repair', hiddenOutput: true }));
@@ -224,7 +227,9 @@ async function requestChunkBatch(context, batch, total, options, notify) {
         settings: context.settings, profile: context.profile, maxTokens: 512,
         contextLength: Math.min(context.budget.effectiveContextTokens, 12_000),
         messages: [
-          { role: 'system', content: chunkPrompt(context.settings.llmLanguage || 'English') },
+          { role: 'system', content: chunkPrompt({
+            prompt: promptLanguage(context.settings), summary: summaryLanguage(context.settings),
+          }) },
           { role: 'user', content: `BATCH ${batch.index}/${total}\nFILES:\n${batch.files.map((file) => `- ${file}`).join('\n')}\n\nPATCH:\n${fitted.content}` },
         ],
       }, options, (event) => notify({
@@ -253,8 +258,9 @@ async function requestChunkBatch(context, batch, total, options, notify) {
   throw lastError;
 }
 
-function buildSystemPrompt(language, reviewArchive = false) {
+function buildSystemPrompt(languages, reviewArchive = false) {
   return [
+    promptLanguageDirective(languages.prompt),
     'You analyze source-code patches and other source-code change representations for a developer workflow tool.',
     'Be factual and concise. Mention behavior, architecture, tests, or risks only when supported by the supplied information.',
     'Do not invent test results, issue numbers, or motivations.',
@@ -263,7 +269,7 @@ function buildSystemPrompt(language, reviewArchive = false) {
       'Use unsuitable only for strong evidence of a wrong archive. Use suspicious for ambiguous, destructive, or unexpectedly broad changes.',
       'This assessment is advisory and never replaces deterministic safety checks.',
     ] : []),
-    readableResponseInstructions(language, { assessment: reviewArchive }),
+    readableResponseInstructions({ summary: languages.summary, commit: languages.commit }, { assessment: reviewArchive }),
   ].join('\n\n');
 }
 
@@ -288,23 +294,25 @@ function buildSynthesisPrompt(project, plan, notes) {
   ].join('\n');
 }
 
-function chunkPrompt(language) {
+function chunkPrompt(languages) {
   return [
+    promptLanguageDirective(languages.prompt),
     'Analyze only this batch of source-code patches.',
     'Return plain text notes, not JSON and not a final commit message.',
     'Use at most eight concise bullet points. Preserve file names and important risks.',
     'Do not claim that tests passed and do not repeat large code excerpts.',
-    `Write the notes in ${language}.`,
+    `Write the notes in ${languages.summary}.`,
   ].join('\n');
 }
 
-function repairPrompt(language, reviewArchive = false) {
+function repairPrompt(languages, reviewArchive = false) {
   return [
+    promptLanguageDirective(languages.prompt),
     reviewArchive
       ? 'Convert the supplied draft into one JSON object with exactly summary, commitMessage, assessment, confidence, and reasons.'
       : 'Convert the supplied draft into one JSON object with exactly summary and commitMessage.',
     'Return JSON only. Do not add analysis, Markdown, or extra keys.',
-    `Write summary and commitMessage in ${language}.`,
+    `Write summary and reasons in ${languages.summary}. Write commitMessage in ${languages.commit}.`,
     'Keep the summary factual and concise. The commit message must be ready for git commit.',
     ...(reviewArchive ? ['Preserve the verdict using assessment suitable, suspicious, or unsuitable, confidence low/medium/high, and 1-5 reasons.'] : []),
   ].join(' ');

@@ -9,14 +9,13 @@ export function settingsDefinitions(state) {
   const definitions = [
     { id: 'theme', label: 'Theme', description: '', directParameterId: 'theme' },
     { id: 'checkOutput', label: 'Running checks', description: '', directParameterId: 'checkOutput' },
-    { id: 'localLlm', label: 'Local LLM', description: 'Provider, model, response language, and authentication.' },
+    { id: 'localLlm', label: 'Local LLM', description: 'Provider, model, languages, review behavior, and authentication.' },
     { id: 'sourceArchive', label: 'Source archives', description: 'What happens to an uploaded ZIP after a completed update.' },
   ];
   if (state.project) definitions.push({
     id: 'managedHistory',
-    label: 'Managed history',
-    description: '',
-    directParameterId: 'managedHistoryReset',
+    label: 'Managed-file history',
+    description: 'Control whether successful updates record managed paths and inspect the current project history.',
   });
   return definitions;
 }
@@ -27,7 +26,12 @@ export function settingsParameters(state, definition) {
     'checkOutput', 'Output while running', outputLabel(state.settings.checkOutput),
     'Compact shows status only; last-line also shows the latest command output line.',
   )];
-  if (definition.id === 'localLlm') return localLlmParameters(state);
+  if (definition.id === 'localLlm') {
+    if (state.settingsPanel?.subpage === 'llmLanguages') return llmLanguageParameters(state);
+    if (state.settingsPanel?.subpage === 'llmModelTests') return llmModelTestParameters(state);
+    if (state.settingsPanel?.subpage === 'llmModelReplay') return llmModelReplayParameters(state);
+    return localLlmParameters(state);
+  }
   if (definition.id === 'sourceArchive') return sourceArchiveParameters(state);
   if (definition.id === 'managedHistory') return managedHistoryParameters(state);
   return [];
@@ -45,7 +49,9 @@ export function settingsChoices(state, parameter) {
     option(parameter, 'lmstudio', 'LM Studio', 'Native API at 127.0.0.1:1234/api/v1.'),
   ];
   if (parameter.settingId === 'llmModel') return modelChoices(state, parameter);
-  if (parameter.settingId === 'llmLanguage') return LLM_LANGUAGES.map((value) => option(parameter, value, value));
+  if (['llmPromptLanguage', 'llmSummaryLanguage', 'llmCommitLanguage'].includes(parameter.settingId)) {
+    return LLM_LANGUAGES.map((value) => option(parameter, value, value));
+  }
   if (parameter.settingId === 'llmArchiveReview') return [
     option(parameter, 'disabled', 'Summary only', 'Generate summary and commit message without an archive suitability verdict.'),
     option(parameter, 'structure', 'Structure guard', 'Compare the project and archive trees before the patch summary request.'),
@@ -62,16 +68,37 @@ export function settingsChoices(state, parameter) {
     option(parameter, 'same-context', 'Continue change context', 'Explain the failure using the previous change review summary as context.'),
     option(parameter, 'new-context', 'New context', 'Explain only the failed command and its output in a fresh request.'),
   ];
+  if (parameter.settingId === 'backupRetentionPolicy') return [
+    option(parameter, 'all', 'Keep all backups', 'Never remove backups automatically. Manual Clear now remains available.'),
+    option(parameter, 'limits', 'Keep backups within limits', 'Remove oldest backups after successful runs when age or total-size limits are exceeded.'),
+  ];
+  if (parameter.settingId === 'managedHistoryPolicy') return [
+    option(parameter, 'record', 'Keep recording managed files', 'Successful archive updates add created and updated paths to managed-file history.'),
+    {
+      ...option(parameter, 'disabled', 'Do not record managed files', 'Keep existing history but stop updating it after future runs.'),
+      disabled: state.workflow?.deletion?.scope === 'managed-history',
+      disabledReason: 'The active workflow uses managed-file history for snapshot deletion. Change that workflow policy first.',
+    },
+  ];
   if (parameter.settingId === 'archivePolicy') return [
     option(parameter, 'keep', 'Do nothing', 'Leave the ZIP in its original location.'),
     option(parameter, 'move', 'Move to archive storage', 'Move the ZIP and enforce retention and size limits.'),
     option(parameter, 'delete', 'Delete source ZIP', 'Delete the uploaded ZIP after the update is completed.'),
   ];
-  if (parameter.id === 'managedHistoryReset') return [
-    { id: 'history-cancel', action: 'history-cancel', label: 'Keep history', description: 'Return without changing managed-file history.' },
-    { id: 'history-reset-confirm', action: 'history-reset-confirm', label: 'Reset history', description: 'Forget every path previously created or updated by Zipflow.' },
-  ];
+  if (parameter.id === 'archiveStorageClear') return clearChoices('archive-storage',
+    `Delete ${state.settingsPanel?.storageStats?.archives?.count ?? 0} Zipflow-managed source archives.`);
+  if (parameter.id === 'backupStorageClear') return clearChoices('backup-storage',
+    `Delete ${state.settingsPanel?.storageStats?.backups?.count ?? 0} backups. Rollback will become unavailable for affected runs.`);
+  if (parameter.id === 'managedHistoryClear') return clearChoices('managed-history',
+    `Forget ${state.settingsPanel?.managedHistory?.paths?.length ?? 0} recorded paths for this project.`);
   return [];
+}
+
+export function settingsPageTitle(state, definition) {
+  if (definition.id === 'localLlm' && state.settingsPanel?.subpage === 'llmLanguages') return 'LLM languages';
+  if (definition.id === 'localLlm' && state.settingsPanel?.subpage === 'llmModelTests') return 'Model tests';
+  if (definition.id === 'localLlm' && state.settingsPanel?.subpage === 'llmModelReplay') return 'Historical model replay';
+  return definition.label;
 }
 
 export function settingsFieldDefinition(fieldId) {
@@ -80,7 +107,7 @@ export function settingsFieldDefinition(fieldId) {
 
 export function settingsEditorValue(state, fieldId) {
   if (fieldId === 'llmApiToken') return '';
-  if (fieldId === 'archiveMaxBytes') return formatByteSize(state.settings[fieldId]).replace(/\s+/g, '');
+  if (['archiveMaxBytes', 'backupMaxBytes'].includes(fieldId)) return formatByteSize(state.settings[fieldId]).replace(/\s+/g, '');
   return String(state.settings[fieldId] ?? '');
 }
 
@@ -96,9 +123,10 @@ function localLlmParameters(state) {
       disabledReason: 'Enable Ollama or LM Studio first.',
     },
     {
-      ...choiceParameter('llmLanguage', 'Response language', state.settings.llmLanguage, 'The prompt remains English; summary and commit message use this language.'),
-      disabled,
-      disabledReason: 'Enable a local LLM provider first.',
+      id: 'llmLanguages', type: 'subpage', label: 'Languages',
+      value: languageSummary(state.settings),
+      description: 'Configure the language of model instructions, summaries, and generated commit messages independently.',
+      disabled, disabledReason: 'Enable a local LLM provider first.',
     },
     {
       ...choiceParameter('llmArchiveReview', 'Archive review', archiveReviewLabel(state.settings.llmArchiveReview), 'Optional LLM safety assessment; deterministic Zipflow checks always remain authoritative.'),
@@ -121,40 +149,175 @@ function localLlmParameters(state) {
       description: 'Optional API token for model discovery and generation.',
     },
     {
-      id: 'llmModelTest', type: 'action', label: 'Test selected model',
+      id: 'llmModelTests', type: 'subpage', label: 'Test selected model',
       value: modelTestValue(state.settingsPanel),
       description: modelTestDescription(state.settingsPanel),
       disabled: disabled || !state.settings.llmModel || Boolean(state.settingsPanel?.modelTest?.running),
-      disabledReason: disabled ? 'Enable a local LLM provider first.' : 'Choose a model first.',
+      disabledReason: disabled
+        ? 'Enable a local LLM provider first.'
+        : !state.settings.llmModel ? 'Choose a model first.' : 'The selected model test is already running.',
     },
   ];
 }
 
+function llmLanguageParameters(state) {
+  return [
+    choiceParameter('llmPromptLanguage', 'Prompt language', state.settings.llmPromptLanguage,
+      'Language used for model-facing instructions. Structured protocol names remain stable.'),
+    choiceParameter('llmSummaryLanguage', 'Summary language', state.settings.llmSummaryLanguage,
+      'Language used for change summaries, suitability reasons, and failed-check explanations.'),
+    choiceParameter('llmCommitLanguage', 'Commit message language', state.settings.llmCommitLanguage,
+      'Language used only for the generated Git commit message.'),
+    { id: 'llmLanguagesBack', type: 'action', action: 'subpage-back', label: 'Back to Local LLM', value: '',
+      description: 'Return to the Local LLM settings page.' },
+  ];
+}
+
+function languageSummary(settings) {
+  return `Prompt ${settings.llmPromptLanguage} · Summary ${settings.llmSummaryLanguage} · Commit ${settings.llmCommitLanguage}`;
+}
+
+function llmModelTestParameters(state) {
+  const running = Boolean(state.settingsPanel?.modelTest?.running || state.settingsPanel?.modelTestWorkspace?.running);
+  return [
+    { id: 'modelTestConnection', type: 'action', action: 'model-test-connection',
+      label: running && state.settingsPanel?.modelTest?.running ? 'Testing connection…' : 'Connection and compatibility test',
+      value: modelTestValue(state.settingsPanel),
+      description: modelTestDescription(state.settingsPanel), disabled: running, loading: running && Boolean(state.settingsPanel?.modelTest?.running) },
+    { id: 'modelTestReplay', type: 'action', action: 'model-test-replay',
+      label: 'Replay a historical update', value: '',
+      description: 'Run the current LLM rules against a stored historical patch without changing project files.', disabled: running },
+    { id: 'llmModelTestsBack', type: 'action', action: 'subpage-back', label: 'Back to Local LLM', value: '',
+      description: 'Return to the Local LLM settings page.', disabled: running },
+  ];
+}
+
+function llmModelReplayParameters(state) {
+  const runs = state.settingsPanel?.replayRuns ?? [];
+  const items = runs.map((run) => ({
+    id: `modelReplay:${run.id}`, type: 'action', action: 'model-replay-run', runId: run.id,
+    label: `${archiveName(run.archivePath)} · ${shortDate(run.createdAt)}`,
+    value: run.plan?.counts ? `${run.plan.counts.created} added · ${run.plan.counts.updated} changed · ${run.plan.counts.deleted} removed` : '',
+    description: run.replayAvailable
+      ? `Replay stored changes.patch from run ${run.id}. Project files remain untouched.`
+      : 'The stored patch is unavailable, so this run cannot be replayed.',
+    disabled: !run.replayAvailable,
+  }));
+  if (!items.length) items.push({
+    id: 'modelReplayEmpty', type: 'action', label: 'No replayable archive updates', value: '',
+    description: 'Complete an archive update with a stored patch before using historical replay.', disabled: true,
+  });
+  items.push({ id: 'modelReplayBack', type: 'action', action: 'model-replay-back', label: 'Back to model tests', value: '',
+    description: 'Return to test options.' });
+  return items;
+}
+
+function archiveName(value) {
+  return path.basename(String(value || 'archive update'));
+}
+
+function shortDate(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'unknown date' : date.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+}
+
 function sourceArchiveParameters(state) {
-  const parameters = [choiceParameter(
-    'archivePolicy', 'Policy', archivePolicyLabel(state.settings.archivePolicy),
-    'Choose what Zipflow does with the source ZIP after a completed update.',
-  )];
+  const stats = state.settingsPanel?.storageStats ?? {};
+  const archives = stats.archives ?? {};
+  const backups = stats.backups ?? {};
+  const loading = Boolean(state.settingsPanel?.loadingStorage);
+  const parameters = [
+    sectionRow('source-policy-section', 'SOURCE ARCHIVE POLICY'),
+    choiceParameter('archivePolicy', 'Policy', archivePolicyLabel(state.settings.archivePolicy),
+      'Choose what Zipflow does with the source ZIP after a completed update.'),
+  ];
   if (state.settings.archivePolicy === 'move') parameters.push(
-    inputParameter('archiveDirectory', 'Archive directory', displayArchiveDirectory(state.settings.archiveDirectory), 'Where completed source ZIPs are moved.'),
-    inputParameter('archiveRetentionDays', 'Retention', `${state.settings.archiveRetentionDays} days`, 'Maximum archive age; 0 disables age cleanup.'),
-    inputParameter('archiveMaxBytes', 'Maximum size', formatByteSize(state.settings.archiveMaxBytes), 'Combined size limit; 0 disables size cleanup.'),
+    inputParameter('archiveDirectory', 'Archive directory', displayArchiveDirectory(state.settings.archiveDirectory),
+      'Directory where completed source ZIPs are moved.'),
+    inputParameter('archiveRetentionDays', 'Retention', `${state.settings.archiveRetentionDays} days`,
+      'Maximum archive age; 0 disables age cleanup.'),
+    inputParameter('archiveMaxBytes', 'Maximum size', formatByteSize(state.settings.archiveMaxBytes),
+      'Combined managed archive size limit; 0 disables size cleanup.'),
+  );
+  parameters.push(
+    sectionRow('source-storage-section', 'CURRENT SOURCE ARCHIVE STORAGE'),
+    statRow('archive-files', 'Files', loading ? 'Scanning…' : String(archives.count ?? 0)),
+    statRow('archive-used', 'Used space', loading ? 'Scanning…' : formatByteSize(archives.totalBytes ?? 0)),
+    statRow('archive-oldest', 'Oldest archive', loading ? 'Scanning…' : dateLabel(archives.oldestAt)),
+    statRow('archive-path', 'Directory', displayArchiveDirectory(state.settings.archiveDirectory)),
+    actionRow('archiveStorageRefresh', 'Refresh storage statistics', loading ? 'Scanning…' : '',
+      'Re-scan Zipflow-managed source archives and backups.', { action: 'storage-refresh', disabled: loading }),
+    { ...choiceParameter('archiveStorageClear', 'Clear now', archives.count ? `${archives.count} files` : 'Empty',
+      'Delete only source archives registered in Zipflow’s archive index.'), disabled: loading || !archives.count },
+    sectionRow('backup-storage-section', 'FILE BACKUPS'),
+    choiceParameter('backupRetentionPolicy', 'Retention policy', backupPolicyLabel(state.settings.backupRetentionPolicy),
+      'Keep every backup or automatically remove the oldest backups within configured limits.'),
+  );
+  if (state.settings.backupRetentionPolicy === 'limits') parameters.push(
+    inputParameter('backupRetentionDays', 'Retention', `${state.settings.backupRetentionDays} days`,
+      'Maximum backup age; 0 disables age cleanup.'),
+    inputParameter('backupMaxBytes', 'Maximum size', formatByteSize(state.settings.backupMaxBytes),
+      'Maximum combined backup size; 0 disables size cleanup.'),
+  );
+  parameters.push(
+    statRow('backup-directory', 'Directory', backups.directory ? displayPath(backups.directory) : '~/.zipflow/backups'),
+    statRow('backup-count', 'Backups', loading ? 'Scanning…' : `${backups.count ?? 0} · ${backups.fileCount ?? 0} files`),
+    statRow('backup-used', 'Used space', loading ? 'Scanning…' : formatByteSize(backups.totalBytes ?? 0)),
+    statRow('backup-oldest', 'Oldest backup', loading ? 'Scanning…' : dateLabel(backups.oldestAt)),
+    { ...choiceParameter('backupStorageClear', 'Clear now', backups.count ? `${backups.count} backups` : 'Empty',
+      'Delete stored rollback backups except the backup belonging to an active run.'), disabled: loading || !backups.count },
   );
   return parameters;
 }
 
 function managedHistoryParameters(state) {
-  const active = state.run && state.plan && !state.run.applied;
-  return [{
-    id: 'managedHistoryReset',
-    type: 'choice',
-    label: 'Recorded paths',
-    value: `${state.settingsPanel?.managedCount ?? 0}`,
-    description: active
-      ? 'History cannot be reset during an active update.'
-      : 'Open to reset managed-file history for the current project.',
-    disabled: Boolean(active),
-  }];
+  const active = Boolean(state.run && !['completed', 'failed', 'cancelled', 'rolled_back'].includes(state.run.status));
+  const history = state.settingsPanel?.managedHistory ?? { paths: [], updatedAt: null };
+  return [
+    sectionRow('managed-recording-section', 'RECORDING'),
+    choiceParameter('managedHistoryPolicy', 'Policy', managedHistoryPolicyLabel(state.settings.managedHistoryPolicy),
+      'Choose whether future successful archive updates update managed-file history.'),
+    sectionRow('managed-current-section', 'CURRENT HISTORY'),
+    statRow('managed-count', 'Recorded paths', String(history.paths?.length ?? 0)),
+    statRow('managed-updated', 'Last updated', dateLabel(history.updatedAt)),
+    { ...choiceParameter('managedHistoryClear', 'Clear now', history.paths?.length ? `${history.paths.length} paths` : 'Empty',
+      'Forget recorded paths without changing whether future runs are recorded.'),
+      disabled: Boolean(active) || !history.paths?.length,
+      disabledReason: active ? 'History cannot be cleared during an active update.' : '' },
+  ];
+}
+
+function sectionRow(id, label) {
+  return { id, type: 'section', label, value: '', disabled: true };
+}
+
+function statRow(id, label, value) {
+  return { id, type: 'stat', label, value, disabled: true };
+}
+
+function actionRow(id, label, value, description, extra = {}) {
+  return { id, type: 'action', label, value, description, ...extra };
+}
+
+function clearChoices(kind, description) {
+  return [
+    { id: `${kind}-clear-cancel`, action: 'clear-cancel', label: 'Back', description: 'Return without deleting anything.' },
+    { id: `${kind}-clear-confirm`, action: `${kind}-clear-confirm`, label: 'Clear now', description },
+  ];
+}
+
+function backupPolicyLabel(value) {
+  return value === 'all' ? 'Keep all backups' : 'Keep backups within limits';
+}
+
+function managedHistoryPolicyLabel(value) {
+  return value === 'disabled' ? 'Do not record managed files' : 'Keep recording managed files';
+}
+
+function dateLabel(value) {
+  if (!value) return 'None';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 'Unknown' : date.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
 }
 
 function modelChoices(state, parameter) {
@@ -172,8 +335,8 @@ function modelChoices(state, parameter) {
       model,
       settingId: state.settings.llmProvider === 'lmstudio' ? null : parameter.settingId,
       value: model.id,
-      label: modelChoiceLabel(state, model),
-      description: '',
+      label: modelChoiceLabel(model),
+      description: modelChoiceDescription(state, model),
       selected: configuredModelMatches(state.settings.llmModel, model),
     })));
   } else result.push({
@@ -191,11 +354,14 @@ function configuredModelMatches(configuredModel, model) {
   return Boolean(model.key) && String(configuredModel ?? '').startsWith(`${model.key}:`);
 }
 
-function modelChoiceLabel(state, model) {
-  const identity = [model.label, model.paramsString, model.quantization].filter(Boolean).join(' · ');
-  if (!model.loaded) return identity;
+function modelChoiceLabel(model) {
+  return [model.label, model.paramsString, model.quantization].filter(Boolean).join(' · ');
+}
+
+function modelChoiceDescription(state, model) {
   const config = formatLoadedModelConfig(modelConfigSummary(state, model));
-  return `${identity} // Loaded${config ? `\n${config}` : ''}`;
+  if (model.loaded) return config ? `Loaded configuration: ${config}` : 'This model currently has a loaded LM Studio instance.';
+  return config ? `Saved configuration: ${config}` : 'Open to configure and select this model.';
 }
 
 function formatLoadedModelConfig(value) {
@@ -271,6 +437,16 @@ const FIELD_DEFINITIONS = Object.freeze({
     placeholder: 'Paste token or leave empty to clear',
     instructions: ['The token is stored locally in ~/.zipflow/settings.json and is never shown in Activity.'],
     secret: true,
+  },
+  backupRetentionDays: {
+    id: 'backupRetentionDays', label: 'Backup retention',
+    description: 'How long Zipflow backups may remain available for rollback.', placeholder: '30',
+    unitHint: 'Unit: whole days. Enter 0 to disable age-based cleanup.',
+  },
+  backupMaxBytes: {
+    id: 'backupMaxBytes', label: 'Backup maximum size',
+    description: 'Maximum combined size of Zipflow rollback backups.', placeholder: '2GB',
+    unitHint: 'Units: B, KB, MB, GB, KiB, MiB, GiB. Enter 0 for no size limit.',
   },
   archiveDirectory: {
     id: 'archiveDirectory',

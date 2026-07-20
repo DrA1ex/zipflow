@@ -13,8 +13,9 @@ export async function loadManagedHistory(projectPath) {
   return normalizeHistory(stored, await canonicalPath(projectPath));
 }
 
-export async function updateManagedHistory(projectPath, appliedItems) {
+export async function updateManagedHistory(projectPath, appliedItems, { enabled = true } = {}) {
   const before = await loadManagedHistory(projectPath);
+  if (!enabled) return { before: before.paths, after: before.paths, recording: false };
   const paths = new Set(before.paths);
   for (const item of appliedItems) {
     if (!item?.path) continue;
@@ -22,7 +23,7 @@ export async function updateManagedHistory(projectPath, appliedItems) {
     else if (item.kind === 'created' || item.kind === 'updated') paths.add(item.path);
   }
   const after = await saveManagedHistory(projectPath, { ...before, paths: [...paths].sort() });
-  return { before: before.paths, after: after.paths };
+  return { before: before.paths, after: after.paths, recording: true };
 }
 
 export async function restoreManagedHistory(projectPath, paths) {

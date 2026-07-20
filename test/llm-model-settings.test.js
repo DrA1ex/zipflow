@@ -51,12 +51,12 @@ function settingsState(modelChoices) {
   return state;
 }
 
-test('LM Studio model list shows parameter counts and only loaded models show runtime status', async () => {
+test('LM Studio model list uses radio selection and muted loaded state metadata', async () => {
   const state = settingsState(await models());
   const output = renderToString(renderZipflow({ state, width: 120, height: 32 }), { width: 120, height: 32 });
 
-  assert.match(output, /Gemma 12B[\s\S]*12B · Q4_K_M/);
-  assert.match(output, /Qwen 27B · 27B · Q5_K_M \/\/ Loaded/);
+  assert.match(output, /○ Gemma 12B[\s\S]*12B · Q4_K_M[\s\S]*· Not loaded/);
+  assert.match(output, /● Qwen 27B · 27B · Q5_K_M[\s\S]*· Loaded/);
   assert.match(output, /Context 24,000 · batch 512 · flash enabled · KV gpu memory/);
   assert.doesNotMatch(output, /just-in-time/i);
   assert.doesNotMatch(output, /Read the models currently exposed/i);
@@ -73,7 +73,7 @@ test('model refresh renders the Terlio inline spinner in the refresh row', async
   assert.doesNotMatch(output, /Refreshing available models ×/);
 });
 
-test('model selection skips Refresh and model configuration starts on Use this model', async () => {
+test('model selection skips Refresh and model configuration starts on Save and select', async () => {
   const modelChoices = await models();
   const state = settingsState(modelChoices);
   state.settings.llmModel = '';
@@ -85,11 +85,11 @@ test('model selection skips Refresh and model configuration starts on Use this m
   openModelConfiguration(controller, modelChoices.find((item) => item.key === 'gemma-12b'));
   view = settingsModelView(state);
   assert.equal(view.parameters[view.parameterIndex].id, 'use-model');
-  assert.equal(view.parameters[view.parameterIndex].label, 'Use this model');
+  assert.equal(view.parameters[view.parameterIndex].label, 'Save and select');
   assert.equal(view.parameters.some((item) => /Use loaded instance/i.test(item.label)), false);
 });
 
-test('loaded LM Studio models keep load-only settings read-only but allow a request context override', async () => {
+test('loaded LM Studio models allow configuration changes and reload the selected instance', async () => {
   const previousHome = process.env.ZIPFLOW_HOME;
   process.env.ZIPFLOW_HOME = await tempDir('zipflow-loaded-model-context-home-');
   try {
@@ -102,13 +102,32 @@ test('loaded LM Studio models keep load-only settings read-only but allow a requ
 
     let view = settingsModelView(state);
     assert.equal(view.parameters.find((item) => item.id === 'contextLength').disabled, false);
-    assert.equal(view.parameters.find((item) => item.id === 'evalBatchSize').disabled, true);
+    assert.equal(view.parameters.find((item) => item.id === 'evalBatchSize').disabled, false);
     await selectModelParameter(controller, view.parameters.findIndex((item) => item.id === 'contextLength'));
     view = settingsModelView(state);
     await selectModelChoice(controller, view.choices.findIndex((item) => item.value === 16_384));
-    view = settingsModelView(state);
-    await selectModelParameter(controller, view.parameters.findIndex((item) => item.id === 'use-model'));
+    const requests = [];
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = async (url, options) => {
+      const body = JSON.parse(options.body);
+      requests.push({ url, body });
+      if (url.endsWith('/models/unload')) return jsonResponse({});
+      if (url.endsWith('/models/load')) return jsonResponse({
+        instance_id: 'qwen-reloaded',
+        load_config: { context_length: 16_384, eval_batch_size: 512, flash_attention: true, offload_kv_cache_to_gpu: true },
+      });
+      throw new Error(`Unexpected request: ${url}`);
+    };
+    try {
+      view = settingsModelView(state);
+      await selectModelParameter(controller, view.parameters.findIndex((item) => item.id === 'use-model'));
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
 
+    assert.deepEqual(requests.map((item) => item.url.split('/').at(-1)), ['unload', 'load']);
+    assert.equal(requests[0].body.instance_id, 'qwen-loaded');
+    assert.equal(requests[1].body.model, 'qwen-27b');
     assert.equal(state.settings.llmModel, 'qwen-27b');
     assert.equal(state.settings.llmModelLoadConfigs['lmstudio:qwen-27b'].contextLength, 16_384);
   } finally {
@@ -142,20 +161,28 @@ test('unloaded LM Studio models open load configuration and apply selected param
     assert.notEqual(contextIndex, -1);
     await selectModelChoice(controller, contextIndex);
 
+    const requests = [];
     globalThis.fetch = async (url, options) => {
-      assert.equal(url, 'http://127.0.0.1:1234/api/v1/models/load');
-      requestBody = JSON.parse(options.body);
-      return jsonResponse({
-        instance_id: 'gemma-custom',
-        load_time_seconds: 1.2,
-        load_config: { context_length: 16_384, eval_batch_size: 512, flash_attention: true },
-      });
+      const body = JSON.parse(options.body);
+      requests.push({ url, body });
+      if (url.endsWith('/models/unload')) return jsonResponse({});
+      if (url.endsWith('/models/load')) {
+        requestBody = body;
+        return jsonResponse({
+          instance_id: 'gemma-custom',
+          load_time_seconds: 1.2,
+          load_config: { context_length: 16_384, eval_batch_size: 512, flash_attention: true },
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
     };
 
     view = settingsModelView(state);
     const useIndex = view.parameters.findIndex((item) => item.id === 'use-model');
     await selectModelParameter(controller, useIndex);
 
+    assert.deepEqual(requests.map((item) => item.url.split('/').at(-1)), ['unload', 'load']);
+    assert.equal(requests[0].body.instance_id, 'qwen-loaded');
     assert.equal(requestBody.model, 'gemma-12b');
     assert.equal(requestBody.context_length, 16_384);
     assert.equal(requestBody.echo_load_config, true);

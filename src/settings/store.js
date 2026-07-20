@@ -3,7 +3,7 @@ import { themes } from 'terlio.js';
 import { readJson, writeJsonAtomic } from '../utils/fs.js';
 import { ensureZipflowHome, getZipflowHome } from '../workflow/store.js';
 
-export const SETTINGS_VERSION = 8;
+export const SETTINGS_VERSION = 10;
 export const THEME_NAMES = Object.keys(themes);
 export const LLM_PROVIDERS = ['disabled', 'ollama', 'lmstudio'];
 export const LLM_LANGUAGES = ['English', 'Russian', 'German', 'French', 'Spanish', 'Chinese', 'Japanese'];
@@ -11,6 +11,8 @@ export const ARCHIVE_POLICIES = ['keep', 'move', 'delete'];
 export const LLM_ARCHIVE_REVIEW_MODES = ['disabled', 'structure', 'patch'];
 export const LLM_CHANGE_DELIVERY_MODES = ['adaptive', 'patch', 'change-list', 'chunked'];
 export const LLM_FAILURE_ANALYSIS_MODES = ['disabled', 'same-context', 'new-context'];
+export const BACKUP_RETENTION_POLICIES = ['all', 'limits'];
+export const MANAGED_HISTORY_POLICIES = ['record', 'disabled'];
 
 export const DEFAULT_SETTINGS = Object.freeze({
   version: SETTINGS_VERSION,
@@ -19,6 +21,10 @@ export const DEFAULT_SETTINGS = Object.freeze({
   llmProvider: 'disabled',
   llmModel: '',
   llmLanguage: 'English',
+  llmPromptLanguage: 'English',
+  llmSummaryLanguage: 'English',
+  llmCommitLanguage: 'English',
+  llmSelectedInstanceId: '',
   llmApiToken: '',
   llmArchiveReview: 'disabled',
   llmChangeDelivery: 'adaptive',
@@ -28,6 +34,10 @@ export const DEFAULT_SETTINGS = Object.freeze({
   archiveDirectory: '~/zipflow-archive',
   archiveRetentionDays: 30,
   archiveMaxBytes: 1_000_000_000,
+  backupRetentionPolicy: 'limits',
+  backupRetentionDays: 30,
+  backupMaxBytes: 2_000_000_000,
+  managedHistoryPolicy: 'record',
   recentArchivePaths: [],
   lastArchiveDirectory: '',
   lastExportDirectory: '',
@@ -48,12 +58,30 @@ export async function saveSettings(settings) {
 }
 
 export function normalizeSettings(settings) {
-  const value = { ...DEFAULT_SETTINGS, ...(settings ?? {}), version: SETTINGS_VERSION };
+  const source = settings && typeof settings === 'object' ? settings : {};
+  const value = { ...DEFAULT_SETTINGS, ...source, version: SETTINGS_VERSION };
   if (!THEME_NAMES.includes(value.theme)) value.theme = DEFAULT_SETTINGS.theme;
   if (!['compact', 'last-line'].includes(value.checkOutput)) value.checkOutput = DEFAULT_SETTINGS.checkOutput;
   if (!LLM_PROVIDERS.includes(value.llmProvider)) value.llmProvider = DEFAULT_SETTINGS.llmProvider;
   if (typeof value.llmModel !== 'string') value.llmModel = '';
-  if (!LLM_LANGUAGES.includes(value.llmLanguage)) value.llmLanguage = DEFAULT_SETTINGS.llmLanguage;
+  const legacyLanguage = normalizeLanguage(value.llmLanguage, DEFAULT_SETTINGS.llmLanguage);
+  const hasSplitLanguages = ['llmPromptLanguage', 'llmSummaryLanguage', 'llmCommitLanguage']
+    .some((key) => Object.prototype.hasOwnProperty.call(source, key));
+  const isLegacySettings = Number(source.version || 0) < SETTINGS_VERSION && !hasSplitLanguages;
+  value.llmPromptLanguage = normalizeLanguage(
+    isLegacySettings ? DEFAULT_SETTINGS.llmPromptLanguage : value.llmPromptLanguage,
+    DEFAULT_SETTINGS.llmPromptLanguage,
+  );
+  value.llmSummaryLanguage = normalizeLanguage(
+    isLegacySettings ? legacyLanguage : value.llmSummaryLanguage,
+    legacyLanguage,
+  );
+  value.llmCommitLanguage = normalizeLanguage(
+    isLegacySettings ? legacyLanguage : value.llmCommitLanguage,
+    legacyLanguage,
+  );
+  value.llmLanguage = value.llmSummaryLanguage;
+  if (typeof value.llmSelectedInstanceId !== 'string') value.llmSelectedInstanceId = '';
   if (typeof value.llmApiToken !== 'string') value.llmApiToken = '';
   if (!LLM_ARCHIVE_REVIEW_MODES.includes(value.llmArchiveReview)) value.llmArchiveReview = DEFAULT_SETTINGS.llmArchiveReview;
   if (!LLM_CHANGE_DELIVERY_MODES.includes(value.llmChangeDelivery)) value.llmChangeDelivery = DEFAULT_SETTINGS.llmChangeDelivery;
@@ -64,6 +92,10 @@ export function normalizeSettings(settings) {
   if (typeof value.archiveDirectory !== 'string' || !value.archiveDirectory.trim()) value.archiveDirectory = DEFAULT_SETTINGS.archiveDirectory;
   value.archiveRetentionDays = normalizeInteger(value.archiveRetentionDays, DEFAULT_SETTINGS.archiveRetentionDays, 0, 36_500);
   value.archiveMaxBytes = normalizeInteger(value.archiveMaxBytes, DEFAULT_SETTINGS.archiveMaxBytes, 0, Number.MAX_SAFE_INTEGER);
+  if (!BACKUP_RETENTION_POLICIES.includes(value.backupRetentionPolicy)) value.backupRetentionPolicy = DEFAULT_SETTINGS.backupRetentionPolicy;
+  value.backupRetentionDays = normalizeInteger(value.backupRetentionDays, DEFAULT_SETTINGS.backupRetentionDays, 0, 36_500);
+  value.backupMaxBytes = normalizeInteger(value.backupMaxBytes, DEFAULT_SETTINGS.backupMaxBytes, 0, Number.MAX_SAFE_INTEGER);
+  if (!MANAGED_HISTORY_POLICIES.includes(value.managedHistoryPolicy)) value.managedHistoryPolicy = DEFAULT_SETTINGS.managedHistoryPolicy;
   value.recentArchivePaths = normalizeRecentPaths(value.recentArchivePaths);
   if (typeof value.lastArchiveDirectory !== 'string') value.lastArchiveDirectory = '';
   if (typeof value.lastExportDirectory !== 'string') value.lastExportDirectory = '';
@@ -96,6 +128,10 @@ function normalizeOptionalInteger(value, min, max) {
 
 function normalizeOptionalBoolean(value) {
   return typeof value === 'boolean' ? value : null;
+}
+
+function normalizeLanguage(value, fallback) {
+  return LLM_LANGUAGES.includes(value) ? value : fallback;
 }
 
 export function settingsPath() {

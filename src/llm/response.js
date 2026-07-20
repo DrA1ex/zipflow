@@ -38,7 +38,10 @@ export function extractUnstructuredResponse(content) {
   return { summary: [...new Set(summary)].slice(0, 5), commitMessage: normalizeCommitMessage(commitMessage) };
 }
 
-export function readableResponseInstructions(language, { assessment = false } = {}) {
+export function readableResponseInstructions(languageOrOptions, { assessment = false } = {}) {
+  const languages = typeof languageOrOptions === 'string'
+    ? { summary: languageOrOptions, commit: languageOrOptions }
+    : { summary: languageOrOptions?.summary ?? 'English', commit: languageOrOptions?.commit ?? 'English' };
   return [
     'Return a short plain-text response using the exact section headings below.',
     'Do not return JSON, Markdown fences, tables, or hidden reasoning.',
@@ -55,7 +58,7 @@ export function readableResponseInstructions(language, { assessment = false } = 
       'REASONS:',
       '- one to five concise reasons',
     ] : []),
-    `Write both summary and commitMessage in ${language}. Write reasons in ${language}. Keep enum values in English.`,
+    `Write summary and reasons in ${languages.summary}. Write commitMessage in ${languages.commit}. Keep enum values in English.`,
   ].join('\n');
 }
 

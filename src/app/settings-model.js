@@ -1,4 +1,4 @@
-import { loadLmStudioModel } from '../llm/client.js';
+import { loadLmStudioModel, unloadLmStudioModel } from '../llm/client.js';
 import { saveSettings } from '../settings/store.js';
 
 export function openModelConfiguration(controller, model) {
@@ -11,11 +11,12 @@ export function openModelConfiguration(controller, model) {
   state.settingsPanel.modelConfig = {
     model,
     focus: 'parameters',
-    parameterIndex: useModelParameterIndex(model, values),
+    parameterIndex: saveModelParameterIndex(model, values),
     choiceIndex: 0,
     activeParameterId: null,
     values,
     loading: false,
+    progressLabel: '',
     error: null,
   };
   state.status = 'Model configuration';
@@ -24,7 +25,7 @@ export function openModelConfiguration(controller, model) {
 
 export function settingsModelView(state) {
   const modelConfig = state.settingsPanel?.modelConfig;
-  if (!modelConfig || !state.settingsPanel?.focus?.startsWith('model-config')) return null;
+  if (!modelConfig) return null;
   const parameters = modelParameters(modelConfig);
   const parameterIndex = clamp(modelConfig.parameterIndex, 0, Math.max(0, parameters.length - 1));
   modelConfig.parameterIndex = parameterIndex;
@@ -52,12 +53,13 @@ export async function handleModelSettingsKey(controller, key) {
   }
   if (key.name === 'up' || key.name === 'down') {
     const delta = key.name === 'up' ? -1 : 1;
-    if (config.focus === 'choices') moveModelChoice(config, delta, settingsModelView(controller.state).choices.length);
-    else moveModelParameter(config, delta, settingsModelView(controller.state).parameters.length);
+    const view = settingsModelView(controller.state);
+    if (config.focus === 'choices') moveModelChoice(config, delta, view.choices.length);
+    else moveModelParameter(config, delta, view.parameters.length);
     controller.invalidate();
     return true;
   }
-  if (['enter', 'space', 'right', 'tab'].includes(key.name)) {
+  if (['enter', 'space', 'right'].includes(key.name)) {
     if (config.focus === 'choices') return activateModelChoice(controller);
     return activateModelParameter(controller);
   }
@@ -83,25 +85,34 @@ function modelParameters(config) {
   const model = config.model;
   const values = config.values;
   const parameters = [
-    valueParameter('contextLength', 'Context length', tokenLabel(values.contextLength), false),
-    valueParameter('evalBatchSize', 'Evaluation batch', numberLabel(values.evalBatchSize), model.loaded),
-    valueParameter('flashAttention', 'Flash Attention', triStateLabel(values.flashAttention), model.loaded),
-    valueParameter('offloadKvCacheToGpu', 'KV cache', kvLabel(values.offloadKvCacheToGpu), model.loaded),
+    valueParameter('contextLength', 'Context length', tokenLabel(values.contextLength)),
+    valueParameter('evalBatchSize', 'Evaluation batch', numberLabel(values.evalBatchSize)),
+    valueParameter('flashAttention', 'Flash Attention', triStateLabel(values.flashAttention)),
+    valueParameter('offloadKvCacheToGpu', 'KV cache', kvLabel(values.offloadKvCacheToGpu)),
   ];
   if (values.numExperts != null || model.config?.num_experts != null) {
-    parameters.push(valueParameter('numExperts', 'Experts', numberLabel(values.numExperts), model.loaded));
+    parameters.push(valueParameter('numExperts', 'Experts', numberLabel(values.numExperts)));
   }
-  parameters.push({ id: 'use-model', action: 'use-model', label: 'Use this model', value: '' });
-  parameters.push({ id: 'back-models', action: 'back-models', label: 'Back to model list', value: '' });
+  parameters.push({
+    id: 'use-model', action: 'use-model', label: config.loading ? (config.progressLabel || 'Applying…') : 'Save and select', value: '',
+    description: 'Save these parameters, make this the selected model, and keep only its LLM instance loaded.',
+    disabled: config.loading,
+  });
+  parameters.push({
+    id: 'back-models', action: 'back-models', label: 'Back to model list', value: '',
+    description: 'Discard unsaved parameter changes and return to available models.', disabled: config.loading,
+  });
   return parameters;
 }
 
 function parameterChoices(config, parameter) {
   if (parameter.id === 'contextLength') return contextChoices(config.model);
-  if (parameter.id === 'evalBatchSize') return [null, 128, 256, 512, 1024, 2048].map((value) => valueChoice(parameter.id, value, numberLabel(value)));
+  if (parameter.id === 'evalBatchSize') return [null, 128, 256, 512, 1024, 2048]
+    .map((value) => valueChoice(parameter.id, value, numberLabel(value)));
   if (parameter.id === 'flashAttention') return triStateChoices(parameter.id, 'Automatic', 'Enabled', 'Disabled');
   if (parameter.id === 'offloadKvCacheToGpu') return triStateChoices(parameter.id, 'Automatic', 'GPU memory', 'CPU memory');
-  if (parameter.id === 'numExperts') return [null, 1, 2, 4, 8, 16].map((value) => valueChoice(parameter.id, value, numberLabel(value)));
+  if (parameter.id === 'numExperts') return [null, 1, 2, 4, 8, 16]
+    .map((value) => valueChoice(parameter.id, value, numberLabel(value)));
   return [];
 }
 
@@ -140,62 +151,89 @@ async function useConfiguredModel(controller) {
   const model = config.model;
   if (config.loading) return true;
   config.loading = true;
+  config.progressLabel = 'Applying model configuration…';
   config.error = null;
-  state.status = model.loaded ? 'Selecting loaded model' : 'Loading model in LM Studio';
+  state.status = config.progressLabel;
   controller.invalidate();
   try {
-    const selectedId = model.key;
-    let loadedInstanceId = model.loadedInstanceId ?? null;
-    let appliedConfig = config.values;
-    if (!model.loaded && state.settings.llmProvider === 'lmstudio') {
-      const loaded = await loadLmStudioModel(model.key, config.values, { apiToken: state.settings.llmApiToken });
-      loadedInstanceId = loaded.instanceId;
-      appliedConfig = { ...config.values, ...normalizeApiConfig(loaded.config) };
-    }
+    const result = state.settings.llmProvider === 'lmstudio'
+      ? await reconcileLmStudioModel(controller, model, config)
+      : { instanceId: null, config: config.values };
     const configKey = modelConfigKey(state.settings.llmProvider, model.key);
     state.settings = await saveSettings({
       ...state.settings,
-      llmModel: selectedId,
+      llmModel: model.key,
+      llmSelectedInstanceId: result.instanceId,
       llmModelLoadConfigs: {
         ...(state.settings.llmModelLoadConfigs ?? {}),
-        [configKey]: appliedConfig,
+        [configKey]: result.config,
       },
     });
-    if (!model.loaded) {
-      const updated = {
-        ...model,
-        id: model.key,
-        loaded: true,
-        loadedInstanceId,
-        loadedInstanceIds: loadedInstanceId ? [loadedInstanceId] : [],
-        contextLength: appliedConfig.contextLength ?? model.maxContextLength ?? null,
-        config: {
-          context_length: appliedConfig.contextLength,
-          eval_batch_size: appliedConfig.evalBatchSize,
-          flash_attention: appliedConfig.flashAttention,
-          offload_kv_cache_to_gpu: appliedConfig.offloadKvCacheToGpu,
-          num_experts: appliedConfig.numExperts,
-        },
-      };
-      state.settingsPanel.models = [
-        updated,
-        ...state.settingsPanel.models.filter((item) => item.key !== model.key),
-      ];
-    }
+    applyLoadedModelState(state, model, result);
     state.settingsPanel.modelsProvider = state.settings.llmProvider;
     delete state.settingsPanel.choiceIndices.llmModel;
     state.settingsPanel.modelConfig = null;
     state.settingsPanel.focus = 'choices';
     state.settingsPanel.activeParameterId = 'llmModel';
-    state.status = model.loaded ? 'Model selected' : 'Model loaded and selected';
+    state.status = 'Model saved and selected';
+    controller.toast(`${model.label} selected`, 'success');
   } catch (error) {
     config.error = error.message;
     state.status = error.message;
   } finally {
-    if (state.settingsPanel.modelConfig) state.settingsPanel.modelConfig.loading = false;
+    if (state.settingsPanel.modelConfig) {
+      state.settingsPanel.modelConfig.loading = false;
+      state.settingsPanel.modelConfig.progressLabel = '';
+    }
     controller.invalidate();
   }
   return true;
+}
+
+async function reconcileLmStudioModel(controller, model, config) {
+  const { state } = controller;
+  const loadedIds = uniqueLoadedInstanceIds(state.settingsPanel.models);
+  const sameSingleInstance = loadedIds.length === 1
+    && loadedIds[0] === model.loadedInstanceId
+    && configsEqual(config.values, configFromLoaded(model));
+  if (sameSingleInstance) {
+    return { instanceId: model.loadedInstanceId, config: { ...config.values } };
+  }
+  for (const instanceId of loadedIds) {
+    config.progressLabel = `Unloading ${instanceId}…`;
+    state.status = config.progressLabel;
+    controller.invalidate();
+    await unloadLmStudioModel(instanceId, { apiToken: state.settings.llmApiToken });
+    state.settingsPanel.models = state.settingsPanel.models.map((item) => item.loadedInstanceIds?.includes(instanceId)
+      ? { ...item, loaded: false, loadedInstanceId: null, loadedInstanceIds: [], config: {}, contextLength: null }
+      : item);
+  }
+  config.progressLabel = `Loading ${model.label}…`;
+  state.status = config.progressLabel;
+  controller.invalidate();
+  const loaded = await loadLmStudioModel(model.key, config.values, { apiToken: state.settings.llmApiToken });
+  return {
+    instanceId: loaded.instanceId,
+    config: { ...config.values, ...normalizeApiConfig(loaded.config) },
+  };
+}
+
+function applyLoadedModelState(state, selectedModel, result) {
+  if (state.settings.llmProvider !== 'lmstudio') return;
+  state.settingsPanel.models = state.settingsPanel.models.map((item) => {
+    if (item.key !== selectedModel.key) {
+      return { ...item, loaded: false, loadedInstanceId: null, loadedInstanceIds: [], config: {}, contextLength: null };
+    }
+    return {
+      ...item,
+      id: item.key,
+      loaded: true,
+      loadedInstanceId: result.instanceId,
+      loadedInstanceIds: result.instanceId ? [result.instanceId] : [],
+      contextLength: result.config.contextLength ?? item.maxContextLength ?? null,
+      config: apiConfigFromValues(result.config),
+    };
+  }).sort((left, right) => Number(right.loaded) - Number(left.loaded) || left.label.localeCompare(right.label));
 }
 
 function closeModelConfiguration(controller) {
@@ -246,7 +284,7 @@ function defaultConfig() {
   return { contextLength: null, evalBatchSize: null, flashAttention: null, offloadKvCacheToGpu: null, numExperts: null };
 }
 
-function useModelParameterIndex(model, values) {
+function saveModelParameterIndex(model, values) {
   return 4 + Number(values.numExperts != null || model.config?.num_experts != null);
 }
 
@@ -258,6 +296,25 @@ function normalizeApiConfig(config) {
     offloadKvCacheToGpu: config.offload_kv_cache_to_gpu ?? null,
     numExperts: config.num_experts ?? null,
   };
+}
+
+function apiConfigFromValues(config) {
+  return {
+    context_length: config.contextLength,
+    eval_batch_size: config.evalBatchSize,
+    flash_attention: config.flashAttention,
+    offload_kv_cache_to_gpu: config.offloadKvCacheToGpu,
+    num_experts: config.numExperts,
+  };
+}
+
+function configsEqual(left, right) {
+  return ['contextLength', 'evalBatchSize', 'flashAttention', 'offloadKvCacheToGpu', 'numExperts']
+    .every((key) => (left[key] ?? null) === (right[key] ?? null));
+}
+
+function uniqueLoadedInstanceIds(models) {
+  return [...new Set((models ?? []).flatMap((item) => item.loadedInstanceIds ?? [item.loadedInstanceId]).filter(Boolean))];
 }
 
 function contextChoices(model) {
@@ -273,8 +330,8 @@ function triStateChoices(id, autoLabel, onLabel, offLabel) {
   return [valueChoice(id, null, autoLabel), valueChoice(id, true, onLabel), valueChoice(id, false, offLabel)];
 }
 
-function valueParameter(id, label, value, disabled) {
-  return { id, label, value, disabled, description: modelParameterHelp(id) };
+function valueParameter(id, label, value) {
+  return { id, label, value, disabled: false, description: modelParameterHelp(id) };
 }
 
 function valueChoice(id, value, label) {

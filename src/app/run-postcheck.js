@@ -16,6 +16,8 @@ import { isLocalLlmEnabled } from '../llm/generate.js';
 import { beginLlmProgress } from './llm-progress.js';
 import { saveLlmDiagnostics } from '../llm/diagnostics.js';
 import { activeRunSettings, clearRunSettings } from './runtime-settings.js';
+import { pruneBackupStorage } from '../apply/backup-storage.js';
+import { markBackupsRemoved } from '../runs/backup-status.js';
 import { waitForPendingLlmReview } from './run-llm-review.js';
 import { recentArchiveHint } from '../settings/recent.js';
 
@@ -284,6 +286,11 @@ async function completeRun(controller, status) {
   state.workflow.lastRunId = state.run.id;
   state.workflow = await saveWorkflow(state.workflow);
   await finalizeSourceArchive(controller);
+  const backupCleanup = await pruneBackupStorage(activeRunSettings(state), { activeRunId: state.run.id }).catch(() => null);
+  if (backupCleanup?.removed?.length) {
+    await markBackupsRemoved(backupCleanup.removed, { reason: 'retention' }).catch(() => null);
+    controller.toast(`${backupCleanup.removed.length} old backup${backupCleanup.removed.length === 1 ? '' : 's'} removed`, 'info');
+  }
   await releaseRunResources(controller);
   controller.message('Final summary', finalSummaryLines(state), 'summary', { collapsedSummary: `Run complete · ${compactPlanLine(state.plan)} · ${checkSummaryLine(state.run.checks)}` });
   clearRunSettings(state);
