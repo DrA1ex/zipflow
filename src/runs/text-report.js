@@ -28,7 +28,14 @@ export function formatRunReport(run) {
       if (run.llm.warning) lines.push('', `LLM warning: ${run.llm.warning}`);
       if (run.llm.assessment) lines.push(`Archive assessment: ${run.llm.assessment} · ${run.llm.confidence ?? 'low'} confidence`);
     }
+    if (run.llm.delivery?.resolved) lines.push(`LLM change delivery: ${run.llm.delivery.resolved}${run.llm.delivery.batches ? ` · ${run.llm.delivery.batches} batches` : ''}`);
     if (run.llm.diagnosticsPath) lines.push(`LLM diagnostics: ${run.llm.diagnosticsPath}`);
+  }
+  if (run.llmFailure) {
+    lines.push('', `LLM failure explanation: ${run.llmFailure.mode ?? 'unknown'}${run.llmFailure.durationMs ? ` · ${formatDuration(run.llmFailure.durationMs)}` : ''}`);
+    if (run.llmFailure.text) lines.push(run.llmFailure.text);
+    if (run.llmFailure.error) lines.push(`LLM failure-analysis error: ${run.llmFailure.error}`);
+    if (run.llmFailure.diagnosticsPath) lines.push(`LLM failure diagnostics: ${run.llmFailure.diagnosticsPath}`);
   }
   if (run.plan?.counts) lines.push('', 'Plan:', ...formatCounts(run.plan.counts));
   if (run.applied) {

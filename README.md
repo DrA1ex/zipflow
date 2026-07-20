@@ -71,7 +71,7 @@ During an update, the header shows the current five-stage progression:
 Archive -> Review -> Apply -> Checks -> Finish
 ```
 
-Activity entries use stable `INFO`, `RUN`, `DONE`, `WARN`, `FAIL`, and `YOU` roles so current work, completed work, problems, and user decisions remain distinguishable. Long-running LLM and check steps explain what result is expected before they start.
+Activity entries use stable `INFO`, `RUN`, `DONE`, `WARN`, `FAIL`, `YOU`, and `SUM` roles so current work, completed work, problems, user decisions, and the final result remain distinguishable. Any durable block longer than three lines starts collapsed with a visible arrow; scroll to it and press `E` to expand or collapse it. Project discovery and the final summary stay expanded. Long-running LLM and check steps explain what result is expected before they start.
 
 ## Checks and custom commands
 
@@ -180,25 +180,36 @@ Ollama:    http://127.0.0.1:11434
 LM Studio: http://127.0.0.1:1234
 ```
 
-The **Archive review** setting controls how the local model participates:
+The **Archive review** setting controls whether the model also judges archive suitability:
 
-- **Summary only** sends the bounded patch for summary and commit-message generation;
+- **Summary only** generates a summary and commit message without an advisory verdict;
 - **Structure guard** first compares the current project and archive directory/file trees, then labels the archive `suitable`, `suspicious`, or `unsuitable`;
-- **Deep patch review** uses one structured patch request to return the archive assessment, reasons, summary, and commit message together.
+- **Deep patch review** returns the advisory assessment, reasons, summary, and commit message from the selected change representation.
+
+The separate **Change delivery** setting controls what source-change evidence reaches the model:
+
+- **Adaptive** sends a bounded full patch when it fits and automatically switches to file-by-file analysis for larger changes;
+- **Full patch** sends one context-budgeted `changes.patch` request;
+- **Changed paths only** sends only explicit `CREATE`, `UPDATE`, and `DELETE` path records, without file contents;
+- **File-by-file chunks** analyzes small groups of file patches in separate bounded requests and then synthesizes their notes into one final summary and commit message.
+
+The **Failed checks** setting can leave failures untouched, explain them in a fresh model context, or continue from the compact context of the preceding change review. The same-context mode does not resend the entire patch; it supplies the prior review result together with the failed command and output.
 
 The verdict is advisory. It can force an explicit safety-review screen but never replaces deterministic path validation, `.gitignore`, Git conflict detection, backups, or tests. A strongly unsuitable structure verdict stops further patch summarization for that request and explains why the archive appears unrelated.
 
 When enabled, every inspected archive with content changes produces:
 
 - `~/.zipflow/runs/<run-id>/changes.patch`;
-- a short Activity summary;
-- a proposed commit message stored in the JSON and text run reports.
+- an optional proposed commit message stored in the JSON and text run reports;
+- a final Activity summary placed after checks, commit, and deployment, followed by one compact checks/deployment line.
 
-The system and user prompts are always English. The selected language applies only to the generated summary and commit message. Activity shows the exact transport and endpoint, model-load progress, prompt-processing progress when the provider exposes it, elapsed time, reasoning, and final content as the stream arrives. Press `Esc` during generation to cancel only the local LLM request; archive analysis then continues with the normal commit-message fallbacks.
+The intermediate LLM result is not left far above the completed run. If no local model is enabled or generation is cancelled, the final block still contains the concise check result.
+
+The system and user prompts are always English. The selected language applies only to generated user-facing text. Primary generation uses a readable text protocol with `SUMMARY`, `COMMIT MESSAGE`, and optional assessment sections. Activity streams only human-readable reasoning and response text, preserves model line breaks, and wraps long lines to the current Terlio pane width; internal JSON repair is hidden from Activity. The view also shows the exact transport and endpoint, model-load progress, prompt-processing progress when the provider exposes it, elapsed time, delivery mode, and current file batch. Press `Esc` during generation to cancel only the local LLM request; archive analysis then continues with the normal commit-message fallbacks.
 
 Before generation, Zipflow discovers the model context size and loaded instances when possible and calculates a conservative prompt budget. For LM Studio, an already loaded instance ID is used directly and its context configuration is left unchanged, so Zipflow does not intentionally load a duplicate model. The prompt budget reserves space for instructions and output. The complete `changes.patch` remains stored in the run, while the model receives a structurally shortened patch when necessary: the complete changed-file manifest is retained and diff hunks are distributed across files instead of cutting text at an arbitrary byte boundary. Zipflow also caps the effective prompt context conservatively to reduce local GPU-memory pressure. Context-overflow and out-of-memory responses trigger a smaller-patch retry and are reported explicitly rather than as `No usable output`.
 
-Zipflow requests structured JSON and validates both fields before using them. If a reasoning model consumes its output budget before producing JSON, Zipflow performs a second compact formatting request against the generated draft. If only a useful summary can be recovered, that summary is kept while the commit message uses the configured fallback. Provider errors and sanitized raw diagnostics are saved in `~/.zipflow/runs/<run-id>/llm-diagnostics.json`. Local LLM failures never block archive application.
+Zipflow parses the readable section protocol and validates the resulting summary, commit message, and optional verdict. If a model ignores the requested format or spends its output budget on reasoning, Zipflow performs a hidden compact JSON-repair request against the generated draft. If only a useful summary can be recovered, that summary is kept while the commit message uses the configured fallback. Provider errors and sanitized raw diagnostics are saved in `~/.zipflow/runs/<run-id>/llm-diagnostics.json`. Local LLM failures never block archive application.
 
 The workflow commit-message source can be set to **Local LLM**. It uses the generated message first, then `.zipflow/commit-message.txt`, then `zipflow: apply <run-id>`.
 

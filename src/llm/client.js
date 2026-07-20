@@ -98,7 +98,7 @@ async function createOpenAiCompletion({
 }, { fetchImpl, timeoutMs, onEvent, signal }) {
   const definition = requireProvider(provider);
   const common = { model, messages, stream: true, temperature: 0, max_tokens: maxTokens };
-  const attempts = [
+  const attempts = responseSchema ? [
     {
       ...common,
       response_format: {
@@ -107,11 +107,12 @@ async function createOpenAiCompletion({
       },
     },
     { ...common, response_format: { type: 'json_object' } },
-  ];
+  ] : [common];
   let firstError = null;
   for (let index = 0; index < attempts.length; index += 1) {
     onEvent({
-      type: 'request', attempt: index + 1, format: index === 0 ? 'json_schema' : 'json_object',
+      type: 'request', attempt: index + 1,
+      format: responseSchema ? (index === 0 ? 'json_schema' : 'json_object') : 'text',
       transport: `${providerDefinition(provider).label} OpenAI-compatible`, endpoint: '/v1/chat/completions', model,
     });
     const response = await request(fetchImpl, `${definition.openAiBaseUrl}/chat/completions`, {

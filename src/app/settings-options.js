@@ -49,6 +49,17 @@ export function settingsChoices(state, parameter) {
     option(parameter, 'structure', 'Structure guard', 'Compare the project and archive trees before the patch summary request.'),
     option(parameter, 'patch', 'Deep patch review', 'Assess archive suitability together with summary and commit message from changes.patch.'),
   ];
+  if (parameter.settingId === 'llmChangeDelivery') return [
+    option(parameter, 'adaptive', 'Adaptive', 'Use a full patch when it fits; otherwise switch to file-by-file chunk analysis.'),
+    option(parameter, 'patch', 'Full patch', 'Send one context-budgeted changes.patch request.'),
+    option(parameter, 'change-list', 'Changed paths only', 'Send created, updated, and deleted file paths without file contents.'),
+    option(parameter, 'chunked', 'File-by-file chunks', 'Analyze small groups of file patches, then synthesize one final answer.'),
+  ];
+  if (parameter.settingId === 'llmFailureAnalysis') return [
+    option(parameter, 'disabled', 'Disabled', 'Do not send failed check output to the local model.'),
+    option(parameter, 'same-context', 'Continue change context', 'Explain the failure using the previous change review summary as context.'),
+    option(parameter, 'new-context', 'New context', 'Explain only the failed command and its output in a fresh request.'),
+  ];
   if (parameter.settingId === 'archivePolicy') return [
     option(parameter, 'keep', 'Do nothing', 'Leave the ZIP in its original location.'),
     option(parameter, 'move', 'Move to archive storage', 'Move the ZIP and enforce retention and size limits.'),
@@ -89,6 +100,16 @@ function localLlmParameters(state) {
     },
     {
       ...choiceParameter('llmArchiveReview', 'Archive review', archiveReviewLabel(state.settings.llmArchiveReview), 'Optional LLM safety assessment; deterministic Zipflow checks always remain authoritative.'),
+      disabled,
+      disabledReason: 'Enable a local LLM provider first.',
+    },
+    {
+      ...choiceParameter('llmChangeDelivery', 'Change delivery', changeDeliveryLabel(state.settings.llmChangeDelivery), 'Choose how source changes are represented and budgeted for the model.'),
+      disabled,
+      disabledReason: 'Enable a local LLM provider first.',
+    },
+    {
+      ...choiceParameter('llmFailureAnalysis', 'Failed checks', failureAnalysisLabel(state.settings.llmFailureAnalysis), 'Optionally ask the model to explain failed checks after they run.'),
       disabled,
       disabledReason: 'Enable a local LLM provider first.',
     },
@@ -176,6 +197,20 @@ function archiveReviewLabel(value) {
   if (value === 'structure') return 'Structure guard';
   if (value === 'patch') return 'Deep patch review';
   return 'Summary only';
+}
+
+
+function changeDeliveryLabel(value) {
+  if (value === 'patch') return 'Full patch';
+  if (value === 'change-list') return 'Changed paths only';
+  if (value === 'chunked') return 'File-by-file chunks';
+  return 'Adaptive';
+}
+
+function failureAnalysisLabel(value) {
+  if (value === 'same-context') return 'Continue change context';
+  if (value === 'new-context') return 'New context';
+  return 'Disabled';
 }
 
 function archivePolicyLabel(value) {

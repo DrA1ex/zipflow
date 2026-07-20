@@ -6,6 +6,7 @@ import { listIgnoredPaths } from '../git/repository.js';
 import { isProtectedProjectPath } from '../archive/protected.js';
 import { createLocalCompletion } from './client.js';
 import { getLocalModelProfile } from './model-info.js';
+import { parseAssessmentResponse } from './response.js';
 
 const REVIEW_SCHEMA = {
   type: 'object',
@@ -46,7 +47,7 @@ export async function reviewArchiveStructure({ settings, project, workflow, extr
       { role: 'system', content: systemPrompt(settings.llmLanguage || 'English') },
       { role: 'user', content: userPrompt(project, plan, prompt.text) },
     ],
-    responseSchema: REVIEW_SCHEMA,
+    responseSchema: null,
     maxTokens: 512,
     apiToken: settings.llmApiToken,
     contextLength: Math.min(profile.contextLength, 16_384),
@@ -98,26 +99,7 @@ export async function createTreeComparison({ project, workflow, extracted }) {
 }
 
 export function parseArchiveAssessment(content) {
-  const source = String(content ?? '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-  if (!source) return null;
-  let parsed;
-  try {
-    parsed = JSON.parse(source);
-  } catch {
-    const start = source.indexOf('{');
-    const end = source.lastIndexOf('}');
-    if (start < 0 || end <= start) return null;
-    try { parsed = JSON.parse(source.slice(start, end + 1)); } catch { return null; }
-  }
-  const assessment = String(parsed.assessment ?? parsed.verdict ?? '').toLowerCase();
-  const confidence = String(parsed.confidence ?? 'low').toLowerCase();
-  const reasons = Array.isArray(parsed.reasons) ? parsed.reasons.map(clean).filter(Boolean).slice(0, 5) : [];
-  if (!['suitable', 'suspicious', 'unsuitable'].includes(assessment) || !reasons.length) return null;
-  return {
-    assessment,
-    confidence: ['low', 'medium', 'high'].includes(confidence) ? confidence : 'low',
-    reasons,
-  };
+  return parseAssessmentResponse(content);
 }
 
 function treeRecord(files) {
@@ -200,8 +182,11 @@ function systemPrompt(language) {
     'Do not reject an archive merely because generated, ignored, cache, environment, build, or dependency files are missing.',
     'Use unsuitable only for a strong mismatch such as unrelated project markers, a different product layout, or a snapshot missing most expected source areas.',
     'Use suspicious when the evidence is ambiguous or the archive may be partial in a risky way.',
-    'Return only JSON with assessment, confidence, and reasons. Do not include Markdown or internal reasoning.',
-    `Write reasons in ${language}; assessment and confidence must remain the English enum values from the schema.`,
+    'Return plain text, not JSON or Markdown fences, using exactly these headings:',
+    'ASSESSMENT: followed by suitable, suspicious, or unsuitable.',
+    'CONFIDENCE: followed by low, medium, or high.',
+    'REASONS: followed by one to five concise bullet points.',
+    `Write reasons in ${language}; assessment and confidence remain English enum values.`,
   ].join(' ');
 }
 

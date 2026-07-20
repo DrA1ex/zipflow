@@ -1,29 +1,30 @@
 import { createLocalCompletion } from './client.js';
 import { getLocalModelProfile } from './model-info.js';
+import { createPromptBudget, fitPatchToBudget, reducePatchBudget } from './patch-budget.js';
 import {
-  createPromptBudget, fitPatchToBudget, reducePatchBudget,
-} from './patch-budget.js';
+  createChangeList, createPatchBatches, estimateTokens, resolveDeliveryMode,
+} from './delivery.js';
+import {
+  extractUnstructuredResponse, parseChangeResponse, readableResponseInstructions,
+} from './response.js';
 
 const RESPONSE_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
+  type: 'object', additionalProperties: false,
   properties: {
     summary: { type: 'array', minItems: 1, maxItems: 5, items: { type: 'string' } },
     commitMessage: { type: 'string', minLength: 1 },
   },
   required: ['summary', 'commitMessage'],
 };
-
 const REVIEW_RESPONSE_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
+  ...RESPONSE_SCHEMA,
   properties: {
     ...RESPONSE_SCHEMA.properties,
     assessment: { type: 'string', enum: ['suitable', 'suspicious', 'unsuitable'] },
     confidence: { type: 'string', enum: ['low', 'medium', 'high'] },
     reasons: { type: 'array', minItems: 1, maxItems: 5, items: { type: 'string' } },
   },
-  required: ['summary', 'commitMessage', 'assessment', 'confidence', 'reasons'],
+  required: [...RESPONSE_SCHEMA.required, 'assessment', 'confidence', 'reasons'],
 };
 
 const MAX_REPAIR_DRAFT_CHARS = 40_000;
@@ -40,13 +41,11 @@ export async function generateChangeDescription({ settings, project, plan, patch
   const reviewArchive = settings.llmArchiveReview === 'patch';
   const responseSchema = reviewArchive ? REVIEW_RESPONSE_SCHEMA : RESPONSE_SCHEMA;
   const system = buildSystemPrompt(language, reviewArchive);
-  const fixedUser = buildUserPrompt(project, plan, '');
+  const fixedUser = buildUserPrompt(project, plan, { kind: 'change-list', content: createChangeList(plan) });
   notify({ type: 'phase', phase: 'model-info', label: 'Reading the selected model context limit' });
   const profile = await getLocalModelProfile(settings.llmProvider, settings.llmModel, {
-    fetchImpl: options.fetchImpl,
-    timeoutMs: options.metadataTimeoutMs ?? 10_000,
-    apiToken: settings.llmApiToken,
-    signal: options.signal,
+    fetchImpl: options.fetchImpl, timeoutMs: options.metadataTimeoutMs ?? 10_000,
+    apiToken: settings.llmApiToken, signal: options.signal,
   });
   notify({ type: 'model-profile', profile });
   const budget = createPromptBudget({
@@ -54,201 +53,245 @@ export async function generateChangeDescription({ settings, project, plan, patch
     fixedPrompt: `${system}\n${fixedUser}`,
     requestedOutputTokens: 1_024,
   });
-  let patchTokens = budget.patchTokens;
-  const attempts = [];
-  let first = null;
-  let lastError = null;
+  const requestedMode = settings.llmChangeDelivery || 'patch';
+  const deliveryMode = resolveDeliveryMode(requestedMode, {
+    patchEstimatedTokens: estimateTokens(patchContent), patchBudgetTokens: budget.patchTokens,
+  });
+  notify({ type: 'delivery-mode', requestedMode, deliveryMode });
+  const generation = deliveryMode === 'chunked'
+    ? await generateChunked({ settings, project, plan, patchContent, profile, budget, system, reviewArchive }, options, notify)
+    : deliveryMode === 'change-list'
+      ? await generateFromChangeList({ settings, project, plan, profile, budget, system }, options, notify)
+      : await generateFromPatch({ settings, project, plan, patchContent, profile, budget, system }, options, notify);
 
-  for (let attempt = 1; attempt <= GENERATION_ATTEMPTS; attempt += 1) {
-    const fitted = fitPatchToBudget(patchContent, patchTokens);
-    attempts.push({ attempt, patch: fitted, budgetTokens: patchTokens });
-    notify({ type: 'patch-budget', attempt, profile, budget, patch: fitted });
-    notify({
-      type: 'phase',
-      phase: attempt === 1 ? 'requesting' : 'retrying-smaller',
-      label: attempt === 1 ? 'Sending the patch to the local model' : 'Retrying with a smaller patch excerpt',
-    });
+  const completion = generation.completion;
+  const direct = tryReadable(completion.content, reviewArchive) ?? tryReadable(completion.reasoning, reviewArchive);
+  if (direct) return resultWithDiagnostics(direct, completion, {
+    profile, budget, delivery: generation.delivery, attempts: generation.attempts, repaired: false,
+  });
+
+  notify({ type: 'phase', phase: 'repairing', label: 'Formatting the model response for Zipflow' });
+  const draft = [completion.content, completion.reasoning].filter(Boolean).join('\n\n').slice(-MAX_REPAIR_DRAFT_CHARS);
+  if (draft) {
     try {
-      first = await requestCompletion({
-        settings,
-        model: profile.requestModel,
-        loadedModel: profile.loadedModel,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: buildUserPrompt(project, plan, fitted.content) },
-        ],
-        maxTokens: budget.outputTokens,
-        contextLength: budget.effectiveContextTokens,
-        reasoningOffSupported: profile.reasoningOffSupported,
+      const repaired = await requestCompletion({
+        settings, profile, maxTokens: 512,
+        contextLength: Math.min(budget.effectiveContextTokens, 8_192),
         responseSchema,
-      }, {
-        ...options,
-        onEvent: (event) => notify({ ...event, stage: 'generation' }),
+        messages: [
+          { role: 'system', content: repairPrompt(language, reviewArchive) },
+          { role: 'user', content: `DRAFT START\n${draft}\nDRAFT END` },
+        ],
+      }, options, (event) => notify({ ...event, stage: 'repair', hiddenOutput: true }));
+      const parsed = tryReadable(repaired.content, reviewArchive) ?? tryReadable(repaired.reasoning, reviewArchive);
+      if (parsed) return resultWithDiagnostics(parsed, repaired, {
+        profile, budget, delivery: generation.delivery, attempts: generation.attempts,
+        repaired: true, originalFinishReason: completion.finishReason,
+        original: completionDiagnostics(completion),
       });
-      attempts[attempts.length - 1].completion = completionDiagnostics(first);
+      generation.attempts.push({ attempt: 'repair', completion: completionDiagnostics(repaired) });
+    } catch (error) {
+      generation.attempts.push({ attempt: 'repair', error: errorDiagnostics(error) });
+    }
+  }
+
+  const partial = extractUnstructuredResponse(completion.content || completion.reasoning);
+  if (partial.summary.length) return {
+    ...partial,
+    warning: partial.commitMessage
+      ? 'The local model returned an unexpected text format; Zipflow extracted its visible summary and commit message.'
+      : 'The local model returned an unexpected text format; Zipflow extracted the summary and will use a commit-message fallback.',
+    diagnostics: {
+      profile, budget, delivery: generation.delivery, attempts: generation.attempts,
+      finishReason: completion.finishReason, chunks: completion.chunks, repaired: false, partial: true,
+    },
+    raw: completionDiagnostics(completion, true),
+  };
+
+  const error = new Error(noOutputMessage(completion));
+  error.code = 'no_usable_output';
+  error.diagnostics = {
+    profile, budget, delivery: generation.delivery, attempts: generation.attempts,
+    completion: completionDiagnostics(completion, true),
+  };
+  throw error;
+}
+
+async function generateFromPatch(context, options, notify) {
+  let patchTokens = context.budget.patchTokens;
+  const attempts = [];
+  let completion = null;
+  let lastError = null;
+  for (let attempt = 1; attempt <= GENERATION_ATTEMPTS; attempt += 1) {
+    const fitted = fitPatchToBudget(context.patchContent, patchTokens);
+    attempts.push({ attempt, patch: fitted, budgetTokens: patchTokens });
+    notify({ type: 'patch-budget', attempt, profile: context.profile, budget: context.budget, patch: fitted });
+    notify({ type: 'phase', phase: attempt === 1 ? 'requesting' : 'retrying-smaller', label: attempt === 1 ? 'Sending the patch to the local model' : 'Retrying with a smaller patch excerpt' });
+    try {
+      completion = await requestCompletion({
+        settings: context.settings, profile: context.profile,
+        maxTokens: context.budget.outputTokens,
+        contextLength: context.budget.effectiveContextTokens,
+        messages: [
+          { role: 'system', content: context.system },
+          { role: 'user', content: buildUserPrompt(context.project, context.plan, { kind: 'patch', content: fitted.content }) },
+        ],
+      }, options, (event) => notify({ ...event, stage: 'generation' }));
+      attempts.at(-1).completion = completionDiagnostics(completion);
       break;
     } catch (error) {
       lastError = error;
-      attempts[attempts.length - 1].error = errorDiagnostics(error);
+      attempts.at(-1).error = errorDiagnostics(error);
       if (!error.retryableWithSmallerPrompt || attempt === GENERATION_ATTEMPTS) break;
       patchTokens = reducePatchBudget(patchTokens, error.code);
       notify({ type: 'smaller-retry', reason: error.code, message: error.message, patchTokens });
     }
   }
-
-  if (!first) {
-    attachDiagnostics(lastError, { profile, budget, attempts });
+  if (!completion) {
+    attachDiagnostics(lastError, { profile: context.profile, budget: context.budget, attempts });
     throw lastError;
   }
+  return { completion, attempts, delivery: { requested: context.settings.llmChangeDelivery, resolved: 'patch' } };
+}
 
-  const direct = tryStructured(first.content, reviewArchive) ?? tryStructured(first.reasoning, reviewArchive);
-  if (direct) return resultWithDiagnostics(direct, first, { profile, budget, attempts, repaired: false });
+async function generateFromChangeList(context, options, notify) {
+  const changeList = createChangeList(context.plan);
+  notify({ type: 'change-list', paths: changedCount(context.plan) });
+  const completion = await requestCompletion({
+    settings: context.settings, profile: context.profile,
+    maxTokens: context.budget.outputTokens,
+    contextLength: context.budget.effectiveContextTokens,
+    messages: [
+      { role: 'system', content: context.system },
+      { role: 'user', content: buildUserPrompt(context.project, context.plan, { kind: 'change-list', content: changeList }) },
+    ],
+  }, options, (event) => notify({ ...event, stage: 'generation' }));
+  return {
+    completion,
+    attempts: [{ attempt: 1, completion: completionDiagnostics(completion) }],
+    delivery: { requested: context.settings.llmChangeDelivery, resolved: 'change-list', paths: changedCount(context.plan) },
+  };
+}
 
-  notify({ type: 'phase', phase: 'repairing', label: 'Formatting the model draft as structured JSON' });
-  const draft = [first.content, first.reasoning].filter(Boolean).join('\n\n').slice(-MAX_REPAIR_DRAFT_CHARS);
-  if (draft) {
+async function generateChunked(context, options, notify) {
+  const maxBatchTokens = Math.max(1_500, Math.min(5_000, Math.floor(context.budget.patchTokens * 0.45)));
+  const batches = createPatchBatches(context.patchContent, { maxEstimatedTokens: maxBatchTokens });
+  const notes = [];
+  const attempts = [];
+  for (let index = 0; index < batches.length; index += 1) {
+    const batch = { ...batches[index], index: index + 1 };
+    notify({ type: 'batch-start', index: batch.index, total: batches.length, files: batch.files });
+    const chunkResult = await requestChunkBatch(context, batch, batches.length, options, notify);
+    const completion = chunkResult.completion;
+    const visible = (completion.content || completion.reasoning).trim();
+    notes.push(`BATCH ${batch.index}/${batches.length} · ${batch.files.join(', ')}\n${visible || '(No model notes returned.)'}`);
+    attempts.push(...chunkResult.attempts);
+    notify({ type: 'batch-complete', index: batch.index, total: batches.length, files: batch.files });
+  }
+  notify({ type: 'phase', phase: 'synthesis', label: 'Combining file-by-file notes into the final response' });
+  const completion = await requestCompletion({
+    settings: context.settings, profile: context.profile,
+    maxTokens: context.budget.outputTokens,
+    contextLength: context.budget.effectiveContextTokens,
+    messages: [
+      { role: 'system', content: context.system },
+      { role: 'user', content: buildSynthesisPrompt(context.project, context.plan, notes) },
+    ],
+  }, options, (event) => notify({ ...event, stage: 'synthesis' }));
+  attempts.push({ attempt: 'synthesis', completion: completionDiagnostics(completion) });
+  return {
+    completion, attempts,
+    delivery: {
+      requested: context.settings.llmChangeDelivery, resolved: 'chunked',
+      batches: batches.length, files: [...new Set(batches.flatMap((batch) => batch.files))].length,
+    },
+  };
+}
+
+
+async function requestChunkBatch(context, batch, total, options, notify) {
+  let tokenBudget = Math.max(800, batch.estimatedTokens);
+  const attempts = [];
+  let lastError = null;
+  for (let attempt = 1; attempt <= GENERATION_ATTEMPTS; attempt += 1) {
+    const fitted = fitPatchToBudget(batch.content, tokenBudget);
     try {
-      const repaired = await requestCompletion({
-        settings,
-        model: profile.requestModel,
-        loadedModel: profile.loadedModel,
-        maxTokens: 512,
-        contextLength: Math.min(budget.effectiveContextTokens, 8_192),
-        reasoningOffSupported: profile.reasoningOffSupported,
-        responseSchema,
+      const completion = await requestCompletion({
+        settings: context.settings, profile: context.profile, maxTokens: 512,
+        contextLength: Math.min(context.budget.effectiveContextTokens, 12_000),
         messages: [
-          {
-            role: 'system',
-            content: repairPrompt(language, reviewArchive),
-          },
-          { role: 'user', content: `DRAFT START\n${draft}\nDRAFT END` },
+          { role: 'system', content: chunkPrompt(context.settings.llmLanguage || 'English') },
+          { role: 'user', content: `BATCH ${batch.index}/${total}\nFILES:\n${batch.files.map((file) => `- ${file}`).join('\n')}\n\nPATCH:\n${fitted.content}` },
         ],
-      }, {
-        ...options,
-        onEvent: (event) => notify({ ...event, stage: 'repair' }),
+      }, options, (event) => notify({
+        ...event, stage: 'chunk-analysis', batchIndex: batch.index, batchTotal: total,
+      }));
+      attempts.push({
+        attempt: `batch-${batch.index}.${attempt}`, files: batch.files,
+        patch: fitted, completion: completionDiagnostics(completion),
       });
-      const parsed = tryStructured(repaired.content, reviewArchive) ?? tryStructured(repaired.reasoning, reviewArchive);
-      if (parsed) {
-        return resultWithDiagnostics(parsed, repaired, {
-          profile, budget, attempts, repaired: true, originalFinishReason: first.finishReason,
-          original: completionDiagnostics(first),
-        });
-      }
-      attempts.push({ attempt: 'repair', completion: completionDiagnostics(repaired) });
+      return { completion, attempts };
     } catch (error) {
-      attempts.push({ attempt: 'repair', error: errorDiagnostics(error) });
+      lastError = error;
+      attempts.push({
+        attempt: `batch-${batch.index}.${attempt}`, files: batch.files,
+        patch: fitted, error: errorDiagnostics(error),
+      });
+      if (!error.retryableWithSmallerPrompt || attempt === GENERATION_ATTEMPTS) break;
+      tokenBudget = reducePatchBudget(tokenBudget, error.code);
+      notify({
+        type: 'smaller-retry', reason: error.code, message: error.message,
+        patchTokens: tokenBudget, batchIndex: batch.index, batchTotal: total,
+      });
     }
   }
-
-  const partial = extractUnstructured(first.content || first.reasoning);
-  if (partial.summary.length) {
-    return {
-      summary: partial.summary,
-      commitMessage: partial.commitMessage,
-      warning: partial.commitMessage
-        ? 'The local model returned unstructured output; Zipflow extracted the visible summary and commit message.'
-        : 'The local model returned unstructured output; Zipflow extracted the summary and will use a commit-message fallback.',
-      diagnostics: {
-        profile, budget, attempts, finishReason: first.finishReason,
-        chunks: first.chunks, repaired: false, partial: true,
-      },
-      raw: completionDiagnostics(first, true),
-    };
-  }
-
-  const error = new Error(noOutputMessage(first));
-  error.code = 'no_usable_output';
-  error.diagnostics = { profile, budget, attempts, completion: completionDiagnostics(first, true) };
-  throw error;
-}
-
-export function parseResponse(content, { requireAssessment = false } = {}) {
-  const parsed = parseJsonObject(content);
-  const summary = normalizeSummary(parsed.summary ?? parsed.changeSummary ?? parsed.change_summary);
-  const commitMessage = normalizeCommitMessage(
-    parsed.commitMessage ?? parsed.commit_message ?? parsed.commit ?? parsed.message,
-  );
-  if (!summary.length || !commitMessage) throw new Error('Local LLM response is missing summary or commitMessage.');
-  const assessment = normalizeAssessment(parsed);
-  if (requireAssessment && !assessment) throw new Error('Local LLM response is missing archive assessment fields.');
-  return { summary, commitMessage, ...(assessment ?? {}) };
-}
-
-export function extractUnstructured(content) {
-  const lines = String(content ?? '').split('\n').map(cleanLine).filter(Boolean);
-  const summaryStart = findLastHeading(lines, /^(summary|summary \(.+\)|сводка|краткое описание)\s*:?$/i);
-  const source = summaryStart >= 0 ? lines.slice(summaryStart + 1) : lines;
-  const summary = [];
-  let commitMessage = '';
-  for (let index = 0; index < source.length; index += 1) {
-    const line = source[index];
-    if (/^(commit message|сообщение коммита)(\s*\(.+\))?\s*:?$/i.test(line)) {
-      commitMessage = findCommitLine(source.slice(index + 1));
-      break;
-    }
-    if (/^(subject|тема)\s*:/i.test(line)) {
-      commitMessage ||= line.replace(/^(subject|тема)\s*:\s*/i, '').trim();
-      continue;
-    }
-    if (summary.length < 5 && isUsefulSummaryLine(line)) summary.push(line);
-  }
-  return { summary: [...new Set(summary)].slice(0, 5), commitMessage: normalizeCommitMessage(commitMessage) };
+  attachDiagnostics(lastError, { delivery: 'chunked', batch: batch.index, attempts });
+  throw lastError;
 }
 
 function buildSystemPrompt(language, reviewArchive = false) {
   return [
-    'You analyze source-code patches for a developer workflow tool.',
-    reviewArchive
-      ? 'Return only one JSON object with exactly summary, commitMessage, assessment, confidence, and reasons.'
-      : 'Return only one JSON object with exactly summary and commitMessage.',
-    'Do not use Markdown fences, commentary, or extra keys. Do not reveal internal reasoning or repeat the patch.',
-    `Write both summary and commitMessage in ${language}.`,
-    'The summary must contain 1-5 concise factual lines. Mention behavior, architecture, tests, or risks only when visible in the patch.',
-    'The commit message must be ready for git commit: imperative subject, preferably under 72 characters, with an optional concise body separated by a blank line.',
-    'Do not invent changes, test results, issue numbers, or motivations not supported by the patch.',
+    'You analyze source-code patches and other source-code change representations for a developer workflow tool.',
+    'Be factual and concise. Mention behavior, architecture, tests, or risks only when supported by the supplied information.',
+    'Do not invent test results, issue numbers, or motivations.',
     ...(reviewArchive ? [
-      'Assess whether the archive changes plausibly belong to this project. Use assessment suitable, suspicious, or unsuitable.',
-      'Use unsuitable only for strong evidence of a wrong archive or unrelated project. Use suspicious for ambiguous, destructive, or unexpectedly broad changes.',
-      'Write 1-5 concise reasons in the requested language; assessment and confidence remain English enum values.',
-      'This is advisory: do not claim that tests passed or that deterministic safety checks can be skipped.',
+      'Assess whether the archive changes plausibly belong to this project and return assessment suitable, suspicious, or unsuitable.',
+      'Use unsuitable only for strong evidence of a wrong archive. Use suspicious for ambiguous, destructive, or unexpectedly broad changes.',
+      'This assessment is advisory and never replaces deterministic safety checks.',
     ] : []),
-  ].join(' ');
+    readableResponseInstructions(language, { assessment: reviewArchive }),
+  ].join('\n\n');
 }
 
-function buildUserPrompt(project, plan, patch) {
+function buildUserPrompt(project, plan, payload) {
+  const intro = [
+    `Project: ${project.name}`,
+    `Project types: ${(project.labels ?? []).join(', ') || 'unknown'}`,
+    `Plan counts: created=${plan.counts.created}, updated=${plan.counts.updated}, deleted=${plan.counts.deleted}`,
+  ];
+  if (payload.kind === 'patch') return [...intro, '', 'CHANGED PATHS:', createChangeList(plan), '', 'PATCH START', payload.content, 'PATCH END'].join('\n');
+  return [...intro, '', 'CHANGED PATHS:', payload.content, '', 'No file contents are provided. Base the response only on path-level evidence and clearly avoid content-specific claims.'].join('\n');
+}
+
+function buildSynthesisPrompt(project, plan, notes) {
   return [
     `Project: ${project.name}`,
     `Project types: ${(project.labels ?? []).join(', ') || 'unknown'}`,
     `Plan counts: created=${plan.counts.created}, updated=${plan.counts.updated}, deleted=${plan.counts.deleted}`,
-    'Changed paths:', ...changePathLines(plan),
-    '', 'PATCH START', patch, 'PATCH END',
+    '', 'COMPLETE CHANGED PATH LIST:', createChangeList(plan),
+    '', 'FILE-BATCH ANALYSIS NOTES:', notes.join('\n\n---\n\n'),
+    '', 'Create the final response now. Reconcile duplicated notes and do not claim that tests passed.',
   ].join('\n');
 }
 
-function normalizeAssessment(parsed) {
-  const assessment = String(parsed.assessment ?? parsed.verdict ?? '').toLowerCase();
-  const confidence = String(parsed.confidence ?? '').toLowerCase();
-  const reasons = Array.isArray(parsed.reasons)
-    ? parsed.reasons.map((line) => String(line).trim()).filter(Boolean).slice(0, 5)
-    : [];
-  if (!['suitable', 'suspicious', 'unsuitable'].includes(assessment) || !reasons.length) return null;
-  return {
-    assessment,
-    confidence: ['low', 'medium', 'high'].includes(confidence) ? confidence : 'low',
-    reasons,
-  };
-}
-
-function changePathLines(plan) {
-  const values = [
-    ...(plan.created ?? []).map((item) => `CREATE ${item.path}`),
-    ...(plan.updated ?? []).map((item) => `UPDATE ${item.path}`),
-    ...(plan.deleted ?? []).map((item) => `DELETE ${item.path}`),
-  ];
-  const limit = 5_000;
-  const selected = values.slice(0, limit);
-  if (values.length > limit) selected.push(`… ${values.length - limit} additional changed paths omitted`);
-  return selected.length ? selected : ['(none)'];
+function chunkPrompt(language) {
+  return [
+    'Analyze only this batch of source-code patches.',
+    'Return plain text notes, not JSON and not a final commit message.',
+    'Use at most eight concise bullet points. Preserve file names and important risks.',
+    'Do not claim that tests passed and do not repeat large code excerpts.',
+    `Write the notes in ${language}.`,
+  ].join('\n');
 }
 
 function repairPrompt(language, reviewArchive = false) {
@@ -259,98 +302,66 @@ function repairPrompt(language, reviewArchive = false) {
     'Return JSON only. Do not add analysis, Markdown, or extra keys.',
     `Write summary and commitMessage in ${language}.`,
     'Keep the summary factual and concise. The commit message must be ready for git commit.',
-    ...(reviewArchive ? ['Preserve the draft archive verdict using assessment suitable, suspicious, or unsuitable, confidence low/medium/high, and 1-5 reasons.'] : []),
+    ...(reviewArchive ? ['Preserve the verdict using assessment suitable, suspicious, or unsuitable, confidence low/medium/high, and 1-5 reasons.'] : []),
   ].join(' ');
 }
 
-function requestCompletion({ settings, model, loadedModel, messages, maxTokens, contextLength, reasoningOffSupported, responseSchema }, options) {
+function requestCompletion({ settings, profile, messages, maxTokens, contextLength, responseSchema = null }, options, onEvent) {
   return createLocalCompletion({
     provider: settings.llmProvider,
-    model: model || settings.llmModel,
-    loadedModel: Boolean(loadedModel),
+    model: profile.requestModel || settings.llmModel,
+    loadedModel: Boolean(profile.loadedModel),
     messages,
-    responseSchema: responseSchema ?? RESPONSE_SCHEMA,
+    responseSchema,
     maxTokens,
     apiToken: settings.llmApiToken,
     contextLength,
-    reasoningOffSupported,
-  }, options);
+    reasoningOffSupported: profile.reasoningOffSupported,
+  }, { ...options, onEvent });
 }
 
-function tryStructured(content, requireAssessment = false) {
-  try {
-    return parseResponse(content, { requireAssessment });
-  } catch {
-    return null;
-  }
+export function parseResponse(content, { requireAssessment = false } = {}) {
+  return parseChangeResponse(content, { requireAssessment });
 }
 
-function parseJsonObject(content) {
-  const source = String(content ?? '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-  try {
-    return JSON.parse(source);
-  } catch {
-    const start = source.indexOf('{');
-    const end = source.lastIndexOf('}');
-    if (start < 0 || end <= start) throw new Error('Local LLM returned invalid JSON.');
-    return JSON.parse(source.slice(start, end + 1));
-  }
+export function extractUnstructured(content) {
+  return extractUnstructuredResponse(content);
+}
+
+function tryReadable(content, requireAssessment = false) {
+  try { return parseChangeResponse(content, { requireAssessment }); } catch { return null; }
 }
 
 function resultWithDiagnostics(value, completion, extra) {
   return {
     ...value,
-    diagnostics: {
-      finishReason: completion.finishReason,
-      chunks: completion.chunks,
-      usage: completion.usage,
-      ...extra,
-    },
+    contextText: buildContextText(value, extra.delivery),
+    diagnostics: { finishReason: completion.finishReason, chunks: completion.chunks, usage: completion.usage, ...extra },
     raw: completionDiagnostics(completion, true),
   };
 }
 
-function normalizeSummary(value) {
-  if (typeof value === 'string') return value.split(/\n+/).map(cleanLine).filter(Boolean).slice(0, 5);
-  return Array.isArray(value) ? value.map((line) => String(line).trim()).filter(Boolean).slice(0, 5) : [];
-}
-
-function normalizeCommitMessage(value) {
-  if (typeof value !== 'string') return '';
-  const result = value.trim();
-  if (!result || looksLikeJson(result)) return '';
-  return result;
-}
-
-function looksLikeJson(value) {
-  if (!/^[\[{]/.test(value)) return false;
-  try {
-    JSON.parse(value);
-    return true;
-  } catch {
-    return false;
-  }
+function buildContextText(value, delivery) {
+  return [
+    `Delivery: ${delivery?.resolved ?? 'unknown'}`,
+    'Summary:', ...(value.summary ?? []).map((line) => `- ${line}`),
+    `Commit message: ${value.commitMessage ?? ''}`,
+    ...(value.assessment ? [`Assessment: ${value.assessment} (${value.confidence ?? 'low'})`, ...(value.reasons ?? []).map((line) => `- ${line}`)] : []),
+  ].join('\n');
 }
 
 function completionDiagnostics(completion, includeOutput = false) {
   return {
-    finishReason: completion.finishReason,
-    chunks: completion.chunks,
-    usage: completion.usage,
-    contentLength: completion.content?.length ?? 0,
-    reasoningLength: completion.reasoning?.length ?? 0,
+    finishReason: completion.finishReason, chunks: completion.chunks, usage: completion.usage,
+    contentLength: completion.content?.length ?? 0, reasoningLength: completion.reasoning?.length ?? 0,
     ...(includeOutput ? { content: completion.content ?? '', reasoning: completion.reasoning ?? '' } : {}),
   };
 }
 
 function errorDiagnostics(error) {
   return {
-    name: error.name,
-    message: error.message,
-    code: error.code ?? null,
-    status: error.status ?? null,
-    retryableWithSmallerPrompt: Boolean(error.retryableWithSmallerPrompt),
-    responseBody: error.responseBody ?? null,
+    name: error.name, message: error.message, code: error.code ?? null, status: error.status ?? null,
+    retryableWithSmallerPrompt: Boolean(error.retryableWithSmallerPrompt), responseBody: error.responseBody ?? null,
   };
 }
 
@@ -359,35 +370,11 @@ function attachDiagnostics(error, diagnostics) {
 }
 
 function noOutputMessage(completion) {
-  if (!completion.content && !completion.reasoning) {
-    return 'The local model completed without returning text. Zipflow saved the raw response diagnostics.';
-  }
-  if (completion.finishReason === 'length') {
-    return 'The local model reached its output limit without producing a usable summary or commit message.';
-  }
+  if (!completion.content && !completion.reasoning) return 'The local model completed without returning text. Zipflow saved the raw response diagnostics.';
+  if (completion.finishReason === 'length') return 'The local model reached its output limit without producing a usable summary or commit message.';
   return 'The local model returned text, but it did not contain a usable summary or commit message.';
 }
 
-function cleanLine(value) {
-  return String(value).trim().replace(/^[-*•]\s+/, '').replace(/^\d+[.)]\s+/, '').replace(/^`+|`+$/g, '').trim();
-}
-
-function findLastHeading(lines, pattern) {
-  for (let index = lines.length - 1; index >= 0; index -= 1) if (pattern.test(lines[index])) return index;
-  return -1;
-}
-
-function findCommitLine(lines) {
-  for (const line of lines) {
-    if (/^(subject|тема)\s*:/i.test(line)) return line.replace(/^(subject|тема)\s*:\s*/i, '').trim();
-    if (!/^(body|тело)\s*:/i.test(line) && line.length <= 200) return line;
-  }
-  return '';
-}
-
-function isUsefulSummaryLine(line) {
-  if (line.length < 8 || line.length > 300) return false;
-  if (/^(commit message|subject|body|сообщение коммита|тема|тело)\s*:?/i.test(line)) return false;
-  if (/^(summary|сводка)\s*:?$/i.test(line)) return false;
-  return true;
+function changedCount(plan) {
+  return (plan.created?.length ?? 0) + (plan.updated?.length ?? 0) + (plan.deleted?.length ?? 0);
 }

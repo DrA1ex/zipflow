@@ -14,6 +14,8 @@ export function createInitialState() {
     plan: null,
     decisions: new Map(),
     messages: [],
+    nextMessageId: 1,
+    activityLayout: null,
     menuItems: [],
     selectedIndex: 0,
     editor: new InputEditor(),
@@ -54,12 +56,25 @@ export function setScreen(state, screen, { items = [], selectedIndex = 0, status
 }
 
 export function appendMessage(state, title, lines = [], tone = 'info') {
-  state.messages.push({ title, lines: Array.isArray(lines) ? lines : [String(lines)], tone, at: new Date().toISOString() });
+  const normalized = Array.isArray(lines) ? lines : [String(lines)];
+  const collapsible = tone !== 'project' && tone !== 'summary' && normalized.length > 3;
+  state.messages.push({
+    id: state.nextMessageId++, title, lines: normalized, tone,
+    collapsible, collapsed: collapsible, at: new Date().toISOString(),
+  });
   state.transcriptSticky = true;
 }
 
 export function replaceLastMessage(state, title, lines = [], tone = 'info') {
-  if (state.messages.length) state.messages[state.messages.length - 1] = { title, lines, tone, at: new Date().toISOString() };
-  else appendMessage(state, title, lines, tone);
+  if (state.messages.length) {
+    const current = state.messages[state.messages.length - 1];
+    const normalized = Array.isArray(lines) ? lines : [String(lines)];
+    const collapsible = tone !== 'project' && tone !== 'summary' && normalized.length > 3;
+    state.messages[state.messages.length - 1] = {
+      ...current, title, lines: normalized, tone, collapsible,
+      collapsed: collapsible ? current.collapsed ?? true : false,
+      at: new Date().toISOString(),
+    };
+  } else appendMessage(state, title, lines, tone);
   state.transcriptSticky = true;
 }

@@ -37,10 +37,13 @@ test('archive inspection persists changes.patch and records the local LLM result
       assert.equal(url, 'http://127.0.0.1:11434/v1/chat/completions');
       requestBody = JSON.parse(options.body);
       return jsonResponse({
-        choices: [{ message: { content: JSON.stringify({
-          summary: ['Обновлена логика значения.', 'Добавлен новый модуль.'],
-          commitMessage: 'Обновить значение и добавить модуль',
-        }) } }],
+        choices: [{ message: { content: [
+          'SUMMARY:',
+          '- Обновлена логика значения.',
+          '- Добавлен новый модуль.',
+          'COMMIT MESSAGE:',
+          'Обновить значение и добавить модуль',
+        ].join('\n') } }],
       });
     };
 
@@ -67,9 +70,10 @@ test('archive inspection persists changes.patch and records the local LLM result
     assert.equal(state.screen, 'plan-review');
     assert.deepEqual(state.run.llm.summary, ['Обновлена логика значения.', 'Добавлен новый модуль.']);
     assert.equal(state.run.llm.commitMessage, 'Обновить значение и добавить модуль');
-    assert.ok(state.messages.some((message) => message.title === 'Local LLM summary'
-      && message.lines.includes('Добавлен новый модуль.')));
+    assert.equal(state.messages.some((message) => message.title === 'Local LLM summary'), false,
+      'the LLM summary is reserved for the final result block after checks');
     assert.match(requestBody.messages[0].content, /Write both summary and commitMessage in Russian/);
+    assert.equal('response_format' in requestBody, false, 'visible generation must stream readable text instead of JSON');
     assert.match(requestBody.messages[1].content, /src\/index\.js/);
 
     const patch = await readFile(state.run.patch.path, 'utf8');

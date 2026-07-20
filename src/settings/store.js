@@ -3,12 +3,14 @@ import { themes } from 'terlio.js';
 import { readJson, writeJsonAtomic } from '../utils/fs.js';
 import { ensureZipflowHome, getZipflowHome } from '../workflow/store.js';
 
-export const SETTINGS_VERSION = 5;
+export const SETTINGS_VERSION = 6;
 export const THEME_NAMES = Object.keys(themes);
 export const LLM_PROVIDERS = ['disabled', 'ollama', 'lmstudio'];
 export const LLM_LANGUAGES = ['English', 'Russian', 'German', 'French', 'Spanish', 'Chinese', 'Japanese'];
 export const ARCHIVE_POLICIES = ['keep', 'move', 'delete'];
 export const LLM_ARCHIVE_REVIEW_MODES = ['disabled', 'structure', 'patch'];
+export const LLM_CHANGE_DELIVERY_MODES = ['adaptive', 'patch', 'change-list', 'chunked'];
+export const LLM_FAILURE_ANALYSIS_MODES = ['disabled', 'same-context', 'new-context'];
 
 export const DEFAULT_SETTINGS = Object.freeze({
   version: SETTINGS_VERSION,
@@ -19,6 +21,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   llmLanguage: 'English',
   llmApiToken: '',
   llmArchiveReview: 'disabled',
+  llmChangeDelivery: 'adaptive',
+  llmFailureAnalysis: 'disabled',
   archivePolicy: 'keep',
   archiveDirectory: '~/zipflow-archive',
   archiveRetentionDays: 30,
@@ -47,6 +51,8 @@ export function normalizeSettings(settings) {
   if (!LLM_LANGUAGES.includes(value.llmLanguage)) value.llmLanguage = DEFAULT_SETTINGS.llmLanguage;
   if (typeof value.llmApiToken !== 'string') value.llmApiToken = '';
   if (!LLM_ARCHIVE_REVIEW_MODES.includes(value.llmArchiveReview)) value.llmArchiveReview = DEFAULT_SETTINGS.llmArchiveReview;
+  if (!LLM_CHANGE_DELIVERY_MODES.includes(value.llmChangeDelivery)) value.llmChangeDelivery = DEFAULT_SETTINGS.llmChangeDelivery;
+  if (!LLM_FAILURE_ANALYSIS_MODES.includes(value.llmFailureAnalysis)) value.llmFailureAnalysis = DEFAULT_SETTINGS.llmFailureAnalysis;
   if (value.llmProvider === 'disabled') value.llmModel = '';
   if (!ARCHIVE_POLICIES.includes(value.archivePolicy)) value.archivePolicy = DEFAULT_SETTINGS.archivePolicy;
   if (typeof value.archiveDirectory !== 'string' || !value.archiveDirectory.trim()) value.archiveDirectory = DEFAULT_SETTINGS.archiveDirectory;

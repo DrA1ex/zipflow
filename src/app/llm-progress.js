@@ -1,3 +1,4 @@
+import { wrapText } from 'terlio.js';
 export function beginLlmProgress(controller, { expectedMs = 0 } = {}) {
   const { state } = controller;
   const startedAt = Date.now();
@@ -20,6 +21,9 @@ export function beginLlmProgress(controller, { expectedMs = 0 } = {}) {
     loadedModel: false,
     cancellationRequested: false,
     expectedMs,
+    deliveryMode: null,
+    batchIndex: null,
+    batchTotal: null,
   };
   const timer = setInterval(() => {
     if (!state.llmRuntime) return;
@@ -45,6 +49,22 @@ export function updateLlmProgress(controller, event) {
   if (event.type === 'phase') {
     runtime.phase = event.phase;
     runtime.label = event.label;
+  } else if (event.type === 'delivery-mode') {
+    runtime.deliveryMode = event.deliveryMode;
+    runtime.label = `Change delivery: ${deliveryLabel(event.deliveryMode)}`;
+  } else if (event.type === 'change-list') {
+    runtime.deliveryMode = 'change-list';
+    runtime.label = `Sending ${formatNumber(event.paths)} changed paths without file contents`;
+  } else if (event.type === 'batch-start') {
+    runtime.phase = 'chunk-analysis';
+    runtime.deliveryMode = 'chunked';
+    runtime.batchIndex = event.index;
+    runtime.batchTotal = event.total;
+    runtime.content = '';
+    runtime.reasoning = '';
+    runtime.label = `Analyzing file batch ${event.index} of ${event.total}`;
+  } else if (event.type === 'batch-complete') {
+    runtime.label = `File batch ${event.index} of ${event.total} analyzed`;
   } else if (event.type === 'patch-budget') {
     runtime.patchBudget = event.patch;
     runtime.contextProfile = event.profile;
@@ -102,11 +122,13 @@ export function updateLlmProgress(controller, event) {
     runtime.label = `Processing the patch · ${formatPercent(event.progress)}`;
   } else if (event.type === 'chunk') {
     runtime.chunks = event.chunks ?? runtime.chunks;
-    runtime.reasoning = event.reasoning ?? runtime.reasoning;
-    runtime.content = event.content ?? runtime.content;
+    if (!event.hiddenOutput) {
+      runtime.reasoning = event.reasoning ?? runtime.reasoning;
+      runtime.content = event.content ?? runtime.content;
+    }
     if (event.contentDelta) {
       runtime.phase = 'answer';
-      runtime.label = runtime.stage === 'repair' ? 'Receiving the formatted answer' : 'Receiving the model answer';
+      runtime.label = runtime.stage === 'repair' ? 'Formatting the response internally' : 'Receiving the model response';
     } else if (event.reasoningDelta) {
       runtime.phase = 'reasoning';
       runtime.label = 'The model is analyzing the patch';
@@ -124,13 +146,14 @@ export function updateLlmProgress(controller, event) {
   controller.invalidate();
 }
 
-export function llmActivityLines(runtime) {
+export function llmActivityLines(runtime, width = 100) {
   if (!runtime) return [];
   const lines = [
     `Local LLM · ${runtime.provider} · ${runtime.model}`,
     runtime.transport ? `  Transport: ${runtime.transport} · POST ${runtime.endpoint}` : null,
     runtime.loadedModel ? `  Model instance: ${runtime.requestModel} · already loaded` : null,
     `  ${runtime.label} · ${formatElapsed(runtime.elapsedMs)}${runtime.expectedMs ? ` / median ${formatElapsed(runtime.expectedMs)}` : ''} · ${runtime.chunks} chunks`,
+    runtime.deliveryMode ? `  Delivery: ${deliveryLabel(runtime.deliveryMode)}${runtime.batchTotal ? ` · batch ${runtime.batchIndex}/${runtime.batchTotal}` : ''}` : null,
   ];
   const compact = lines.filter(Boolean);
   lines.length = 0;
@@ -141,19 +164,27 @@ export function llmActivityLines(runtime) {
       `  Omitted: ${runtime.patchBudget.omittedFiles} files without excerpts · ${runtime.patchBudget.omittedHunks} hunks`,
     );
   }
-  const reasoning = preview(runtime.reasoning, 5);
-  const content = preview(runtime.content, 5);
-  if (reasoning.length) lines.push('  Model draft:', ...reasoning.map((line) => `    ${line}`));
-  if (content.length) lines.push('  Structured answer:', ...content.map((line) => `    ${line}`));
+  const textWidth = Math.max(28, width - 10);
+  const reasoning = preview(runtime.reasoning, 5, textWidth);
+  const content = preview(runtime.content, 8, textWidth);
+  if (reasoning.length) lines.push('  Analysis:', ...reasoning.map((line) => `    ${line}`));
+  if (content.length) lines.push('  Model response:', ...content.map((line) => `    ${line}`));
   lines.push('');
   return lines;
 }
 
-function preview(value, maxLines) {
-  const source = String(value ?? '').trim();
+function preview(value, maxLines, width) {
+  const source = String(value ?? '').replace(/\r\n/g, '\n').trimEnd();
   if (!source) return [];
-  const lines = source.split('\n').map((line) => line.trim()).filter(Boolean);
-  return lines.slice(-maxLines).map((line) => line.length > 160 ? `${line.slice(0, 157)}…` : line);
+  const wrapped = source.split('\n').flatMap((line) => wrapText(line, width));
+  return wrapped.slice(-maxLines);
+}
+
+function deliveryLabel(value) {
+  if (value === 'patch') return 'full patch';
+  if (value === 'change-list') return 'changed paths only';
+  if (value === 'chunked') return 'file-by-file chunks';
+  return value || 'adaptive';
 }
 
 function formatElapsed(milliseconds) {

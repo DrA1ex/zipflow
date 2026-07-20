@@ -15,6 +15,7 @@ import {
   closeSettings, handleSettingsKey, isSettingsScreen, openSettings, selectChoice, selectParameter, selectSetting,
 } from './settings-panel.js';
 import { projectSummary, workflowOverviewLines } from '../ui/format.js';
+import { toggleActivityBlockAtScroll } from '../ui/activity.js';
 import { terminateActiveProcesses } from '../utils/process.js';
 import { removeIfExists } from '../utils/fs.js';
 import {
@@ -81,6 +82,12 @@ export class ZipflowController {
       this.state.transcriptScroll = Math.max(0, this.state.transcriptScroll + delta);
       this.state.transcriptSticky = normalized.name === 'page-down';
       return this.invalidate();
+    }
+    if (normalized.printable && normalized.text?.toLowerCase() === 'e' && !isEditorScreen(this.state.screen)) {
+      if (toggleActivityBlockAtScroll(this.state)) {
+        this.setStatus('Activity block toggled');
+        return this.invalidate();
+      }
     }
     if (isEditorScreen(this.state.screen)) return this.handleEditorKey(normalized);
     if (handleSetupShortcut(this, normalized) || handleExportShortcut(this, normalized)) return this.invalidate();

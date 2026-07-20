@@ -51,7 +51,7 @@ Rendering does not perform project mutations. Global settings use a stable two-p
 
 ### `src/settings`
 
-Persists versioned global application settings in `~/.zipflow/settings.json`. Settings are deliberately separate from project workflows. They include the local LLM provider, optional bearer token, selected model, response language, archive-review mode, and source-ZIP disposition policy.
+Persists versioned global application settings in `~/.zipflow/settings.json`. Settings are deliberately separate from project workflows. They include the local LLM provider, optional bearer token, selected model, response language, archive-review mode, change-delivery strategy, failed-check analysis policy, and source-ZIP disposition policy.
 
 ### `src/llm`
 
@@ -59,7 +59,7 @@ Uses provider-specific adapters. LM Studio model metadata comes from the native 
 
 `model-info.js` resolves the active or configured context size with a conservative fallback. `patch-budget.js` reserves context for instructions and output, keeps a complete changed-file manifest, and distributes available diff hunks across files. Context overflow and local compute-memory errors trigger progressively smaller-patch retries. `diagnostics.js` stores a bounded, sanitized request/result/error record in the run directory.
 
-`archive-review.js` can compare bounded project/archive trees before patch generation. Deep review extends the main structured response with `assessment`, `confidence`, and concise reasons, allowing the same request to produce the advisory verdict, summary, and commit message. Generation validates structured summary and commit-message JSON. Schema rejection retries with JSON mode where supported. A reasoning-only or length-limited response triggers a second formatting pass over the model draft, followed by a conservative unstructured-summary fallback. LLM errors remain non-fatal to archive application.
+`archive-review.js` can compare bounded project/archive trees before change generation. `delivery.js` selects a bounded full patch, an explicit changed-path list, or file-by-file patch batches; adaptive delivery chooses between full-patch and chunked analysis from the discovered context budget. Chunked analysis stores compact notes for each batch and synthesizes them in a final request. Deep review extends the readable response with `assessment`, `confidence`, and concise reasons. `response.js` parses the user-facing section protocol while a hidden JSON-repair request handles models that ignore it or return reasoning-only output. `failure.js` can explain a failed check in a fresh context or with the compact preceding change-review context. LLM errors remain non-fatal to archive application.
 
 ### `src/patch`
 
@@ -166,7 +166,7 @@ compact plan
 
 Conflict review uses a queue over the plan's conflicting items. A decision removes one item from the queue and advances to the next; bulk choices populate the same decision map without duplicating application logic. Diff views store their originating screen, item list, selected index, and introduction text so returning never loses the user's position.
 
-Activity messages are typed as information, running state, success, warning, error, or user choice. Completed live blocks collapse into a durable message, while the current five-stage run position is derived from application state and displayed separately in the header.
+Activity messages are typed as information, running state, success, warning, error, user choice, or final summary. Durable blocks longer than three lines start collapsed with visible disclosure markers and can be toggled at the current scroll position; project discovery and the final summary remain expanded. Live LLM text preserves provider line breaks and is wrapped with Terlio's width-aware text utility before rendering. The current five-stage run position is derived from application state and displayed separately in the header.
 
 Run history is persisted in existing run records rather than a second event database. Archive hashes support duplicate warnings, and workflow `lastRunId` resolves the deliberate repeat-last action.
 
@@ -181,7 +181,7 @@ archive input
   -> archive metadata
   -> persisted changes.patch
   -> optional LLM structure guard or deep patch review
-  -> streamed local LLM summary and commit message
+  -> readable streamed local LLM analysis using path, patch, or file-batch delivery
   -> deterministic archive age/snapshot shrink review
   -> optional reasoning-draft formatting pass
   -> copyable Activity plan
@@ -192,6 +192,7 @@ archive input
   -> backup
   -> transactional apply
   -> checks
+  -> optional local LLM failed-check explanation
   -> optional result commit
   -> optional deployment
   -> source ZIP keep, move, or delete policy
@@ -268,14 +269,14 @@ Unit and integration tests use temporary projects and Git repositories. Regressi
 - custom-check prompt order;
 - stable radio selection and Space activation;
 - global settings persistence and rendering;
-- LM Studio and Ollama model metadata, context budgeting, structural patch truncation, optional authorization, native and OpenAI-compatible SSE streams, progress events, context/OOM retries, reasoning-only responses, diagnostics, repair requests, and structured local LLM responses;
+- LM Studio and Ollama model metadata, context budgeting, structural patch truncation, adaptive/full/path-list/file-batch delivery, optional authorization, native and OpenAI-compatible streams, readable wrapped progress, context/OOM retries, reasoning-only responses, hidden repair requests, failure explanations, and diagnostics;
 - source archive keep, move, delete, retention, and size-limit behavior;
 - commit-message editor fallback, typing, deletion, and multiline input;
 - patch creation from archive-versus-snapshot changes;
 - managed-file deletion history and reset;
 - Git initialization, ignore generation, and first commit;
 - all four ZIP export modes;
-- copyable Activity and native-selection fallback;
+- copyable and collapsible Activity, readable LLM streaming, final-summary ordering, and native-selection fallback;
 - bulk-before-manual conflict UX and one-file conflict queues;
 - unified and side-by-side file diff rendering with hunk navigation;
 - compact workflow home, five-stage run progress, duplicate/old/shrinking archive warnings, performance analytics, and persisted run history;

@@ -7,7 +7,7 @@ import { formatRunReport } from './text-report.js';
 
 export async function createRunRecord({ id, project, workflow, archivePath, archiveHash = null, archiveInfo = null }) {
   const record = {
-    version: 6,
+    version: 7,
     id,
     projectPath: project.root,
     projectName: project.name,
@@ -19,6 +19,7 @@ export async function createRunRecord({ id, project, workflow, archivePath, arch
     archiveDisposition: null,
     patch: null,
     llm: null,
+    llmFailure: null,
     archiveSafety: null,
     status: 'created',
     createdAt: new Date().toISOString(),

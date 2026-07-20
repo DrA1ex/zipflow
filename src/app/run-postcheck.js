@@ -11,6 +11,10 @@ import { compactPlanLine, compactPlanMeta, formatArchiveName } from '../ui/forma
 import { confirmRollback, showRunDetails } from './run-rollback.js';
 import { failRun, releaseRunResources } from './run-lifecycle.js';
 import { finalizeSourceArchive } from './archive-policy.js';
+import { explainCheckFailure } from '../llm/failure.js';
+import { isLocalLlmEnabled } from '../llm/generate.js';
+import { beginLlmProgress } from './llm-progress.js';
+import { saveLlmDiagnostics } from '../llm/diagnostics.js';
 
 export function isPostCheckScreen(screen) {
   return [
@@ -103,6 +107,8 @@ export async function startChecks(controller) {
         failed?.name ?? 'Required check',
         lastNonEmptyLine(`${failed?.stdout ?? ''}\n${failed?.stderr ?? ''}`) || 'No output',
       ], 'error');
+      await maybeExplainFailedCheck(controller, failed);
+      controller.message('Check result summary', [checkSummaryLine(checksResult)], 'summary');
       return showFailedCheck(controller);
     }
     controller.message('All checks passed', [`${checksResult.passed} checks passed`], 'success');
@@ -243,13 +249,68 @@ async function completeRun(controller, status) {
   state.workflow = await saveWorkflow(state.workflow);
   await finalizeSourceArchive(controller);
   await releaseRunResources(controller);
-  controller.message(status === 'completed' ? 'Update completed successfully' : 'Update completed with errors', [
-    compactPlanLine(state.plan),
-    compactPlanMeta(state.plan),
-    `Checks: ${state.run.checks ? `${state.run.checks.passed} passed · ${state.run.checks.failed} failed` : 'not run'} · Deployment: ${deploymentResultLine(state)}`,
-    `Report: ${displayPath(runReportPath(state.run.id))}`,
-  ], status === 'completed' ? 'success' : 'warning');
+  controller.message('Final summary', finalSummaryLines(state), 'summary');
   showCompleted(controller);
+}
+
+
+async function maybeExplainFailedCheck(controller, failedCheck) {
+  const { state } = controller;
+  if (!failedCheck || !isLocalLlmEnabled(state.settings) || state.settings.llmFailureAnalysis === 'disabled') return null;
+  const progress = beginLlmProgress(controller);
+  const abortController = new AbortController();
+  state.llmAbortController = abortController;
+  controller.setStatus('Asking the local LLM to explain the failed check');
+  const startedAt = Date.now();
+  try {
+    const result = await explainCheckFailure({
+      settings: state.settings, project: state.project, run: state.run, failedCheck,
+    }, { onEvent: progress.onEvent, signal: abortController.signal });
+    const record = { ...result, durationMs: Date.now() - startedAt };
+    state.run.llmFailure = record;
+    state.run = await saveRunRecord(state.run);
+    controller.message('Local LLM error explanation', result.text.split(/\r?\n/), 'warning');
+    return record;
+  } catch (error) {
+    const cancelled = error.code === 'cancelled';
+    const diagnosticsPath = await saveLlmDiagnostics(state.run.id, {
+      status: cancelled ? 'cancelled' : 'failed', provider: state.settings.llmProvider,
+      model: state.settings.llmModel, stage: 'failure-analysis', ...(cancelled ? {} : { error }),
+    }).catch(() => null);
+    state.run.llmFailure = {
+      durationMs: Date.now() - startedAt,
+      provider: state.settings.llmProvider, model: state.settings.llmModel,
+      mode: state.settings.llmFailureAnalysis,
+      cancelled, error: cancelled ? null : error.message, diagnosticsPath,
+    };
+    state.run = await saveRunRecord(state.run);
+    controller.message(cancelled ? 'LLM error explanation cancelled' : 'LLM error explanation unavailable', [
+      cancelled ? 'The failed check remains available without an explanation.' : error.message,
+      ...(diagnosticsPath ? [`Diagnostics: ${displayPath(diagnosticsPath)}`] : []),
+    ], 'warning');
+    return null;
+  } finally {
+    if (state.llmAbortController === abortController) state.llmAbortController = null;
+    progress.stop();
+  }
+}
+
+export function finalSummaryLines(state) {
+  const lines = [];
+  if (state.run.llm?.summary?.length) lines.push(...state.run.llm.summary);
+  lines.push(
+    `${compactPlanLine(state.plan)} · ${checkSummaryLine(state.run.checks)} · Deployment ${deploymentResultLine(state)}`,
+    `Commit ${state.run.commit ? `${state.run.commit.revision} ${firstLine(state.run.commit.message)}` : 'not created'} · Report ${displayPath(runReportPath(state.run.id))}`,
+  );
+  return lines;
+}
+
+function checkSummaryLine(checks) {
+  if (!checks) return 'Checks not run';
+  const total = Number(checks.passed ?? 0) + Number(checks.failed ?? 0);
+  return checks.failed
+    ? `Checks ${checks.passed}/${total} passed · ${checks.failed} failed`
+    : `Checks ${checks.passed}/${total} passed`;
 }
 
 function showCompleted(controller) {

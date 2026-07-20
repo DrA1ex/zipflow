@@ -24,7 +24,7 @@ import { settingsViewModel } from '../app/settings-panel.js';
 import { formatDuration, runStep } from './format.js';
 import { renderDiffDocument } from '../diff/hunks.js';
 import { ZIPFLOW_VERSION } from '../version.js';
-import { transcriptLines } from './activity.js';
+import { buildTranscript } from './activity.js';
 
 export function renderZipflow({ state, width, height }) {
   const theme = themes[state.settings?.theme] ?? themes.ocean;
@@ -80,17 +80,22 @@ function renderWorkflow(state, width, mainHeight, theme) {
 }
 
 function renderTranscript(state, width, height, theme) {
-  const lines = transcriptLines(state, theme, width);
+  const transcript = buildTranscript(state, theme, width);
+  const lines = transcript.lines;
   const visibleRows = Math.max(1, height - 3);
   const maxScroll = Math.max(0, lines.length - visibleRows);
   if (state.transcriptSticky) state.transcriptScroll = maxScroll;
+  state.activityLayout = { ranges: transcript.ranges, visibleRows, maxScroll };
+  const hasCollapsed = transcript.ranges.some((item) => item.collapsible);
   return ScrollPane({
     title: ' Activity ',
     lines,
     width,
     height,
     scroll: state.transcriptScroll,
-    footer: state.transcriptSticky ? 'following latest' : 'PgDn to return',
+    footer: state.transcriptSticky
+      ? `following latest${hasCollapsed ? ' · E expand block at top' : ''}`
+      : `PgDn to return${hasCollapsed ? ' · E expand/collapse block at top' : ''}`,
     theme,
     pointerId: 'zipflow:transcript',
     onWheel: (event) => {

@@ -175,8 +175,8 @@ async function generateLlmSummary(controller, { plan, patch, extracted }) {
   setProgress(controller, 5, 7, `Streaming summary from ${state.settings.llmModel}`);
   const llmEstimate = await previousLlmEstimate(state);
   controller.message('Local LLM analysis starting', [
-    `${changedCount(plan)} changed paths will be analyzed${state.settings.llmArchiveReview === 'structure' ? ' after a project/archive tree comparison' : ' from changes.patch'}${llmEstimate ? ` · historical median ${formatEstimate(llmEstimate)}` : ''}.`,
-    'The full patch remains in the run report even if the model input must be reduced. Esc cancels only this summary.',
+    `${changedCount(plan)} changed paths · delivery ${deliveryLabel(state.settings.llmChangeDelivery)}${state.settings.llmArchiveReview === 'structure' ? ' · project/archive structure guard first' : ''}${llmEstimate ? ` · historical median ${formatEstimate(llmEstimate)}` : ''}.`,
+    'Adaptive delivery uses one patch when it fits and file-by-file batches when it does not. Esc cancels only this LLM step.',
   ], 'process');
   const progress = beginLlmProgress(controller, { expectedMs: llmEstimate });
   const abortController = new AbortController();
@@ -247,7 +247,6 @@ function emitLlmResult(controller, llm) {
       `Estimated ${attempt.patch.originalEstimatedTokens.toLocaleString('en-US')} tokens · sent ${attempt.patch.sentEstimatedTokens.toLocaleString('en-US')}`,
       `${attempt.patch.omittedFiles} files without excerpts · ${attempt.patch.omittedHunks} hunks omitted`,
     ], 'warning');
-    controller.message('Local LLM summary', llm.result.summary, 'info');
     const assessment = llm.assessment;
     if (assessment) controller.message('Local LLM archive assessment', [
       `${assessment.assessment} · ${assessment.confidence} confidence · ${assessment.mode} review`,
@@ -367,6 +366,8 @@ function llmRecord(state, result, diagnosticsPath, durationMs = 0) {
     confidence: result.confidence ?? result.structureAssessment?.confidence ?? null,
     reasons: result.reasons ?? result.structureAssessment?.reasons ?? null,
     diagnostics: result.diagnostics || null, diagnosticsPath,
+    contextText: result.contextText ?? null,
+    delivery: result.diagnostics?.delivery ?? null,
   };
 }
 
@@ -414,6 +415,14 @@ async function previousLlmEstimate(state) {
   const analytics = buildRunAnalytics(runs);
   const sameModel = analytics.llm.byModel.find((item) => item.name === `${state.settings.llmProvider} · ${state.settings.llmModel}`);
   return sameModel?.medianMs || analytics.llm.total.medianMs || 0;
+}
+
+
+function deliveryLabel(value) {
+  if (value === 'patch') return 'full patch';
+  if (value === 'change-list') return 'changed paths only';
+  if (value === 'chunked') return 'file-by-file chunks';
+  return 'adaptive';
 }
 
 function formatEstimate(milliseconds) {

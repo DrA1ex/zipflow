@@ -61,7 +61,8 @@ async function chooseValue(controller, id) {
 test('global settings store theme, LLM authorization, and source archive defaults', async () => withSettingsHome(async () => {
   await saveSettings({
     theme: 'matrix', checkOutput: 'compact', llmProvider: 'ollama', llmModel: 'qwen-coder',
-    llmLanguage: 'Russian', llmApiToken: 'secret', llmArchiveReview: 'patch', archivePolicy: 'move',
+    llmLanguage: 'Russian', llmApiToken: 'secret', llmArchiveReview: 'patch',
+    llmChangeDelivery: 'chunked', llmFailureAnalysis: 'same-context', archivePolicy: 'move',
     archiveDirectory: '~/custom-archives', archiveRetentionDays: 45, archiveMaxBytes: 500_000_000,
   });
   const settings = await loadSettings();
@@ -73,6 +74,8 @@ test('global settings store theme, LLM authorization, and source archive default
   assert.equal(settings.llmLanguage, 'Russian');
   assert.equal(settings.llmApiToken, 'secret');
   assert.equal(settings.llmArchiveReview, 'patch');
+  assert.equal(settings.llmChangeDelivery, 'chunked');
+  assert.equal(settings.llmFailureAnalysis, 'same-context');
   assert.equal(settings.archivePolicy, 'move');
   assert.equal(settings.archiveDirectory, '~/custom-archives');
   assert.equal(settings.archiveRetentionDays, 45);
@@ -273,4 +276,31 @@ test('archive review mode is selected from the Local LLM page and preserves the 
   view = settingsViewModel(state);
   assert.equal(state.settings.llmArchiveReview, 'patch');
   assert.equal(view.parameters[view.parameterIndex].id, 'llmArchiveReview');
+}));
+
+
+test('Local LLM settings expose delivery and failed-check analysis choices', async () => withSettingsHome(async () => {
+  const { state, controller } = await settingsController({
+    llmProvider: 'ollama', llmModel: 'qwen', llmChangeDelivery: 'chunked',
+    llmFailureAnalysis: 'same-context',
+  });
+  await selectCategory(controller, 'localLlm');
+  let view = settingsViewModel(state);
+  assert.match(view.parameters.find((item) => item.id === 'llmChangeDelivery').value, /File-by-file/);
+  assert.match(view.parameters.find((item) => item.id === 'llmFailureAnalysis').value, /Continue/);
+
+  view = await openParameter(controller, 'llmChangeDelivery');
+  assert.equal(view.choices[view.choiceIndex].id, 'llmChangeDelivery:chunked');
+  assert.deepEqual(view.choices.map((item) => item.id), [
+    'llmChangeDelivery:adaptive', 'llmChangeDelivery:patch',
+    'llmChangeDelivery:change-list', 'llmChangeDelivery:chunked',
+  ]);
+  await handleSettingsKey(controller, { name: 'escape' });
+  assert.equal(settingsViewModel(state).parameters[settingsViewModel(state).parameterIndex].id, 'llmChangeDelivery');
+
+  view = await openParameter(controller, 'llmFailureAnalysis');
+  assert.equal(view.choices[view.choiceIndex].id, 'llmFailureAnalysis:same-context');
+  assert.deepEqual(view.choices.map((item) => item.id), [
+    'llmFailureAnalysis:disabled', 'llmFailureAnalysis:same-context', 'llmFailureAnalysis:new-context',
+  ]);
 }));
