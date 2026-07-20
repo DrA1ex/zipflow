@@ -85,3 +85,12 @@ test('recommended groups include every detected technology without duplicate bas
   assert.ok(titles.includes('CMake and C++'));
   assert.ok(titles.includes('Go'));
 });
+
+test('Swift projects receive Xcode and SwiftPM ignore recommendations', async () => {
+  const { recommendedGitignoreGroups } = await import('../src/git/ignore.js');
+  const groups = recommendedGitignoreGroups({ technologies: [{ id: 'swift' }], labels: ['Swift · macOS'] });
+  const swift = groups.find((group) => group.title === 'Swift and Xcode');
+  assert.ok(swift.patterns.includes('.build/'));
+  assert.ok(swift.patterns.includes('DerivedData/'));
+  assert.ok(swift.patterns.includes('xcuserdata/'));
+});

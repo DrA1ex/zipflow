@@ -131,3 +131,49 @@ test('a directory with no markers remains usable as an unknown project', async (
   assert.deepEqual(project.checks, []);
   assert.equal(project.name, path.basename(root));
 });
+
+test('detects Swift Package and macOS Xcode projects with useful checks', async () => {
+  const root = await tempDir('zipflow-swift-project-');
+  await writeFiles(root, {
+    'Package.swift': '// swift-tools-version: 5.9\n',
+    'DemoApp.xcodeproj/project.pbxproj': '// fixture\n',
+  });
+
+  const project = await discoverProject(root);
+  const swift = project.technologies.find((item) => item.id === 'swift');
+
+  assert.equal(swift.label, 'Swift · macOS');
+  assert.ok(project.checks.some((item) => item.id === 'swift-test'));
+  assert.ok(project.checks.some((item) => item.id === 'xcode-test'));
+  assert.deepEqual(project.checks.find((item) => item.id === 'xcode-test').command.slice(0, 4), ['xcodebuild', '-project', 'DemoApp.xcodeproj', '-scheme']);
+});
+
+test('discovers scripts as checks and deploy command candidates', async () => {
+  const root = await tempDir('zipflow-project-scripts-');
+  await writeFiles(root, {
+    'package.json': '{"name":"scripts-app"}\n',
+    'scripts/test-smoke.sh': 'echo smoke\n',
+    'scripts/deploy-release.sh': 'echo deploy\n',
+    'scripts/cleanup.py': 'print("clean")\n',
+  });
+
+  const project = await discoverProject(root);
+
+  assert.ok(project.checks.some((item) => item.id === 'script:scripts/test-smoke.sh' && item.selected));
+  assert.ok(project.checks.some((item) => item.id === 'script:scripts/cleanup.py' && !item.selected));
+  assert.equal(project.checks.some((item) => item.id.includes('deploy-release')), false);
+  assert.equal(project.deployCandidates[0].commandText, "bash 'scripts/deploy-release.sh'");
+  assert.ok(project.deployCandidates.some((item) => item.commandText.includes('cleanup.py')));
+});
+
+test('offers deploy-like package scripts separately from validation checks', async () => {
+  const root = await tempDir('zipflow-node-deploy-candidate-');
+  await writeFiles(root, {
+    'package.json': JSON.stringify({ scripts: { test: 'node --test', deploy: 'node deploy.js' } }),
+  });
+
+  const project = await discoverProject(root);
+
+  assert.equal(project.checks.some((item) => item.id === 'node-script:deploy'), false);
+  assert.ok(project.deployCandidates.some((item) => item.commandText === 'npm run deploy'));
+});

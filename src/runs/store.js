@@ -7,7 +7,7 @@ import { formatRunReport } from './text-report.js';
 
 export async function createRunRecord({ id, project, workflow, archivePath, archiveHash = null, archiveInfo = null }) {
   const record = {
-    version: 7,
+    version: 8,
     id,
     projectPath: project.root,
     projectName: project.name,
@@ -15,6 +15,42 @@ export async function createRunRecord({ id, project, workflow, archivePath, arch
     archivePath,
     archiveHash,
     archiveInfo,
+    archiveMetadata: null,
+    archiveDisposition: null,
+    patch: null,
+    llm: null,
+    llmFailure: null,
+    archiveSafety: null,
+    status: 'created',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    plan: null,
+    applied: null,
+    checks: null,
+    checkpoint: null,
+    commit: null,
+    deploy: null,
+    managedHistory: null,
+    rollback: null,
+    decisions: [],
+    error: null,
+  };
+  await saveRunRecord(record);
+  return record;
+}
+
+
+export async function createActionRunRecord({ id, project, workflow, action }) {
+  const record = {
+    version: 8,
+    id,
+    kind: action,
+    projectPath: project.root,
+    projectName: project.name,
+    workflowName: workflow.name,
+    archivePath: null,
+    archiveHash: null,
+    archiveInfo: null,
     archiveMetadata: null,
     archiveDisposition: null,
     patch: null,

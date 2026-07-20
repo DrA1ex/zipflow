@@ -75,6 +75,12 @@ Archive -> Review -> Apply -> Checks -> Finish
 
 Activity entries use stable `INFO`, `RUN`, `DONE`, `WARN`, `FAIL`, `YOU`, and `SUM` roles so current work, completed work, problems, user decisions, and the final result remain distinguishable. Any durable block longer than three lines starts collapsed with a visible arrow; scroll to it and press `E` to expand or collapse it. Project discovery and the final summary stay expanded. Long-running LLM and check steps explain what result is expected before they start.
 
+## Supported project workflows
+
+Zipflow detects Node.js, TypeScript, Python, CMake/C++, Go, Swift Package Manager, and macOS Xcode projects. Swift projects receive `swift test`, `swift build`, and inferred macOS `xcodebuild` checks. The inferred Xcode scheme can be reviewed or replaced in the workflow.
+
+The project scanner also inspects `./scripts`. Check-like scripts are offered in the checks step, while deploy/release/publish-like scripts are prioritized as deployment choices. Other runnable scripts remain available as optional choices, and a custom command can always be entered.
+
 ## Checks and custom commands
 
 Detected checks are shown as a multi-select list. `Space` or `Enter` toggles a check.
@@ -226,6 +232,12 @@ Zipflow separates two commit purposes:
 Each purpose is configured on its own wizard step. Result commit message settings are shown only when result commits are enabled.
 
 Result commits stage only paths applied by the current run. Protected `.zipflow/` paths and untracked paths ignored by Git are filtered before staging, so archive metadata cannot break a commit. Pre-existing staged changes block automatic commits so Zipflow cannot accidentally include unrelated index contents. No push is performed.
+
+## Manual project actions
+
+For a configured workflow, the project menu exposes **Run tests** when checks are selected and **Run deployment** when a deploy command is configured. These actions operate on the current local project without applying an archive. Each action writes a normal text and JSON run report and appears in run history.
+
+When a manual check or deployment fails and local LLM failure analysis is configured, Zipflow offers **Explain error with local LLM**. It never runs automatically from the project menu; selecting it is required. The automatic post-upload behavior remains controlled by the existing workflow settings.
 
 ## Deployment
 

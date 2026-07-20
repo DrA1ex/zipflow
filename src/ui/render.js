@@ -134,8 +134,8 @@ function renderTranscript(state, width, height, theme) {
 function renderCurrent(state, width, height, theme) {
   if (state.busy) return renderBusy(state, height, theme);
   if (isEditorScreen(state.screen)) return renderEditor(state, width, height, theme);
-  if (state.screen === 'checks-running') return renderChecksRunning(state, height, theme);
-  if (state.screen === 'deploy-running') return renderDeployRunning(state, height, theme);
+  if (['checks-running', 'manual-checks-running'].includes(state.screen)) return renderChecksRunning(state, height, theme);
+  if (['deploy-running', 'manual-deploy-running'].includes(state.screen)) return renderDeployRunning(state, height, theme);
   const intro = state.panelIntro ?? [];
   return WorkspacePane({
     title: ` ${screenTitle(state)} `,
@@ -300,7 +300,7 @@ function screenTitle(state) {
     'custom-check-name': 'Custom check name', 'setup-policy': 'Update policy', 'setup-archive-mode': 'Archive mode',
     'setup-deletion-scope': 'Snapshot deletion', 'setup-git-checkpoint': 'Git checkpoint',
     'setup-git-result': 'Result commit', 'setup-git-message': 'Commit message source', 'commit-template': 'Commit template',
-    'setup-deploy': 'Deployment', 'deploy-command': 'Deploy command', 'setup-review': 'Review',
+    'setup-deploy': 'Deployment', 'setup-deploy-command': 'Deploy command', 'deploy-command': 'Deploy command', 'setup-review': 'Review',
     'archive-input': 'Archive', 'archive-duplicate': 'Archive already used', 'archive-safety': 'Archive safety', 'plan-review': 'Update plan', 'plan-details': 'Change groups', 'plan-files': 'Changed files', 'diff-view': 'Diff',
     'conflict-summary': 'Conflict choices', 'conflict-checkpoint': 'Conflict checkpoint', 'conflict-file': 'Resolve conflict', conflicts: 'Choose files',
     applying: 'Applying update', 'checks-running': 'Checks', 'check-failed': 'Checks failed', commit: 'Commit',
@@ -311,7 +311,10 @@ function screenTitle(state) {
     'export-running': 'Creating ZIP', 'export-complete': 'ZIP created',
     'setup-git-init': 'Initialize Git', 'setup-gitignore': 'Git ignore rules',
     'setup-initial-commit': 'First commit', 'initial-commit-message': 'First commit message',
-    'run-history': 'Run history', 'run-analytics': 'Performance analytics', error: 'Error', settings: 'Settings',
+    'run-history': 'Run history', 'run-analytics': 'Performance analytics',
+    'manual-checks-running': 'Running tests', 'manual-checks-result': 'Test report',
+    'manual-deploy-running': 'Deployment', 'manual-deploy-result': 'Deployment report',
+    error: 'Error', settings: 'Settings',
   };
   return titles[state.screen] ?? 'Zipflow';
 }
@@ -333,7 +336,7 @@ function footerHints(state) {
   }
   if (state.screen === 'diff-view') return ['↑/↓ scroll', 'N/P next/previous hunk', 'M switch mode', 'Drag to copy', 'Esc back'];
   if (state.llmAbortController) return ['Esc cancel LLM generation', 'Ctrl+C stop'];
-  if (state.busy || ['checks-running', 'deploy-running'].includes(state.screen)) return ['Ctrl+C stop'];
+  if (state.busy || ['checks-running', 'deploy-running', 'manual-checks-running', 'manual-deploy-running'].includes(state.screen)) return ['Ctrl+C stop'];
   if (isEditorScreen(state.screen)) return state.editorContext?.multiline
     ? ['Enter confirm', 'Ctrl+Enter newline', 'Ctrl+U clear to cursor', 'Esc back', 'Ctrl+T native select']
     : ['Enter confirm', 'Tab complete path', 'Esc back', 'Ctrl+B settings', 'Ctrl+T native select'];

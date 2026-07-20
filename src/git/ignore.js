@@ -43,6 +43,10 @@ const TECHNOLOGY_GROUPS = {
     title: 'Go',
     patterns: ['bin/', '*.test', 'coverage.out'],
   },
+  swift: {
+    title: 'Swift and Xcode',
+    patterns: ['.build/', '.swiftpm/', 'DerivedData/', '*.xcuserstate', 'xcuserdata/', '*.xccheckout'],
+  },
 };
 
 export function recommendedGitignoreGroups(project) {
@@ -53,6 +57,7 @@ export function recommendedGitignoreGroups(project) {
   if (ids.has('python')) groups.push(TECHNOLOGY_GROUPS.python);
   if (ids.has('cmake')) groups.push(TECHNOLOGY_GROUPS.cmake);
   if (ids.has('go')) groups.push(TECHNOLOGY_GROUPS.go);
+  if (ids.has('swift')) groups.push(TECHNOLOGY_GROUPS.swift);
   return groups.map((group) => ({ ...group, patterns: [...group.patterns] }));
 }
 

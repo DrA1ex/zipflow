@@ -71,7 +71,7 @@ Persists per-project paths previously created or updated by Zipflow. `analytics.
 
 ### `src/project`
 
-Detects the project root, technologies, package managers, and recommended checks. Each technology has an isolated detector.
+Detects the project root, technologies, package managers, recommended checks, `./scripts` commands, and deployment candidates. Each technology has an isolated detector; Swift/macOS support lives in `detectors/swift.js`, while generic script discovery is isolated in `project/scripts.js`.
 
 ### `src/workflow`
 
@@ -80,6 +80,11 @@ Defines defaults, normalizes older workflow files, and persists versioned workfl
 ### `src/export`
 
 Collects source paths for tracked, non-ignored, interactive, and all-file exports, then writes ZIP archives. Protected `.git/` and `.zipflow/` roots are filtered below the UI layer.
+
+
+### `src/app/manual-flow.js`
+
+Runs configured checks or deployment against the current local project without applying an archive. Manual actions create ordinary persisted run reports and expose LLM failure explanation only as an explicit result-screen action.
 
 ### `src/archive`
 

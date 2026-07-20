@@ -8,6 +8,10 @@ import {
 import {
   activateGitBootstrap, backGitBootstrap, handlesGitBootstrapScreen, showGitBootstrap, submitGitBootstrapEditor,
 } from './setup-git-init.js';
+import {
+  activateDeployCommand, activateDeployPolicy, deployPolicyDescription, showDeployCommandStep,
+  showDeployPolicyStep, submitDeployEditor,
+} from './setup-deploy.js';
 
 export async function beginSetup(controller, { fresh = false } = {}) {
   const { state } = controller;
@@ -39,7 +43,8 @@ export async function activateSetup(controller, itemId) {
   if (screen === 'setup-git-checkpoint') return activateCheckpoint(controller, itemId);
   if (screen === 'setup-git-result') return activateResultCommit(controller, itemId);
   if (screen === 'setup-git-message') return activateMessageStrategy(controller, itemId);
-  if (screen === 'setup-deploy') return activateDeployPolicy(controller, itemId);
+  if (screen === 'setup-deploy') return activateDeployPolicy(controller, itemId, () => showReviewStep(controller));
+  if (screen === 'setup-deploy-command') return activateDeployCommand(controller, itemId, () => showReviewStep(controller));
   if (screen === 'setup-review') return activateReview(controller, itemId);
 }
 
@@ -56,13 +61,7 @@ export async function submitSetupEditor(controller) {
     controller.message('Commit template saved', [template], 'success');
     return showDeployPolicyStep(controller);
   }
-  if (purpose === 'deploy-command') {
-    const commandText = state.editor.value.trim();
-    if (!commandText) return controller.setStatus('Enter the deploy command.');
-    state.draft.deploy.commandText = commandText;
-    controller.message('Deploy command configured', [commandText, deployPolicyDescription(state.draft.deploy.policy)], 'success');
-    return showReviewStep(controller);
-  }
+  if (purpose === 'deploy-command') return submitDeployEditor(controller, () => showReviewStep(controller));
 }
 
 export function handleSetupShortcut(controller, key) {
@@ -85,11 +84,12 @@ export function backSetup(controller) {
   if (screen === 'setup-git-result') return showCheckpointStep(controller);
   if (screen === 'setup-git-message') return showResultCommitStep(controller);
   if (screen === 'setup-deploy') return previousBeforeDeploy(controller);
+  if (screen === 'setup-deploy-command') return showDeployPolicyStep(controller);
   if (screen === 'setup-review') return showDeployPolicyStep(controller);
   if (screen.startsWith('custom-check')) return showChecksStep(controller);
   if (screen === 'project-path-input') return showProjectStep(controller);
   if (screen === 'commit-template') return showMessageStrategyStep(controller);
-  if (screen === 'deploy-command') return showDeployPolicyStep(controller);
+  if (screen === 'deploy-command') return showDeployCommandStep(controller);
 }
 
 function activateProject(controller, itemId) {
@@ -248,36 +248,6 @@ function activateMessageStrategy(controller, itemId) {
   }
 }
 
-function showDeployPolicyStep(controller) {
-  const value = controller.state.draft.deploy.policy;
-  controller.showMenu('setup-deploy', [
-    choice('deploy-disabled', value === 'disabled', 'No deploy command', 'Finish after checks and the optional result commit.'),
-    choice('deploy-ask', value === 'ask', 'Ask after successful checks', 'Offer to run the deploy command after the update passes all required checks.'),
-    choice('deploy-always', value === 'always', 'Always deploy after successful checks', 'Run the configured deploy command automatically after checks and the optional commit.'),
-    choice('deploy-on-demand', value === 'on-demand', 'Deploy on demand', 'Keep a Run deployment action on the successful result screen.'),
-    { id: 'deploy-continue', label: 'Continue', description: deployPolicyDescription(value) },
-  ], 'Deployment after successful checks', setupContinueIndex(controller, 'setup-deploy', 4));
-}
-
-function activateDeployPolicy(controller, itemId) {
-  if (itemId.startsWith('deploy-') && itemId !== 'deploy-continue') {
-    controller.state.draft.deploy.policy = itemId.slice(7);
-    return showDeployPolicyStep(controller);
-  }
-  if (itemId === 'deploy-continue') {
-    if (controller.state.draft.deploy.policy === 'disabled') return showReviewStep(controller);
-    return controller.showEditor('deploy-command', {
-      label: 'Deploy command',
-      placeholder: 'npm run deploy',
-      purpose: 'deploy-command',
-      instructions: [
-        'This command is not a validation check. It can run only after every required check has passed.',
-        deployPolicyDescription(controller.state.draft.deploy.policy),
-      ],
-    }, controller.state.draft.deploy.commandText);
-  }
-}
-
 function showReviewStep(controller) {
   const workflow = controller.state.draft;
   controller.message('Workflow ready', [
@@ -370,12 +340,6 @@ function localLlmMessageDescription(state) {
   return 'Configure a provider and model in Ctrl+B settings. Until then Zipflow falls back to archive metadata, then the run identifier.';
 }
 
-function deployPolicyDescription(value) {
-  if (value === 'ask') return 'Ask whether to deploy after successful checks';
-  if (value === 'always') return 'Deploy automatically after successful checks';
-  if (value === 'on-demand') return 'Deploy only when selected from the successful result screen';
-  return 'Deployment disabled';
-}
 
 function deletionReviewLabel(scope) {
   if (scope === 'all') return 'Snapshot · all managed files';

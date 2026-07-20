@@ -93,6 +93,10 @@ export async function suggestPathEntries(value, {
     if (extension && !entry.isDirectory() && !entry.name.toLowerCase().endsWith(extension)) return false;
     return entry.isDirectory() || entry.isFile();
   }).sort((left, right) => Number(right.isDirectory()) - Number(left.isDirectory()) || left.name.localeCompare(right.name));
+  if (matches.length === 1 && matches[0].isFile()) {
+    const exact = path.join(directory, matches[0].name);
+    if (path.resolve(exact) === path.resolve(parsed)) return suggestions;
+  }
   for (const entry of matches) {
     const absolute = path.join(directory, entry.name);
     const isDirectory = entry.isDirectory();

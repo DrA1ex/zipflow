@@ -101,3 +101,14 @@ test('directory suggestions include an explicit action for choosing the current 
   assert.equal(result[0].submit, true);
   assert.ok(result.some((item) => item.label === 'child/'));
 });
+
+test('does not suggest an exact file path when there is nothing left to complete', async () => {
+  const { suggestPathEntries } = await import('../src/utils/paths.js');
+  const root = await tempDir('zipflow-path-exact-file-');
+  const archive = path.join(root, 'release.zip');
+  await writeFile(archive, 'zip');
+
+  const result = await suggestPathEntries(archive, { extension: '.zip' });
+
+  assert.deepEqual(result, []);
+});

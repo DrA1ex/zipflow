@@ -25,6 +25,7 @@ export async function detectNodeProject(root) {
   const scripts = packageJson.scripts ?? {};
   const typescript = await exists(path.join(root, 'tsconfig.json'));
   const checks = [];
+  const deployCandidates = [];
   checks.push({
     id: 'node-syntax',
     name: 'JavaScript syntax',
@@ -36,6 +37,15 @@ export async function detectNodeProject(root) {
     timeoutMs: 120_000,
   });
   for (const [name, command] of Object.entries(scripts)) {
+    if (isDeployScript(name, command)) {
+      deployCandidates.push({
+        id: `node-deploy:${name}`, name: titleFromName(name),
+        description: `${packageManager} run ${name}`,
+        commandText: packageManager === 'npm' ? `npm run ${name}` : `${packageManager} run ${name}`,
+        cwd: '.', preferred: true, source: 'package.json',
+      });
+      continue;
+    }
     const classification = classifyScript(name, command);
     if (!classification) continue;
     checks.push({
@@ -72,6 +82,7 @@ export async function detectNodeProject(root) {
     details: { packageManager, typescript, packageName: packageJson.name ?? path.basename(root), parseError },
     files: ['package.json', ...LOCKFILES.map(([file]) => file), ...(typescript ? ['tsconfig.json'] : [])],
     checks: dedupeChecks(checks),
+    deployCandidates,
     note: parseError ? `package.json could not be parsed: ${parseError}` : null,
   };
 }
@@ -83,6 +94,10 @@ async function detectPackageManager(root, declared) {
     if (await exists(path.join(root, file))) return manager;
   }
   return 'npm';
+}
+
+function isDeployScript(name, command) {
+  return /deploy|release|publish|upload|ship|distribute|notarize|package|archive/.test(`${name} ${command}`.toLowerCase());
 }
 
 function classifyScript(name, command) {

@@ -23,6 +23,7 @@ import {
   activateExport, backExport, beginCreateZip, handleExportShortcut, handlesExportScreen, submitExportEditor,
 } from './export-flow.js';
 import { activateHistory, backHistory, handlesHistoryScreen, repeatLastArchive, showRunHistory } from './history-flow.js';
+import { activateManual, backManual, beginManualChecks, beginManualDeploy, handlesManualScreen } from './manual-flow.js';
 import {
   acceptPathSuggestion, clearPathSuggestions, isPathEditorScreen, movePathSuggestion,
   refreshPathSuggestions, resetPathSuggestionInput, selectPathSuggestion,
@@ -84,7 +85,7 @@ export class ZipflowController {
       this.setStatus('Cancelling local LLM generation…');
       return;
     }
-    if (this.state.busy || ['checks-running', 'deploy-running'].includes(this.state.screen)) return;
+    if (this.state.busy || ['checks-running', 'deploy-running', 'manual-checks-running', 'manual-deploy-running'].includes(this.state.screen)) return;
     if (normalized.printable && normalized.text === '?') return this.showContextHelp();
     if (normalized.name === 'page-up' || normalized.name === 'page-down') {
       const delta = normalized.name === 'page-up' ? -8 : 8;
@@ -137,6 +138,7 @@ export class ZipflowController {
     if (handlesRunScreen(this.state.screen)) return activateRun(this, item.id);
     if (handlesExportScreen(this.state.screen)) return activateExport(this, item.id);
     if (handlesHistoryScreen(this.state.screen)) return activateHistory(this, item.id);
+    if (handlesManualScreen(this.state.screen)) return activateManual(this, item.id);
     if (this.state.screen === 'error') {
       if (item.id === 'back-home') return this.showHome();
       if (item.id === 'exit') return this.exit(1);
@@ -161,8 +163,12 @@ export class ZipflowController {
     this.state.runDetailsOrigin = null;
     if (workflow) {
       const lastRun = workflow.lastRunId ? `Last run: ${workflow.lastRunId}` : 'No previous runs';
+      const checks = workflow.checks.filter((check) => check.selected);
+      const deployConfigured = Boolean(workflow.deploy?.commandText);
       return this.showMenu('home', [
-        { id: 'start-update', label: 'Start an update', description: 'Choose a ZIP archive and use the workflow summarized above' },
+        { id: 'start-update', label: 'Start an update', description: 'Choose a ZIP archive and use the saved workflow' },
+        ...(checks.length ? [{ id: 'run-tests', label: 'Run tests', description: `Run ${checks.length} configured check${checks.length === 1 ? '' : 's'} against the current project` }] : []),
+        ...(deployConfigured ? [{ id: 'run-deploy-now', label: 'Run deployment', description: workflow.deploy.commandText }] : []),
         { id: 'change-workflow', label: 'Change workflow', description: 'Review and update the workflow; nothing changes until you confirm the final step' },
         { id: 'create-zip', label: 'Create ZIP', description: 'Export tracked, non-ignored, selected, or all project files' },
         { id: 'repeat-last', label: 'Repeat last archive', description: workflow.lastRunId ? 'Rebuild the previous archive plan against the current project' : 'No previous archive', disabled: !workflow.lastRunId },
@@ -247,6 +253,8 @@ export class ZipflowController {
     if (itemId === 'run-history') return showRunHistory(this);
     if (itemId === 'repeat-last') return repeatLastArchive(this);
     if (itemId === 'create-zip') return beginCreateZip(this);
+    if (itemId === 'run-tests') return beginManualChecks(this);
+    if (itemId === 'run-deploy-now') return beginManualDeploy(this);
     if (itemId === 'setup-project') return beginSetup(this, { fresh: true });
     if (itemId === 'choose-directory') {
       await beginSetup(this, { fresh: true });
@@ -310,6 +318,7 @@ export class ZipflowController {
     if (handlesRunScreen(this.state.screen)) return backRun(this);
     if (handlesExportScreen(this.state.screen)) return backExport(this);
     if (handlesHistoryScreen(this.state.screen)) return backHistory(this);
+    if (handlesManualScreen(this.state.screen)) return backManual(this);
     if (this.state.screen === 'home' || this.state.screen === 'new-project') return this.exit(0);
     return this.showHome();
   }

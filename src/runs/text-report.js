@@ -3,7 +3,8 @@ export function formatRunReport(run) {
     `ZIPFLOW RUN ${run.id}`,
     '',
     `Project: ${run.projectPath}`,
-    `Archive: ${run.archivePath}`,
+    ...(run.kind ? [`Action: ${actionLabel(run.kind)}`] : []),
+    ...(run.archivePath ? [`Archive: ${run.archivePath}`] : []),
     `Status: ${run.status}`,
     `Created: ${run.createdAt}`,
   ];
@@ -76,7 +77,8 @@ export function formatCompletionForClipboard(run) {
     `ZIPFLOW RUN ${run.id}`,
     '',
     `Project: ${run.projectPath}`,
-    `Archive: ${run.archivePath}`,
+    ...(run.kind ? [`Action: ${actionLabel(run.kind)}`] : []),
+    ...(run.archivePath ? [`Archive: ${run.archivePath}`] : []),
     `Status: ${run.status}`,
     '',
     `Changes: ${counts.created ?? 0} added · ${counts.updated ?? 0} changed · ${counts.deleted ?? 0} removed`,
@@ -95,7 +97,8 @@ export function formatFailureForClipboard(run) {
     `ZIPFLOW RUN ${run.id}`,
     '',
     `Project: ${run.projectPath}`,
-    `Archive: ${run.archivePath}`,
+    ...(run.kind ? [`Action: ${actionLabel(run.kind)}`] : []),
+    ...(run.archivePath ? [`Archive: ${run.archivePath}`] : []),
   ];
   if (run.plan?.counts) lines.push('', 'Applied plan:', ...formatCounts(run.plan.counts));
   if (failed) {
@@ -142,4 +145,10 @@ function formatDuration(milliseconds = 0) {
 
 function firstLine(value) {
   return String(value ?? '').split(/\r?\n/, 1)[0];
+}
+
+function actionLabel(kind) {
+  if (kind === 'manual-checks') return 'Manual tests against current project';
+  if (kind === 'manual-deploy') return 'Manual deployment of current project';
+  return String(kind ?? 'Update');
 }

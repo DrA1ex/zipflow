@@ -67,9 +67,12 @@ test('deployment command is requested only when deployment is enabled', async ()
   await activateSetup(controller, 'deploy-on-demand');
   await activateSetup(controller, 'deploy-continue');
 
+  assert.equal(state.screen, 'setup-deploy-command');
+  assert.ok(state.menuItems.some((item) => item.id === 'deploy-custom'));
+  await activateSetup(controller, 'deploy-custom');
   assert.equal(state.screen, 'deploy-command');
   assert.equal(state.editorContext.label, 'Deploy command');
-  assert.match(state.editorContext.instructions.join(' '), /only after every required check has passed/i);
+  assert.match(state.editorContext.instructions.join(' '), /only after every required update check passes/i);
 });
 
 test('projects without Git are offered initialization before workflow checks', async () => {
@@ -112,4 +115,32 @@ test('Git initialization never offers to rewrite an existing gitignore', async (
   await activateSetup(controller, 'gitignore-existing');
   assert.equal(await readFile(path.join(root, '.gitignore'), 'utf8'), original);
   assert.equal(state.screen, 'setup-initial-commit');
+});
+
+test('deployment setup offers detected commands before a custom command', async () => {
+  const state = createInitialState();
+  state.project = {
+    ...projectFixture(),
+    deployCandidates: [{
+      id: 'deploy:script', name: 'Deploy Release', description: 'bash scripts/deploy-release.sh',
+      commandText: 'bash scripts/deploy-release.sh', cwd: '.', source: './scripts',
+    }],
+  };
+  const controller = new ZipflowController(state);
+
+  await beginSetup(controller, { fresh: true });
+  await activateSetup(controller, 'use-project');
+  await activateSetup(controller, 'checks-continue');
+  await activateSetup(controller, 'policy-continue');
+  await activateSetup(controller, 'archive-continue');
+  await activateSetup(controller, 'checkpoint-continue');
+  await activateSetup(controller, 'result-never');
+  await activateSetup(controller, 'result-continue');
+  await activateSetup(controller, 'deploy-on-demand');
+  await activateSetup(controller, 'deploy-continue');
+
+  assert.equal(state.screen, 'setup-deploy-command');
+  assert.equal(state.menuItems[0].id, 'deploy-candidate:0');
+  await activateSetup(controller, 'deploy-candidate:0');
+  assert.equal(state.draft.deploy.commandText, 'bash scripts/deploy-release.sh');
 });

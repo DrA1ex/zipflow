@@ -19,7 +19,7 @@ export async function showRunHistory(controller, selectedIndex = null) {
   }, ...runs.map((run) => ({
     id: `history:${run.id}`,
     label: `${runStatusLabel(run.status)} · ${formatWhen(run.createdAt)}`,
-    description: `${archiveName(run)} · ${run.plan?.counts ? compactPlanLine({ counts: run.plan.counts }) : 'No plan recorded'}`,
+    description: historyDescription(run),
   }))];
   if (runs.length === 0) items.push({ id: 'history-empty', label: 'No runs recorded yet', disabled: true });
   items.push({ id: 'history-back', label: 'Back to project' });
@@ -116,6 +116,15 @@ function formatWhen(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return 'unknown time';
   return date.toLocaleString('en-GB', { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+function historyDescription(run) {
+  if (run.kind === 'manual-checks') {
+    const checks = run.checks;
+    return `Manual tests · ${checks ? `${checks.passed} passed · ${checks.failed} failed` : 'No result recorded'}`;
+  }
+  if (run.kind === 'manual-deploy') return `Manual deployment · ${run.deploy?.ok ? 'passed' : run.deploy ? 'failed' : 'No result recorded'}`;
+  return `${archiveName(run)} · ${run.plan?.counts ? compactPlanLine({ counts: run.plan.counts }) : 'No plan recorded'}`;
 }
 
 function archiveName(run) {

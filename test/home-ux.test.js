@@ -24,3 +24,20 @@ test('configured project home keeps workflow details in Activity instead of the 
   const summary = projectSummary(state.project, state.workflow);
   assert.equal(summary.some((line) => /waiting for a ZIP archive/i.test(line)), false);
 });
+
+test('configured project home exposes manual tests and deployment when available', () => {
+  const state = createInitialState();
+  state.project = {
+    name: 'fixture', root: '/tmp/fixture', labels: ['Swift · macOS'], technologies: [{ id: 'swift' }],
+    checks: [], deployCandidates: [], git: true,
+  };
+  state.workflow = createRecommendedWorkflow(state.project);
+  state.workflow.checks = [{ id: 'swift-test', name: 'Swift tests', selected: true }];
+  state.workflow.deploy = { policy: 'on-demand', commandText: 'bash scripts/deploy.sh', cwd: '.' };
+  const controller = new ZipflowController(state);
+
+  controller.showHome();
+
+  assert.ok(state.menuItems.some((item) => item.id === 'run-tests'));
+  assert.ok(state.menuItems.some((item) => item.id === 'run-deploy-now'));
+});

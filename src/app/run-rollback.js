@@ -58,8 +58,8 @@ export function showRunDetails(controller, run, { origin = null, announce = true
   const lines = [
     `Run: ${run.id}`,
     `Status: ${runStatusLabel(run.status)}`,
-    `Archive: ${formatArchiveName(run.archivePath)}`,
-    `Source ZIP: ${archiveDispositionSummary(run.archiveDisposition)}`,
+    ...(run.kind ? [`Action: ${manualActionLabel(run.kind)}`] : []),
+    ...(run.archivePath ? [`Archive: ${formatArchiveName(run.archivePath)}`, `Source ZIP: ${archiveDispositionSummary(run.archiveDisposition)}`] : []),
     ...(run.plan?.counts ? planSummary({ counts: run.plan.counts }) : []),
     `Checks: ${run.checks ? `${run.checks.passed} passed · ${run.checks.failed} failed` : 'not run'}`,
     `LLM: ${run.llm ? `${run.llm.error ? 'failed' : run.llm.cancelled ? 'cancelled' : 'completed'}${run.llm.durationMs ? ` · ${Math.round(run.llm.durationMs / 1000)}s` : ''}${run.llm.assessment ? ` · ${run.llm.assessment}` : ''}` : 'not run'}`,
@@ -79,7 +79,7 @@ export function showRunDetails(controller, run, { origin = null, announce = true
   }
   if (run.applied && run.rollback?.status !== 'completed') items.push({ id: 'rollback', label: 'Roll back this update' });
   items.push(
-    { id: 'another-archive', label: 'Apply another archive' },
+    { id: 'another-archive', label: run.kind ? 'Start an update' : 'Apply another archive' },
     { id: 'back-home', label: controller.state.runDetailsOrigin === 'history' ? 'Back to run history' : 'Back to project' },
   );
   const intro = run.plan?.counts
@@ -210,4 +210,10 @@ function deploySummary(deploy) {
   if (!deploy) return 'not run';
   if (deploy.skipped) return 'skipped';
   return deploy.ok ? `passed (${deploy.commandText})` : `failed (${deploy.commandText})`;
+}
+
+function manualActionLabel(kind) {
+  if (kind === 'manual-checks') return 'Manual tests against current project';
+  if (kind === 'manual-deploy') return 'Manual deployment of current project';
+  return String(kind);
 }
