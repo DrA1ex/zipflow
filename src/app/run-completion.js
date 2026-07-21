@@ -7,7 +7,32 @@ import { releaseRunResources } from './run-lifecycle.js';
 import { activeRunSettings, clearRunSettings } from './runtime-settings.js';
 import { pruneBackupStorage } from '../apply/backup-storage.js';
 import { markBackupsRemoved } from '../runs/backup-status.js';
-import { recentArchiveHint } from '../settings/recent.js';
+
+
+export async function completeNoChangeRun(controller) {
+  const { state } = controller;
+  state.run.status = 'no_changes';
+  state.run.noChanges = {
+    unchanged: Number(state.plan?.counts?.unchanged ?? 0),
+    repeatOf: state.run.repeatOf ?? null,
+  };
+  state.run.applied = {
+    paths: [], changedPaths: [], backupPath: null, backupAvailable: false,
+    skippedConflicts: [], preservedPaths: [],
+  };
+  state.run = await saveRunRecord(state.run);
+  state.workflow.lastRunId = state.run.id;
+  state.workflow = await saveWorkflow(state.workflow);
+  controller.message('Archive already matches the project', [
+    `${state.run.noChanges.unchanged} files unchanged · no update required`,
+    'LLM review, checks, commit, and deployment were skipped.',
+    ...(state.run.repeatOf ? [`Previously applied by run ${state.run.repeatOf}.`] : []),
+  ], 'success', { collapsible: false, collapsedSummary: 'No changes · archive already matches project' });
+  await finalizeSourceArchive(controller);
+  await releaseRunResources(controller);
+  clearRunSettings(state);
+  beginAnotherArchive(controller);
+}
 
 export async function completeRun(controller, status) {
   const { state } = controller;
@@ -30,14 +55,24 @@ export async function completeRun(controller, status) {
 }
 
 export function finalSummaryLines(state) {
+  if (state.run.status === 'no_changes') {
+    return [
+      `Archive already matched the project · ${Number(state.plan?.counts?.unchanged ?? 0)} files unchanged`,
+      `Checks skipped · Commit skipped · Deployment skipped · Source archive ${archiveDispositionLine(state.run.archiveDisposition)}`,
+      `Report ${displayPath(runReportPath(state.run.id))}`,
+    ];
+  }
   const lines = [];
-  if (state.run.llm?.summary?.length) lines.push(...state.run.llm.summary);
+  if (state.run.llm?.summary?.length) {
+    const [first, ...rest] = state.run.llm.summary;
+    lines.push(`Summary: ${first}${rest.length ? ` · ${rest.length} more point${rest.length === 1 ? '' : 's'} in Activity` : ''}`);
+  }
   const autonomy = state.run.autonomy?.mode && state.run.autonomy.mode !== 'manual'
     ? ` · Autopilot ${state.run.autonomy.mode}${state.run.autonomy.paused ? ' paused' : ''}`
     : '';
   lines.push(
     `${compactPlanLine(state.plan)} · ${checkSummaryLine(state.run.checks)} · Deployment ${deploymentResultLine(state)} · Source archive ${archiveDispositionLine(state.run.archiveDisposition)}${autonomy}`,
-    `Commit ${state.run.commit ? `${state.run.commit.revision} ${firstLine(state.run.commit.message)}` : 'not created'} · Report ${displayPath(runReportPath(state.run.id))}`,
+    `Commit ${state.run.commit ? `${state.run.commit.revision} ${firstLine(state.run.commit.message)}` : state.run.status === 'no_changes' ? 'skipped · no changes' : 'not created'} · Report ${displayPath(runReportPath(state.run.id))}`,
   );
   return lines;
 }
@@ -52,7 +87,7 @@ export function showCompleted(controller) {
   if (state.workflow.deploy?.policy === 'on-demand' && !state.run.deploy?.ok) {
     items.push({ id: 'run-deploy', label: 'Run deployment', description: state.workflow.deploy.commandText });
   }
-  if (!state.run.rollback || state.run.rollback.status !== 'completed') {
+  if (state.run.applied?.backupPath && state.run.applied?.backupAvailable !== false && (!state.run.rollback || state.run.rollback.status !== 'completed')) {
     items.push({ id: 'rollback', label: 'Roll back this update', description: 'Restore the exact local state from before this run' });
   }
   items.push({ id: 'project-menu', label: 'Return to project menu' });
@@ -68,10 +103,7 @@ export function beginAnotherArchive(controller) {
     label: 'ZIP archive path',
     placeholder: '~/Downloads/project-update.zip',
     purpose: 'archive-path',
-    instructions: [
-      'Drop a ZIP file into the terminal or enter its path. Tab completes ZIP paths.',
-      ...(recentArchiveHint(controller.state.settings) ? [recentArchiveHint(controller.state.settings)] : []),
-    ],
+    instructions: ['Drop a ZIP file into the terminal or enter its path.'],
   }, '');
   controller.setStatus('Waiting for archive');
 }

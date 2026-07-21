@@ -82,16 +82,22 @@ export async function decideAtGate(controller, {
     state.run.decisions.push(record);
     state.run.autonomy.decisions = state.run.decisions.map((item) => item.id);
     state.run = await saveRunRecord(state.run);
-    controller.message('Autopilot decision', [
-      `${actionLabel(validAction)} · ${Math.round(decision.effectiveConfidence * 100)}% effective confidence`,
-      decision.summary,
-      ...decision.risks.map((risk) => `Risk: ${risk}`),
-      ...decision.conditions.map((condition) => `Condition: ${condition}`),
-      ...(!decision.accepted ? ['Confidence or context quality was below the profile threshold; control returns to you.'] : []),
-      ...(!stateValid ? ['Project state changed while the model was deciding; the proposed action was not executed.'] : []),
-    ], validAction === 'ask-user' || validAction === 'abort' ? 'warning' : 'choice', {
+    const evidence = cleanDecisionItems(decision.evidence);
+    const risks = cleanDecisionItems(decision.risks, { omitNone: true });
+    const conditions = cleanDecisionItems(decision.conditions, { omitNone: true });
+    const confidence = confidenceLabel(decision.effectiveConfidence);
+    controller.message(`${autonomyModeLabel(state.workflow.autonomy.mode)} decision`, [
+      `Decision: ${actionLabelForGate(gate, validAction)}`,
+      `Confidence: ${confidence}`,
+      `Summary: ${decision.summary}`,
+      ...(evidence.length ? ['Evidence:', ...evidence.map((item) => `• ${item}`)] : []),
+      ...(risks.length ? ['Risks:', ...risks.map((item) => `• ${item}`)] : []),
+      ...(conditions.length ? ['Conditions:', ...conditions.map((item) => `• ${item}`)] : []),
+      ...(!decision.accepted ? ['Result: Confidence or context quality was below the profile threshold; control returns to you.'] : []),
+      ...(!stateValid ? ['Result: Project state changed while the model was deciding; the proposed action was not executed.'] : []),
+    ], validAction === 'ask-user' || validAction === 'abort' ? 'warning' : 'autopilot', {
       collapsible: false,
-      collapsedSummary: `Autopilot · ${actionLabel(validAction)} · ${Math.round(decision.effectiveConfidence * 100)}%`,
+      collapsedSummary: `Autopilot · ${actionLabelForGate(gate, validAction)} · ${confidence} confidence`,
     });
     return { ...decision, action: validAction, record };
   } catch (error) {
@@ -174,7 +180,7 @@ export async function resumeAutopilot(controller) {
   if (!state.run?.autonomy || state.run.autonomy.mode === 'manual') return false;
   state.run.autonomy.paused = false;
   state.run = await saveRunRecord(state.run);
-  controller.message('Autopilot resumed', ['The next unresolved checkpoint may be decided by the configured local model.'], 'choice');
+  controller.message('Autopilot resumed', ['The next unresolved checkpoint may be decided by the configured local model.'], 'autopilot');
   return true;
 }
 
@@ -205,4 +211,40 @@ export function initializeRunAutonomy(run, workflow) {
 
 function actionLabel(value) {
   return String(value ?? '').split('-').map((part) => part ? `${part[0].toUpperCase()}${part.slice(1)}` : '').join(' ');
+}
+
+function actionLabelForGate(gate, action) {
+  const labels = {
+    'plan-application': { apply: 'Apply update', abort: 'Abort update', 'ask-user': 'Ask user' },
+    'result-commit': { skip: 'Skip commit', 'create-new': 'Create commit', 'amend-head': 'Amend previous Zipflow commit', 'squash-zipflow-commits': 'Squash Zipflow commits', 'ask-user': 'Ask user' },
+    deployment: { run: 'Run deployment', skip: 'Skip deployment', 'ask-user': 'Ask user' },
+    'failed-checks': { rerun: 'Run checks again', rollback: 'Roll back update', 'keep-uncommitted': 'Keep without commit', 'commit-anyway': 'Commit despite failed checks', 'ask-user': 'Ask user' },
+  };
+  return labels[gate]?.[action] ?? actionLabel(action);
+}
+
+function confidenceLabel(value) {
+  const number = Number(value);
+  if (number >= 0.8) return 'High';
+  if (number >= 0.55) return 'Medium';
+  return 'Low';
+}
+
+function autonomyModeLabel(mode) {
+  return mode === 'full' ? 'Full autopilot' : 'Guarded autopilot';
+}
+
+function cleanDecisionItems(values, { omitNone = false } = {}) {
+  const seen = new Set();
+  const result = [];
+  for (const value of values ?? []) {
+    const text = String(value ?? '').trim();
+    if (!text) continue;
+    if (omitNone && /^(?:none|none identified|no (?:material )?(?:risk|risks|condition|conditions)(?: identified)?)[.!]?$/i.test(text)) continue;
+    const key = text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(text);
+  }
+  return result;
 }

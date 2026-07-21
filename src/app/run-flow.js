@@ -24,7 +24,7 @@ import {
 import {
   activateRollback, backRollback, confirmRollback, showLastRun, showRunDetails,
 } from './run-rollback.js';
-import { cancelRun, failRun, releaseRunResources } from './run-lifecycle.js';
+import { cancelRun, failRun } from './run-lifecycle.js';
 import {
   activateReview, archiveConflictPaths, backReview, handleReviewKey, handlesReviewScreen,
   showArchiveSafetyReview, showConflictCheckpoint, showConflictSummary, showPlanReview,
@@ -40,6 +40,8 @@ import {
   gitStateValidator, handleLocalWorkAutonomy, resolveConflictsAutonomously,
   serializeGitStatus, serializePlanForDecision,
 } from './run-plan-autonomy.js';
+
+import { completeNoChangeRun } from './run-completion.js';
 
 export { showLastRun };
 
@@ -106,13 +108,13 @@ export function backRun(controller) {
 export async function inspectArchivePath(controller, enteredPath, { allowDuplicate = false, archiveHash = null } = {}) {
   const { state } = controller;
   const archivePath = parseEnteredPath(enteredPath, state.project.root);
-  if (!(await exists(archivePath))) return controller.message('Archive not found', [displayPath(archivePath)], 'error');
-  if (!archivePath.toLowerCase().endsWith('.zip')) return controller.message('Unsupported archive', ['Zipflow currently accepts .zip files only.'], 'error');
+  if (!(await exists(archivePath))) return controller.toast('Archive not found', 'error', 3, displayPath(archivePath));
+  if (!archivePath.toLowerCase().endsWith('.zip')) return controller.toast('Unsupported archive', 'error', 3, 'Zipflow currently accepts .zip files only.');
   let inspectedArchive;
   try {
     inspectedArchive = await inspectArchiveFile(archivePath);
   } catch (error) {
-    return controller.message('Unsafe archive path', [error.message], 'error');
+    return controller.toast('Unsafe archive path', 'error', 4, error.message);
   }
   const operation = controller.beginOperation({ kind: 'archive-inspection', label: 'Inspecting archive' });
   setBusy(controller, 'Inspecting archive', 0, 7, 'Hashing archive');
@@ -153,6 +155,7 @@ async function inspectArchive(controller, archivePath, archiveHash, archiveInfo,
     if (previousRun) state.run.repeatOf = previousRun.id;
     captureRunSettings(state);
     state.run = await saveRunRecord(state.run);
+    controller.message(`Update run ${runId}`, [`Archive: ${formatArchiveName(archivePath)}`], 'run', { collapsible: false });
     controller.activeLock = await acquireProjectLock(state.project.root, runId);
     const temp = path.join(getZipflowHome(), 'tmp', runId);
     setBusy(controller, 'Inspecting archive', 1, 7, 'Reading ZIP entries');
@@ -198,17 +201,20 @@ async function continueArchiveInspection(controller, { archivePath, archiveHash,
     setProgress(controller, 3, 7, 'Comparing project files');
     activeOperation.update({ phase: 'Comparing project files' });
     const resolvedPlan = plan ?? await buildUpdatePlan({ project: state.project, workflow: state.workflow, extracted, signal: activeOperation.signal });
-    setProgress(controller, 4, 7, 'Creating changes.patch');
-    activeOperation.update({ phase: 'Creating changes.patch' });
-    const patch = await createPlanPatch(state.run.id, resolvedPlan, { projectPath: state.project.root, signal: activeOperation.signal });
-    setProgress(controller, 5, 7, 'Checking deterministic archive risks');
-    const archiveRisk = await evaluateArchiveRisks({
+    const hasChanges = changedCount(resolvedPlan) > 0;
+    setProgress(controller, 4, 7, hasChanges ? 'Creating changes.patch' : 'No file changes detected');
+    activeOperation.update({ phase: hasChanges ? 'Creating changes.patch' : 'No file changes detected' });
+    const patch = hasChanges
+      ? await createPlanPatch(state.run.id, resolvedPlan, { projectPath: state.project.root, signal: activeOperation.signal })
+      : { path: null, content: '', omitted: 0 };
+    setProgress(controller, 5, 7, hasChanges ? 'Checking deterministic archive risks' : 'Preparing no-change result');
+    const archiveRisk = hasChanges ? await evaluateArchiveRisks({
       projectPath: state.project.root,
       workflow: state.workflow,
       archiveInfo,
       extracted,
       plan: resolvedPlan,
-    });
+    }) : { warnings: [] };
 
     state.archive = extracted;
     state.archiveMetadata = metadata;
@@ -218,7 +224,7 @@ async function continueArchiveInspection(controller, { archivePath, archiveHash,
       state.workflow.autonomy?.mode === 'manual' && state.workflow.policy.conflictPolicy === 'overwrite' ? 'archive' : null,
     ]));
     state.run.plan = serializePlanForDecision(resolvedPlan);
-    state.run.patch = { path: patch.path, omitted: patch.omitted };
+    state.run.patch = patch.path ? { path: patch.path, omitted: patch.omitted } : null;
     state.run.archiveInfo = { ...archiveInfo, fileCount: extracted.fileCount, totalSize: extracted.totalSize, rootPrefix: extracted.rootPrefix };
     state.run.llm = null;
     state.archiveSafety = {
@@ -239,26 +245,14 @@ async function continueArchiveInspection(controller, { archivePath, archiveHash,
       `${formatArchiveName(archivePath)} · ${extracted.fileCount} files${extracted.rootPrefix ? ` · root ${extracted.rootPrefix}/` : ''}`,
       ...(metadata.commitMessageSource ? [`Commit message found: ${metadata.commitMessageSource}`] : []),
     ], 'success', { collapsedSummary: `Archive inspected · ${extracted.fileCount} files` });
-    controller.message('Update plan', [...planActivityLines(resolvedPlan), `Patch: ${displayPath(patch.path)}`], resolvedPlan.conflicts.length ? 'warning' : 'info', {
+    controller.message('Update plan', [...planActivityLines(resolvedPlan), ...(patch.path ? [`Patch: ${displayPath(patch.path)}`] : [])], resolvedPlan.conflicts.length ? 'warning' : 'info', {
       collapsedSummary: `Update plan · ${compactPlanLine(resolvedPlan)}`,
     });
 
-    if (state.run.repeatOf && changedCount(resolvedPlan) === 0 && state.workflow.autonomy?.mode !== 'manual') {
-      state.run.status = 'duplicate_skipped';
-      state.run.duplicate = { previousRunId: state.run.repeatOf, reason: 'current-project-already-matches' };
-      state.run = await saveRunRecord(state.run);
-      await releaseRunResources(controller);
-      clearRunSettings(state);
-      controller.message('Archive already applied', [
-        `The current project already matches this ZIP. Autopilot skipped reapplication and did not run checks, commit, or deployment.`,
-        `Previous run: ${state.run.repeatOf}`,
-      ], 'success', { collapsedSummary: 'Repeated archive · no changes · skipped' });
-      return beginArchiveInput(controller);
-    }
+    if (!hasChanges) return completeNoChangeRun(controller);
 
     const settings = activeRunSettings(state);
-    const shouldRunLlm = isLocalLlmEnabled(settings)
-      && (changedCount(resolvedPlan) > 0 || ['structure', 'sample'].includes(settings.llmArchiveReview));
+    const shouldRunLlm = isLocalLlmEnabled(settings) && hasChanges;
     if (shouldRunLlm) startLlmReview(controller, { plan: resolvedPlan, patch, extracted });
 
     if (requiresSafetyReview(state.archiveSafety)) return showArchiveSafetyReview(controller);

@@ -84,7 +84,7 @@ async function generateLlmSummary(controller, { plan, patch, extracted }) {
   const llmEstimate = await previousLlmEstimate(state);
   controller.message('Local LLM analysis starting', [
     `${changedCount(plan)} changed paths · delivery ${deliveryLabel(settings.llmChangeDelivery)}${settings.llmArchiveReview === 'structure' ? ' · project/archive structure guard first' : settings.llmArchiveReview === 'sample' ? ' · bounded structure and patch sample guard first' : ''}${llmEstimate ? ` · historical median ${formatEstimate(llmEstimate)}` : ''}.`,
-    'Adaptive delivery uses a full patch, representative sample, or capped batches according to the model context. Esc cancels only this LLM step.',
+    'Adaptive delivery uses a full patch, representative sample, or capped batches according to the model context. Ctrl+C cancels this LLM operation.',
   ], 'process');
   const progress = beginLlmProgress(controller, { expectedMs: llmEstimate });
   const operation = controller.beginOperation({ kind: 'llm-review', label: 'Generating local LLM review' });
@@ -199,19 +199,22 @@ async function generateLlmSummary(controller, { plan, patch, extracted }) {
 function emitLlmResult(controller, llm, reviewMode) {
   if (llm.result) {
     const attempt = llm.result.diagnostics?.attempts?.find((item) => typeof item.attempt === 'number');
-    if (attempt?.patch?.truncated) controller.message('Local LLM input reduced safely', [
+    if (attempt?.patch?.truncated) controller.message('Additional LLM context reduction', [
       `Estimated ${attempt.patch.originalEstimatedTokens.toLocaleString('en-US')} tokens · sent ${attempt.patch.sentEstimatedTokens.toLocaleString('en-US')}`,
-      `${attempt.patch.omittedFiles} files without excerpts · ${attempt.patch.omittedHunks} hunks omitted`,
-    ], 'warning', { collapsedSummary: 'Local LLM · input reduced to fit context' });
+      `${attempt.patch.omittedFiles} file${attempt.patch.omittedFiles === 1 ? '' : 's'} without excerpts · ${attempt.patch.omittedHunks} hunk${attempt.patch.omittedHunks === 1 ? '' : 's'} omitted`,
+    ], 'warning', { collapsedSummary: 'Local LLM · additional context reduction' });
     const assessment = llm.assessment;
-    if (assessment) controller.message('Local LLM archive suitability', [
-      `Assessment: ${titleCase(assessment.assessment)}`,
-      `Confidence: ${titleCase(assessment.confidence)}`,
-      `Review: ${reviewModeLabel(assessment.mode)}`,
-      ...assessment.reasons.map((reason) => `Reason: ${reason}`),
-    ], assessment.assessment === 'suitable' ? 'success' : 'warning', {
-      collapsedSummary: `Local LLM · ${assessment.assessment} · ${assessment.confidence} confidence`,
-    });
+    if (assessment) {
+      const reasons = cleanAssessmentReasons(assessment.reasons);
+      controller.message('Local LLM archive suitability', [
+        `Assessment: ${titleCase(assessment.assessment)}`,
+        `Confidence: ${titleCase(assessment.confidence)}`,
+        `Review: ${reviewModeLabel(assessment.mode)}`,
+        ...(reasons.length ? ['Reasons:', ...reasons.map((reason) => `• ${reason}`)] : []),
+      ], assessment.assessment === 'suitable' ? 'success' : 'warning', {
+        collapsedSummary: `Local LLM · ${assessment.assessment} · ${assessment.confidence} confidence`,
+      });
+    }
     else controller.message('Local LLM archive suitability', [
       reviewMode === 'disabled'
         ? 'Not requested · Archive review is set to Summary only.'
@@ -276,7 +279,7 @@ function llmRecord(state, result, diagnosticsPath, durationMs = 0) {
     warning: result.warning || null,
     assessment: result.assessment ?? result.structureAssessment?.assessment ?? null,
     confidence: result.confidence ?? result.structureAssessment?.confidence ?? null,
-    reasons: result.reasons ?? result.structureAssessment?.reasons ?? null,
+    reasons: cleanAssessmentReasons(result.reasons ?? result.structureAssessment?.reasons ?? []),
     diagnostics: result.diagnostics || null,
     diagnosticsPath,
     contextText: result.contextText ?? null,
@@ -298,8 +301,30 @@ function assessmentRecord(value, mode) {
     mode,
     assessment: value.assessment,
     confidence: value.confidence ?? 'low',
-    reasons: value.reasons ?? value.summary ?? [],
+    reasons: cleanAssessmentReasons(value.reasons ?? value.summary ?? []),
   };
+}
+
+function cleanAssessmentReasons(values) {
+  const seen = new Set();
+  const result = [];
+  for (const value of values ?? []) {
+    const text = String(value ?? '').trim()
+      .replace(/^reason\s*:\s*/i, '')
+      .replace(/^[-*•]\s+/, '')
+      .trim();
+    if (!text) continue;
+    if (/^\[(?:list|reasons?|bullet points?)(?:\s+in\s+[^\]]+)?\]$/i.test(text)) continue;
+    if (/^(?:reviewing|checking|comparing|inspecting)\b.*:?$/i.test(text)) continue;
+    if (/^i\s+(?:need|will|should|must|am going)\s+to\s+(?:check|review|compare|inspect)\b/i.test(text)) continue;
+    if (/^(?:let me|let's)\s+(?:check|review|compare|inspect)\b/i.test(text)) continue;
+    const key = text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(text);
+    if (result.length >= 5) break;
+  }
+  return result;
 }
 
 async function previousLlmEstimate(state) {

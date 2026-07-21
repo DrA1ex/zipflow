@@ -83,7 +83,7 @@ function standardActivityMessage(message, theme, width) {
   const token = message.tone === 'error' ? 'danger'
     : message.tone === 'success' ? 'success'
       : message.tone === 'warning' ? 'warning'
-        : message.tone === 'choice' ? 'accent' : 'title';
+        : ['choice', 'autopilot', 'run'].includes(message.tone) ? 'accent' : 'title';
   const marker = message.collapsible ? (message.collapsed ? '▸ ' : '▾ ') : '';
   const body = message.collapsible && message.collapsed
     ? collapsedLines(message)
@@ -154,6 +154,8 @@ function activityTag(tone) {
   if (tone === 'warning') return '[WARN]';
   if (tone === 'error') return '[FAIL]';
   if (tone === 'choice') return '[YOU ]';
+  if (tone === 'autopilot') return '[AUTO]';
+  if (tone === 'run') return '[RUN ]';
   if (tone === 'process') return '[RUN ]';
   if (tone === 'summary') return '[SUM ]';
   return '[INFO]';

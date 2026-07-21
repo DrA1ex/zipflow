@@ -36,7 +36,9 @@ export async function finalizeSourceArchive(controller) {
         ...(result.pruned.length ? [`Cleanup removed ${result.pruned.length} older archives · ${formatByteSize(totalSize(result.pruned))}`] : []),
       ], 'info');
     } else if (result.action === 'deleted') {
-      controller.message('Source archive deleted', ['The saved global policy was applied after the update was kept.'], 'warning');
+      controller.message('Source archive deleted', [state.run.status === 'no_changes'
+        ? 'The saved global policy was applied after the archive was verified.'
+        : 'The saved global policy was applied after the update was kept.'], 'warning');
     } else if (result.action === 'missing') {
       controller.message('Source archive was already missing', [displayPath(result.originalPath)], 'warning');
     }

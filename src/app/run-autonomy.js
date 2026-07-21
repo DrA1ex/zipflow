@@ -1,5 +1,6 @@
 import { decideAtGate, autonomyEnabledFor, markAutonomyDecision } from './autonomy-flow.js';
-import { getGitStatus } from '../git/repository.js';
+import { getGitStatus, listIgnoredPaths } from '../git/repository.js';
+import { isProtectedProjectPath } from '../archive/protected.js';
 import { gitStateValidator } from './run-plan-autonomy.js';
 import { captureRunExecutionState, runExecutionStateValidator } from './run-state-integrity.js';
 
@@ -57,6 +58,7 @@ export async function decideResultCommit(controller, {
   amendHead,
   squash,
   skip,
+  requestDecision = null,
 }) {
   const { state } = controller;
   if (!autonomyEnabledFor(state, 'decideResultCommit')) return false;
@@ -68,22 +70,36 @@ export async function decideResultCommit(controller, {
   const allowedActions = ['skip', 'create-new', ...(allowRewrite && rewriteCandidates.some((item) => item.kind === 'amend') ? ['amend-head'] : []),
     ...(allowRewrite && rewriteCandidates.some((item) => item.kind === 'squash') ? ['squash-zipflow-commits'] : []), 'ask-user'];
   const gitStatus = await getGitStatus(state.project.root).catch(() => null);
+  const appliedGit = await appliedGitContext(state.project.root, state.run.applied.paths, gitStatus);
   const decision = await decideAtGate(controller, {
     gate: 'result-commit', capability: 'decideResultCommit', allowedActions,
     fallback: 'ask-user', label: 'Autopilot is choosing the Git result',
     context: {
       state: {
+        checkpointPurpose: 'Choose how to record the already-applied Zipflow update in Git.',
+        workflowResultCommit: state.workflow.git.resultCommit,
         checksPassed: !failedChecks,
         checks: state.run.checks,
         appliedPaths: state.run.applied.paths,
+        appliedPathCount: state.run.applied.paths.length,
+        committableAppliedPaths: appliedGit.committablePaths,
+        appliedPathGitEntries: appliedGit.entries,
+        unrelatedGitEntries: appliedGit.unrelatedEntries,
+        recommendedAction: appliedGit.committablePaths.length ? 'create-new' : 'skip',
+        validSkipReasons: [
+          'No committable applied-path diff exists.',
+          'Every applied path is protected or ignored.',
+          'The workflow explicitly requests no result commit.',
+        ],
         messageCandidates: candidates.map((item) => ({ id: item.id, label: item.label, message: item.message })),
         rewriteCandidates,
         gitStatus: serializeGitStatus(gitStatus),
       },
       riskLevel: failedChecks || allowedActions.length > 3 ? 'high' : 'medium',
-      complete: true,
+      complete: Boolean(gitStatus),
     },
     validateDecision: gitStateValidator(state.project.root, gitStatus),
+    ...(requestDecision ? { requestDecision } : {}),
   });
   const messageCandidate = candidates.find((item) => item.id === decision.targetId) ?? candidates[0];
   if (decision.action === 'skip') { await executeDecision(controller, decision, skip); return true; }
@@ -110,6 +126,7 @@ export async function decideDeployment(controller, {
   failedChecks = false,
   run,
   skip,
+  requestDecision = null,
 }) {
   const { state } = controller;
   if (!autonomyEnabledFor(state, 'decideDeployment')) return false;
@@ -167,6 +184,23 @@ export async function handleDeploymentFailureAutonomy(controller, {
   if (decision.action === 'rollback-local-only') { await executeDecision(controller, decision, rollbackLocal); return true; }
   if (decision.action === 'finish-with-error') { await executeDecision(controller, decision, finishWithError); return true; }
   return false;
+}
+
+async function appliedGitContext(projectPath, appliedPaths, status) {
+  const requested = [...new Set(appliedPaths ?? [])].filter(Boolean);
+  if (!status) return { committablePaths: requested.filter((item) => !isProtectedProjectPath(item)), entries: [], unrelatedEntries: [] };
+  const safe = requested.filter((item) => !isProtectedProjectPath(item));
+  const ignored = safe.length ? await listIgnoredPaths(projectPath, safe).catch(() => new Set()) : new Set();
+  const requestedSet = new Set(requested);
+  const entries = status.entries.filter((item) => requestedSet.has(item.path) || requestedSet.has(item.originalPath)).map(serializeStatusEntry);
+  const dirty = new Set(entries.flatMap((item) => [item.path, item.originalPath].filter(Boolean)));
+  const committablePaths = safe.filter((item) => !ignored.has(item) && dirty.has(item));
+  const unrelatedEntries = status.entries.filter((item) => !requestedSet.has(item.path) && !requestedSet.has(item.originalPath)).map(serializeStatusEntry);
+  return { committablePaths, entries, unrelatedEntries };
+}
+
+function serializeStatusEntry(entry) {
+  return { status: entry.status, path: entry.path, originalPath: entry.originalPath ?? null };
 }
 
 function serializeCheck(check) {

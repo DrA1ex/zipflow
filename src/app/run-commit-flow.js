@@ -18,6 +18,9 @@ async function decideCommitOrPrompt(controller, { failedChecks }) {
   const { state } = controller;
   if (!state.run.applied.paths.length || state.workflow.git.resultCommit === 'never') return continueToDeploy(controller);
   const candidates = commitMessageCandidates(state);
+  if (!failedChecks && state.workflow.git.resultCommit === 'auto') {
+    return createResultCommit(controller, candidates[0]?.message || defaultCommitMessage(state));
+  }
   const previousRuns = await listProjectRuns(state.project.root, { limit: 20 });
   const rewriteCandidates = await getCommitRewriteCandidates(state.project.root, previousRuns.filter((run) => run.id !== state.run.id), { currentPaths: state.run.applied.paths });
   const handled = await decideResultCommit(controller, {
@@ -28,7 +31,6 @@ async function decideCommitOrPrompt(controller, { failedChecks }) {
     skip: () => continueAfterCommitChoice(controller),
   });
   if (handled !== false) return handled;
-  if (!failedChecks && state.workflow.git.resultCommit === 'auto') return createResultCommit(controller, defaultCommitMessage(state));
   return showCommitPrompt(controller);
 }
 

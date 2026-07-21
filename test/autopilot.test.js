@@ -56,6 +56,11 @@ test('accepted autonomous decisions are audited and low-confidence proposals ret
     assert.equal(decision.action, 'apply');
     assert.equal(state.run.decisions.length, 1);
     assert.equal(state.run.decisions[0].gate, 'plan-application');
+    const activity = state.messages.find((item) => item.title === 'Guarded autopilot decision');
+    assert.equal(activity?.tone, 'autopilot');
+    assert.match(activity.lines.join(' '), /Decision: Apply update/);
+    assert.match(activity.lines.join(' '), /Confidence: High/);
+    assert.doesNotMatch(activity.lines.join(' '), /95%|effective confidence/i);
 
     const low = await decideAtGate(controller, {
       gate: 'deployment', capability: 'decideDeployment',

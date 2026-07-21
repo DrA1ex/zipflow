@@ -77,9 +77,9 @@ test('guarded autopilot silently skips an already applied archive when the proje
 
     assert.equal(state.screen, 'archive-input');
     assert.equal(state.busy, false);
-    assert.equal(state.messages.some((item) => item.title === 'Archive already applied'), true);
+    assert.equal(state.messages.some((item) => item.title === 'Archive already matches the project'), true);
     assert.equal(state.messages.some((item) => item.title === 'Autopilot decision'), false);
-    assert.equal(state.run.status, 'duplicate_skipped');
+    assert.equal(state.run.status, 'no_changes');
   } finally {
     delete process.env.ZIPFLOW_HOME;
   }

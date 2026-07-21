@@ -48,6 +48,9 @@ test('archive inspection persists changes.patch and records the local LLM result
           'CONFIDENCE:',
           'high',
           'REASONS:',
+          '- [list in Russian]',
+          '- Reviewing the trees:',
+          '- I need to check whether the project is compatible.',
           '- Структура и маркеры проекта совпадают.',
         ].join('\n') } }],
       });
@@ -92,7 +95,11 @@ test('archive inspection persists changes.patch and records the local LLM result
     assert.ok(suitability);
     assert.match(suitability.lines.join(' '), /Suitable/i);
     assert.match(suitability.lines.join(' '), /Confidence: High/i);
-    assert.match(suitability.lines.join(' '), /Структура и маркеры проекта совпадают/);
+    const suitabilityText = suitability.lines.join(' ');
+    assert.match(suitabilityText, /Reasons:/);
+    assert.match(suitabilityText, /Структура и маркеры проекта совпадают/);
+    assert.doesNotMatch(suitabilityText, /list in Russian|Reviewing the trees|I need to check/);
+    assert.doesNotMatch(suitabilityText, /Reason:/);
     assert.match(requestBody.messages[0].content, /Write summary and reasons in Russian[\s\S]*Write commitMessage in Russian/);
     assert.equal('response_format' in requestBody, false, 'visible generation must stream readable text instead of JSON');
     assert.match(requestBody.messages[1].content, /src\/index\.js/);

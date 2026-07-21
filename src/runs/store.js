@@ -116,7 +116,7 @@ export async function findAppliedArchiveRun(projectPath, archiveHash) {
   if (!archiveHash) return null;
   const runs = await listProjectRuns(projectPath, { limit: 100 });
   return runs.find((run) => run.archiveHash === archiveHash && [
-    'applied', 'checks_passed', 'checks_failed', 'completed', 'completed_with_errors', 'rolled_back',
+    'applied', 'checks_passed', 'checks_failed', 'completed', 'completed_with_errors', 'rolled_back', 'no_changes',
   ].includes(run.status)) ?? null;
 }
 

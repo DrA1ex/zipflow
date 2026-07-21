@@ -51,9 +51,9 @@ test('final summary keeps the LLM result last with one compact checks and deploy
   };
   state.workflow = { deploy: { policy: 'disabled' } };
   const lines = finalSummaryLines(state);
-  assert.deepEqual(lines.slice(0, 2), ['Updated archive handling.', 'Added focused regression coverage.']);
-  assert.match(lines[2], /Checks 5\/5 passed/);
-  assert.match(lines[2], /Deployment/);
+  assert.match(lines[0], /^Summary: Updated archive handling\. · 1 more point in Activity$/);
+  assert.match(lines[1], /Checks 5\/5 passed/);
+  assert.match(lines[1], /Deployment/);
   assert.match(lines.at(-1), /Commit not created/);
 });
 
@@ -68,9 +68,9 @@ test('autopilot decision streaming presents structured fields instead of raw JSO
   const output = lines.join('\n');
   assert.match(output, /Autopilot decision/);
   assert.match(output, /Decision: Apply/);
-  assert.match(output, /Confidence: 91%/);
+  assert.match(output, /Confidence: High/);
   assert.match(output, /Summary: The plan is conflict-free/);
-  assert.match(output, /Risk: One file is removed/);
+  assert.match(output, /Risks:\n\s+• One file is removed/);
   assert.doesNotMatch(output, /"schemaVersion"|"action"/);
 });
 

@@ -32,7 +32,7 @@ export function matchesRunType(run, filter = 'all') {
 }
 
 export function matchesRunStatus(run, filter = 'all') {
-  if (filter === 'successful') return ['completed', 'checks_passed'].includes(run?.status);
+  if (filter === 'successful') return ['completed', 'checks_passed', 'no_changes'].includes(run?.status);
   if (filter === 'failed') return ['failed', 'checks_failed', 'completed_with_errors', 'interrupted', 'interrupted_closed', 'checks_cancelled'].includes(run?.status) || run?.deploy?.ok === false;
   if (filter === 'rolled-back') return run?.status === 'rolled_back' || run?.rollback?.status === 'completed';
   return true;

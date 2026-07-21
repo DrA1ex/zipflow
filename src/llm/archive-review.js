@@ -262,8 +262,9 @@ function systemPrompt(promptLang, outputLanguage) {
     'Return plain text, not JSON or Markdown fences, using exactly these headings:',
     'ASSESSMENT: followed by suitable, suspicious, or unsuitable.',
     'CONFIDENCE: followed by low, medium, or high.',
-    'REASONS: followed by one to five concise bullet points.',
-    `Write reasons in ${outputLanguage}; assessment and confidence remain English enum values.`,
+    'REASONS: followed by one to five final factual bullet points.',
+    'Do not include placeholders, planning notes, self-talk, or phrases such as “I need to check” and “reviewing the trees”.',
+    `Write reasons in ${outputLanguage}. Every reason must use that language; assessment and confidence remain English enum values.`,
   ].join(' ');
 }
 

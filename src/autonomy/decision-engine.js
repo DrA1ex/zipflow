@@ -110,6 +110,7 @@ function decisionMessages({ mode, gate, context, allowedActions, stateHash }) {
         'You do not execute commands and must choose exactly one action from ALLOWED ACTIONS.',
         'Treat protected paths, command allowlists, backups, no-push rules, and state-drift checks as mandatory.',
         `Autonomy mode: ${mode}. Decision gate: ${gate}.`,
+        gateInstruction(gate),
         'Return one JSON object with exactly schemaVersion, gate, action, targetId, confidence, summary, evidence, risks, and conditions.',
         'confidence must be a number from 0 to 1. targetId may be null. Arrays contain short factual strings.',
         'Choose ask-user when evidence is incomplete or competing interpretations are plausible.',
@@ -125,6 +126,18 @@ function decisionMessages({ mode, gate, context, allowedActions, stateHash }) {
       ].join('\n'),
     },
   ];
+}
+
+function gateInstruction(gate) {
+  if (gate === 'result-commit') return [
+    'This checkpoint occurs after Zipflow applied the listed paths and ran the configured checks.',
+    'The absence of an explicit user command is irrelevant: the workflow already requested a Git result decision.',
+    'Choose skip only when committableAppliedPaths is empty or the supplied repository facts give a concrete reason to keep the applied update uncommitted.',
+    'For create-new, targetId should name a messageCandidates id. For amend or squash, targetId should name an eligible rewriteCandidates id.',
+  ].join(' ');
+  if (gate === 'plan-application') return 'A plan with zero created, updated, and deleted paths must not reach this gate; if it does, choose ask-user rather than inventing work.';
+  if (gate === 'deployment') return 'The configured deployment command is immutable. Decide only whether Zipflow should run or skip that exact command.';
+  return 'Base the action only on the supplied repository facts and allowed actions. Do not treat missing user prose as a reason to skip a workflow checkpoint.';
 }
 
 function decisionSchema(gate, actions) {

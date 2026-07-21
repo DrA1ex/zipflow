@@ -105,7 +105,7 @@ export function runStatusLabel(status) {
   const labels = {
     completed: 'Completed', completed_with_errors: 'Completed with errors', checks_failed: 'Checks failed',
     failed: 'Failed', cancelled: 'Cancelled', rolled_back: 'Rolled back', applied: 'Applied', checks_passed: 'Checks passed',
-    interrupted: 'Interrupted', interrupted_closed: 'Interrupted · closed', checks_cancelled: 'Checks cancelled',
+    interrupted: 'Interrupted', interrupted_closed: 'Interrupted · closed', checks_cancelled: 'Checks cancelled', no_changes: 'No changes',
   };
   return labels[status] ?? String(status || 'Unknown').replaceAll('_', ' ');
 }

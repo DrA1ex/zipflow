@@ -197,11 +197,11 @@ function decisionActivityLines(runtime, width, theme) {
     lines.push(`  ${paint(theme, 'textMuted', 'Receiving a structured decision…')}`);
   } else {
     if (decision.action) lines.push(`  ${paint(theme, 'accent', 'Decision:')} ${actionLabel(decision.action)}`);
-    if (decision.confidence !== null) lines.push(`  ${paint(theme, 'accent', 'Confidence:')} ${Math.round(decision.confidence * 100)}%`);
+    if (decision.confidence !== null) lines.push(`  ${paint(theme, 'accent', 'Confidence:')} ${confidenceLabel(decision.confidence)}`);
     if (decision.summary) lines.push(...wrappedField('Summary:', decision.summary, width, theme));
-    for (const value of decision.evidence) lines.push(...wrappedField('Evidence:', value, width, theme));
-    for (const value of decision.risks) lines.push(...wrappedField('Risk:', value, width, theme, 'warning'));
-    for (const value of decision.conditions) lines.push(...wrappedField('Condition:', value, width, theme));
+    if (decision.evidence.length) lines.push(`  ${paint(theme, 'accent', 'Evidence:')}`, ...decision.evidence.flatMap((value) => wrappedBullet(value, width, theme)));
+    if (decision.risks.length) lines.push(`  ${paint(theme, 'accent', 'Risks:')}`, ...decision.risks.filter((value) => !isNoneValue(value)).flatMap((value) => wrappedBullet(value, width, theme, 'warning')));
+    if (decision.conditions.length) lines.push(`  ${paint(theme, 'accent', 'Conditions:')}`, ...decision.conditions.filter((value) => !isNoneValue(value)).flatMap((value) => wrappedBullet(value, width, theme)));
   }
   lines.push('');
   return lines;
@@ -214,6 +214,22 @@ function wrappedField(label, value, width, theme, valueToken = null) {
   return wrapped.map((line, index) => index === 0
     ? `  ${paint(theme, 'accent', label)} ${valueToken ? paint(theme, valueToken, line) : line}`
     : `  ${' '.repeat(label.length + 1)}${valueToken ? paint(theme, valueToken, line) : line}`);
+}
+
+function wrappedBullet(value, width, theme, valueToken = null) {
+  const wrapped = wrapText(String(value ?? ''), Math.max(24, width - 12));
+  return wrapped.map((line, index) => `    ${index === 0 ? '• ' : '  '}${valueToken ? paint(theme, valueToken, line) : line}`);
+}
+
+function confidenceLabel(value) {
+  const number = Number(value);
+  if (number >= 0.8) return 'High';
+  if (number >= 0.55) return 'Medium';
+  return 'Low';
+}
+
+function isNoneValue(value) {
+  return /^(?:none|none identified|no (?:material )?(?:risk|risks|condition|conditions)(?: identified)?)[.!]?$/i.test(String(value ?? '').trim());
 }
 
 function partialDecision(value) {

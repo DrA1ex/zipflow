@@ -194,9 +194,9 @@ compact plan
 
 Conflict review uses a queue over the plan's conflicting items. A decision removes one item from the queue and advances to the next; bulk choices populate the same decision map without duplicating application logic. Diff views store their originating screen, item list, selected index, and introduction text so returning never loses the user's position.
 
-Activity messages are typed as information, running state, success, warning, error, user choice, or final summary. Structured `Key: value` labels are styled with the active accent and expansion instructions are muted. Generated review-coverage blocks stay expanded because they are short and immediately useful; other durable blocks longer than three lines start collapsed with semantic summaries and can be toggled at the current scroll position. Project discovery and the final summary remain expanded. When the reader is above the bottom, appended entries preserve position and expose a full-width clickable unread indicator; streaming replacement does not count every token as a new entry. Live LLM text preserves provider line breaks and is wrapped with Terlio's width-aware text utility before rendering. The current five-stage run position is derived from application state and displayed separately in the header.
+Activity messages are typed as information, running state, success, warning, error, user choice, bounded Autopilot decision, run boundary, or final summary. Structured `Key: value` labels are styled with the active accent and expansion instructions are muted. Generated review-coverage blocks stay expanded because they are short and immediately useful; other durable blocks longer than three lines start collapsed with semantic summaries and can be toggled at the current scroll position. Project discovery and the final summary remain expanded. When the reader is above the bottom, appended entries preserve position and expose a full-width clickable unread indicator; streaming replacement does not count every token as a new entry. Live LLM text preserves provider line breaks and is wrapped with Terlio's width-aware text utility before rendering. The current five-stage run position is derived from application state and displayed separately in the header.
 
-Run history is persisted in existing run records rather than a second event database. Presentation separates archive updates, manual tests, and manual deployments, with independent type and status filters. Archive hashes support duplicate warnings, and workflow `lastRunId` resolves the deliberate repeat-last action. Manual mode shows the duplicate warning. Guarded and Full autopilot rebuild the plan immediately; an unchanged project is recorded as `duplicate_skipped` and returns to archive waiting without invoking the decision engine.
+Run history is persisted in existing run records rather than a second event database. Presentation separates archive updates, manual tests, and manual deployments, with independent type and status filters. Archive hashes support duplicate warnings, and workflow `lastRunId` resolves the deliberate repeat-last action. Every archive plan with zero created, updated, deleted, and conflicting paths is recorded as `no_changes` in all decision modes. This deterministic branch applies source-archive disposition and returns to archive waiting without creating a patch or invoking LLM review, apply, checks, commit, or deployment.
 
 ## Run lifecycle
 
@@ -207,7 +207,9 @@ archive input
   -> project lock
   -> isolated extraction
   -> archive metadata
-  -> persisted changes.patch
+  -> deterministic plan
+  -> no_changes completion when the plan is empty
+  -> otherwise persisted changes.patch
   -> optional LLM structure guard or deep patch review
   -> readable streamed local LLM analysis using path, patch, or file-batch delivery
   -> immediate durable verdict and summary in Activity before commit-message selection
@@ -247,6 +249,8 @@ Cancellation is a first-class result, not a generic failure. Apply cancellation 
 Workflow version 7 stores an immutable autonomy snapshot with one of three profiles: Manual, Guarded, or Full. Profiles expand into capabilities rather than scattering mode-name checks through the code. Guarded uses a higher effective-confidence threshold and excludes failed-check commits, deployment after failed checks, ambiguous conflict resolution, and Git-history rewrite. Full enables those supported capabilities but cannot weaken hard safety rules.
 
 At each supported gate, the app builds structured context and an explicit `allowedActions` list. `src/autonomy/decision-engine.js` asks the selected local model for a strict JSON decision. It validates gate and action identity, normalizes evidence and risk fields, computes effective confidence from coverage, risk, ambiguity, and completeness, and performs one bounded repair request when needed. Invalid, low-confidence, cancelled, unavailable, or state-drifted decisions use a deterministic fallback or return to the manual UI.
+
+The result-commit gate is built from the exact post-apply Git entries for applied paths, separately classified unrelated entries, workflow commit policy, message candidates, and Zipflow-issued eligible rewrite targets. The prompt states that reaching the gate is already a request to decide, so a model cannot treat the absence of an additional user command as evidence for `skip`. Explicit automatic commit policy is executed deterministically before advisory Autopilot selection.
 
 Decision records are persisted before execution with `pending`, `executing`, `executed`, `failed`, or `not-executed` state. Side-effect modules mark transitions and revalidate state immediately before acting. Startup recovery marks unfinished decisions interrupted and never replays them automatically. Git rewrite candidates are generated by Zipflow, limited to eligible unpublished contiguous Zipflow commits, and referenced by application-issued IDs; the model cannot select arbitrary revisions. Deployment always uses the command snapshot already stored in the workflow and never model-generated shell text.
 
