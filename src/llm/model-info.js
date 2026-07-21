@@ -64,7 +64,7 @@ async function lmStudioProfile(model, options) {
     maxContextLength: record.maxContextLength ?? contextLength,
     source: loaded ? 'loaded-instance' : 'model-metadata',
     reasoningOffSupported: record.reasoningOptions.includes('off'),
-    requestModel: record.key,
+    requestModel: loaded?.id ?? record.key,
     configuredModel: record.key,
     originalConfiguredModel: model,
     loadedModel: Boolean(loaded),

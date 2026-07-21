@@ -63,7 +63,6 @@ export class ZipflowController {
       this.message('Project detected', projectSummary(this.state.project, this.state.workflow), 'project');
       if (this.state.workflow) {
         if (await offerInterruptedRunRecovery(this)) return;
-        this.message('Hint', ['Current workflow loaded. Zipflow is waiting for a ZIP archive; press Esc to open the project menu or change the workflow.']);
         beginArchiveInput(this);
       } else this.showHome();
     } catch (error) {

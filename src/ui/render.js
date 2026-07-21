@@ -217,26 +217,20 @@ function renderEditor(state, width, height, theme) {
   const contextRows = Math.max(1, Number(state.editorContext?.contextRows) || 1);
   const context = state.editorContext?.context
     ?? (state.editorContext?.instructions ?? []).join(' · ');
-  const editorHeight = Math.max(2, height - 5 - contextRows);
-  return WorkspacePane({
-    title: ` ${screenTitle(state)} `,
-    active: true,
-    height,
-    theme,
-    children: [
-      ZipflowTextEditorView({
-        title: state.editorContext?.label ?? ' Input ',
-        value: state.editor.value,
-        cursor: state.editor.cursor,
-        width: Math.max(20, width - 4),
-        height: editorHeight,
-        placeholder: state.editorContext?.placeholder ?? '',
-        lineNumbers: false,
-        theme,
-      }),
-      ContextDock({ text: context, rows: contextRows, width: Math.max(20, width - 6), theme }),
-    ].filter(Boolean),
-  });
+  const editorHeight = Math.max(2, height - contextRows - 2);
+  return Column({ height },
+    ZipflowTextEditorView({
+      title: ` ${state.editorContext?.label ?? screenTitle(state)} `,
+      value: state.editor.value,
+      cursor: state.editor.cursor,
+      width,
+      height: editorHeight,
+      placeholder: state.editorContext?.placeholder ?? '',
+      lineNumbers: false,
+      theme,
+    }),
+    ContextDock({ text: context, rows: contextRows, width: Math.max(20, width - 2), theme }),
+  );
 }
 
 function renderBusy(state, height, theme) {
@@ -352,7 +346,7 @@ function screenTitle(state) {
     'setup-deploy': 'Deployment', 'setup-deploy-command': 'Deploy command', 'deploy-command': 'Deploy command', 'setup-review': 'Review',
     'archive-input': 'Archive', 'archive-duplicate': 'Archive already used', 'archive-root-choice': 'Archive root', 'archive-safety': 'Archive safety', 'plan-review': 'Update plan', 'plan-details': 'Change groups', 'plan-files': 'Changed files', 'diff-view': 'Diff',
     'conflict-summary': 'Conflict choices', 'conflict-checkpoint': 'Conflict checkpoint', 'conflict-file': 'Resolve conflict', conflicts: 'Choose files',
-    applying: 'Applying update', 'checks-running': 'Checks', 'check-failed': 'Checks failed', commit: 'Commit',
+    applying: 'Applying update', 'autopilot-decision': 'Autopilot decision', 'checks-running': 'Checks', 'check-failed': 'Checks failed', commit: 'Commit',
     'commit-message': 'Commit message', 'deploy-prompt': 'Deployment', 'deploy-running': 'Deployment',
     'deploy-failed': 'Deployment failed', completed: 'Completed', 'run-details': 'Last run', 'run-file-groups': 'Changed files', 'run-file-list': 'Changed files',
     'rollback-confirm': 'Rollback', 'rolling-back': 'Rolling back',
@@ -400,7 +394,7 @@ function headerStats(state) {
 function preferredPromptHeight(state, width = 80, mainHeight = 20) {
   const maximum = Math.max(7, Math.floor(mainHeight * 0.6));
   if (state.busy) return Math.min(maximum, 8);
-  if (state.screen === 'setup-review') return Math.min(maximum, Math.max(15, Math.floor(mainHeight * 0.58)));
+  if (state.screen === 'setup-review') return Math.min(maximum, 8);
   if (isWorkflowSetupScreen(state.screen)) return Math.min(maximum, Math.max(13, Math.floor(mainHeight * 0.48)));
   if (['checks-running', 'manual-checks-running'].includes(state.screen)) {
     return Math.min(maximum, Math.max(8, (state.checkRuntime?.checks?.length ?? 0) + 5));

@@ -6,12 +6,23 @@ export async function resolveLocalLlmSession(settings, {
   signal = null,
 } = {}) {
   const apiToken = String(settings?.llmApiToken ?? '').trim();
-  const profile = await getLocalModelProfile(settings.llmProvider, settings.llmModel, {
+  const preferredModel = settings.llmProvider === 'lmstudio' && settings.llmSelectedInstanceId
+    ? settings.llmSelectedInstanceId
+    : settings.llmModel;
+  let profile = await getLocalModelProfile(settings.llmProvider, preferredModel, {
     fetchImpl,
     timeoutMs,
     apiToken,
     signal,
   });
+  if (settings.llmProvider === 'lmstudio' && preferredModel !== settings.llmModel && profile.source === 'fallback') {
+    profile = await getLocalModelProfile(settings.llmProvider, settings.llmModel, {
+      fetchImpl,
+      timeoutMs,
+      apiToken,
+      signal,
+    });
+  }
   applyConfiguredContext(settings, profile);
   return {
     provider: settings.llmProvider,

@@ -41,10 +41,9 @@ test('configured projects boot directly into archive waiting and Escape opens th
     const detected = state.messages.find((message) => message.title === 'Project detected');
     assert.ok(detected);
     assert.ok(detected.lines.some((line) => /Archive: Overlay/.test(line)));
-    const hint = state.messages.find((message) => message.title === 'Hint');
-    assert.ok(hint);
-    assert.match(hint.lines.join(' '), /press Esc/i);
-    assert.equal(detected.lines.some((line) => /press Esc/i.test(line)), false);
+    assert.equal(state.messages.some((message) => message.title === 'Hint'), false,
+      'archive waiting should stay visually quiet instead of adding a redundant help block');
+    assert.deepEqual(state.editorContext.instructions, ['Drop a ZIP file into the terminal or enter its path.']);
     await controller.handleKey({ name: 'escape', printable: false });
     assert.equal(state.screen, 'home');
     assert.deepEqual(state.panelIntro, []);

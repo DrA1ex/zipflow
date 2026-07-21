@@ -69,6 +69,17 @@ export class OperationManager {
           this.emit();
         }
       },
+      handoff: (callback) => {
+        if (typeof callback !== 'function') throw new TypeError('Operation handoff requires a callback.');
+        if (!finished) {
+          finished = true;
+          if (this.current?.id === operation.id) {
+            this.current = null;
+            this.emit();
+          }
+        }
+        return callback();
+      },
     };
   }
 

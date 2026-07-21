@@ -67,3 +67,19 @@ test('critical operations defer the first Ctrl+C until the atomic section finish
   assert.equal(operation.signal.aborted, true);
   operation.finish();
 });
+
+
+test('operation handoff releases the current phase before the next phase begins', async () => {
+  const manager = new OperationManager();
+  const apply = manager.begin({ kind: 'apply', label: 'Applying update' });
+  const next = await apply.handoff(async () => {
+    assert.equal(manager.current, null);
+    const checks = manager.begin({ kind: 'checks', label: 'Running checks' });
+    assert.equal(manager.current.kind, 'checks');
+    checks.finish();
+    return 'checks-started';
+  });
+  assert.equal(next, 'checks-started');
+  assert.equal(manager.current, null);
+  apply.finish();
+});

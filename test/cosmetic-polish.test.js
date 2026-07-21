@@ -268,3 +268,17 @@ function findNode(node, predicate) {
 function stripAnsi(value) {
   return String(value).replace(/\u001b\[[0-9;]*m/g, '');
 }
+
+
+test('archive path editor uses one complete panel without a nested Archive frame', () => {
+  const state = createInitialState();
+  state.project = projectFixture();
+  const controller = new ZipflowController(state);
+  controller.invalidate = () => {};
+  beginArchiveInput(controller);
+  const output = stripAnsi(renderToString(renderZipflow({ state, width: 100, height: 28 }), { width: 100, height: 28 }));
+  assert.equal((output.match(/┌  ZIP archive path/g) ?? []).length, 1);
+  assert.doesNotMatch(output, /┌  Archive\s/);
+  assert.match(output, /└─+┘/);
+  assert.match(output, /Drop a ZIP file into the terminal or enter its path\./);
+});

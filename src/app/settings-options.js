@@ -277,15 +277,14 @@ function backupParameters(state) {
 }
 
 function managedHistoryParameters(state) {
-  const active = Boolean(state.run && !['completed', 'failed', 'cancelled', 'rolled_back'].includes(state.run.status));
   const history = state.settingsPanel?.managedHistory ?? { paths: [], updatedAt: null };
   return [
     choiceParameter('managedHistoryPolicy', 'Recording', managedHistoryPolicyLabel(state.settings.managedHistoryPolicy),
       'Choose whether future successful archive updates update managed-file history.'),
     { ...choiceParameter('managedHistoryClear', 'Clear now', history.paths?.length ? `${history.paths.length} paths` : 'Empty',
       'Forget recorded paths without changing whether future runs are recorded.'),
-      disabled: Boolean(active) || !history.paths?.length,
-      disabledReason: active ? 'History cannot be cleared during an active update.' : '' },
+      disabled: !history.paths?.length,
+      disabledReason: '' },
   ];
 }
 

@@ -17,19 +17,20 @@ import { inspectArchiveFile } from '../security/archive-input.js';
 import { getZipflowHome } from '../workflow/store.js';
 import { createRunRecord, findAppliedArchiveRun, saveRunRecord } from '../runs/store.js';
 import { compactPlanLine, formatArchiveName, planActivityLines } from '../ui/format.js';
+import { activateDuplicate, showDuplicateWarning } from './run-duplicate.js';
 import {
   activatePostCheck, backPostCheck, isPostCheckScreen, startChecks, submitPostCheckEditor,
 } from './run-postcheck.js';
 import {
   activateRollback, backRollback, confirmRollback, showLastRun, showRunDetails,
 } from './run-rollback.js';
-import { cancelRun, failRun } from './run-lifecycle.js';
+import { cancelRun, failRun, releaseRunResources } from './run-lifecycle.js';
 import {
   activateReview, archiveConflictPaths, backReview, handleReviewKey, handlesReviewScreen,
   showArchiveSafetyReview, showConflictCheckpoint, showConflictSummary, showPlanReview,
 } from './run-review.js';
 import { prepareArchiveRootReview, selectArchiveRoot, showArchiveRootChoice } from './archive-root.js';
-import { activeRunSettings, captureRunSettings } from './runtime-settings.js';
+import { activeRunSettings, captureRunSettings, clearRunSettings } from './runtime-settings.js';
 import { skipPendingLlmReview, startLlmReview, waitForPendingLlmReview } from './run-llm-review.js';
 import { rememberArchivePath } from '../settings/recent.js';
 import { decideAtGate, autonomyEnabledFor, markAutonomyDecision } from './autonomy-flow.js';
@@ -65,7 +66,7 @@ export async function submitRunEditor(controller) {
 
 export async function activateRun(controller, itemId) {
   const { state } = controller;
-  if (state.screen === 'archive-duplicate') return activateDuplicate(controller, itemId);
+  if (state.screen === 'archive-duplicate') return activateDuplicate(controller, itemId, { beginArchiveInput, inspectArchivePath });
   if (state.screen === 'archive-root-choice') return activateArchiveRootChoice(controller, itemId);
   if (state.screen === 'interrupted-run') return activateInterruptedRun(controller, itemId);
   if (handlesReviewScreen(state.screen)) {
@@ -114,19 +115,25 @@ export async function inspectArchivePath(controller, enteredPath, { allowDuplica
     return controller.message('Unsafe archive path', [error.message], 'error');
   }
   const operation = controller.beginOperation({ kind: 'archive-inspection', label: 'Inspecting archive' });
+  setBusy(controller, 'Inspecting archive', 0, 7, 'Hashing archive');
   try {
     const archiveInfo = { size: inspectedArchive.size, modifiedAt: inspectedArchive.modifiedAt };
     await rememberArchivePath(state, archivePath);
     operation.update({ phase: 'Hashing archive' });
     const digest = archiveHash ?? await hashFile(archivePath, { signal: operation.signal });
+    let previous = null;
     if (!allowDuplicate) {
-      const previous = await findAppliedArchiveRun(state.project.root, digest);
-      if (previous) {
+      previous = await findAppliedArchiveRun(state.project.root, digest);
+      if (previous && state.workflow.autonomy?.mode === 'manual') {
+        state.busy = false;
         operation.finish();
         return showDuplicateWarning(controller, archivePath, digest, previous);
       }
+      if (previous) controller.message('Previously applied archive detected', [
+        `Run ${previous.id} used the same ZIP. Autopilot will rebuild the plan against the current project state.`,
+      ], 'info', { collapsedSummary: `Repeated archive · comparing current project state` });
     }
-    return inspectArchive(controller, archivePath, digest, archiveInfo, operation);
+    return inspectArchive(controller, archivePath, digest, archiveInfo, operation, previous);
   } catch (error) {
     operation.finish();
     if (error.code === 'cancelled') {
@@ -137,12 +144,13 @@ export async function inspectArchivePath(controller, enteredPath, { allowDuplica
   }
 }
 
-async function inspectArchive(controller, archivePath, archiveHash, archiveInfo, operation) {
+async function inspectArchive(controller, archivePath, archiveHash, archiveInfo, operation, previousRun = null) {
   const { state } = controller;
   const runId = createRunId();
   state.pendingArchive = null;
   try {
     state.run = await createRunRecord({ id: runId, project: state.project, workflow: state.workflow, archivePath, archiveHash, archiveInfo });
+    if (previousRun) state.run.repeatOf = previousRun.id;
     captureRunSettings(state);
     state.run = await saveRunRecord(state.run);
     controller.activeLock = await acquireProjectLock(state.project.root, runId);
@@ -235,6 +243,19 @@ async function continueArchiveInspection(controller, { archivePath, archiveHash,
       collapsedSummary: `Update plan · ${compactPlanLine(resolvedPlan)}`,
     });
 
+    if (state.run.repeatOf && changedCount(resolvedPlan) === 0 && state.workflow.autonomy?.mode !== 'manual') {
+      state.run.status = 'duplicate_skipped';
+      state.run.duplicate = { previousRunId: state.run.repeatOf, reason: 'current-project-already-matches' };
+      state.run = await saveRunRecord(state.run);
+      await releaseRunResources(controller);
+      clearRunSettings(state);
+      controller.message('Archive already applied', [
+        `The current project already matches this ZIP. Autopilot skipped reapplication and did not run checks, commit, or deployment.`,
+        `Previous run: ${state.run.repeatOf}`,
+      ], 'success', { collapsedSummary: 'Repeated archive · no changes · skipped' });
+      return beginArchiveInput(controller);
+    }
+
     const settings = activeRunSettings(state);
     const shouldRunLlm = isLocalLlmEnabled(settings)
       && (changedCount(resolvedPlan) > 0 || ['structure', 'sample'].includes(settings.llmArchiveReview));
@@ -293,7 +314,7 @@ export async function startApply(controller, { checkpointCreated = false } = {})
       state.run.status = 'applied';
       state.run = await saveRunRecord(state.run);
       controller.message('Nothing to apply', [`${state.plan.counts.unchanged} files already match the archive.`], 'success');
-      return startChecks(controller);
+      return operation.handoff(() => startChecks(controller));
     }
     setBusy(controller, 'Applying update', 0, Math.max(1, changedCount(state.plan)), 'Creating backup');
     const applied = await applyUpdatePlan({
@@ -324,7 +345,7 @@ export async function startApply(controller, { checkpointCreated = false } = {})
       `${state.plan.preserved.length} snapshot paths preserved · Backup: ${displayPath(applied.backup.root)}`,
     ], 'success');
     state.busy = false;
-    return startChecks(controller);
+    return operation.handoff(() => startChecks(controller));
   } catch (error) {
     state.busy = false;
     if (error.code === 'cancelled') {
@@ -366,35 +387,6 @@ export async function retryArchive(controller) {
   await cancelRun(controller);
   controller.message('Ready for another archive', ['Choose the corrected or rebuilt ZIP file.']);
   return beginArchiveInput(controller);
-}
-
-function showDuplicateWarning(controller, archivePath, archiveHash, previous) {
-  controller.state.pendingArchive = { archivePath, archiveHash, previous };
-  controller.showMenu('archive-duplicate', [
-    { id: 'duplicate-choose-another', label: 'Choose another archive', description: 'Recommended when this ZIP was selected accidentally' },
-    { id: 'duplicate-apply-again', label: 'Apply this archive again', description: 'Rebuild the plan against the current project state' },
-    { id: 'duplicate-view-run', label: 'Show previous result', description: `Run ${previous.id} · ${previous.status}` },
-  ], 'Archive was used before', 0, [
-    formatArchiveName(archivePath),
-    `Previously used: ${new Date(previous.createdAt).toLocaleString('en-GB')}`,
-    previous.plan?.counts ? compactPlanLine({ counts: previous.plan.counts }) : 'Previous plan unavailable',
-  ]);
-}
-
-async function activateDuplicate(controller, itemId) {
-  const pending = controller.state.pendingArchive;
-  if (!pending) return beginArchiveInput(controller);
-  if (itemId === 'duplicate-choose-another') return beginArchiveInput(controller);
-  if (itemId === 'duplicate-apply-again') return inspectArchivePath(controller, pending.archivePath, { allowDuplicate: true, archiveHash: pending.archiveHash });
-  if (itemId === 'duplicate-view-run') {
-    const run = pending.previous;
-    controller.message('Previous archive result', [
-      `Run: ${run.id} · ${run.status}`,
-      ...(run.plan?.counts ? [compactPlanLine({ counts: run.plan.counts })] : []),
-      `Commit: ${run.commit ? `${run.commit.revision} ${firstLine(run.commit.message)}` : 'none'}`,
-    ]);
-    return showDuplicateWarning(controller, pending.archivePath, pending.archiveHash, run);
-  }
 }
 
 export async function continueAfterSafety(controller) {
@@ -494,6 +486,3 @@ function changedCount(plan) {
   return plan.created.length + plan.updated.length + plan.deleted.length;
 }
 
-function firstLine(value) {
-  return String(value ?? '').split(/\r?\n/, 1)[0];
-}

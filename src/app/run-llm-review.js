@@ -205,8 +205,10 @@ function emitLlmResult(controller, llm, reviewMode) {
     ], 'warning', { collapsedSummary: 'Local LLM · input reduced to fit context' });
     const assessment = llm.assessment;
     if (assessment) controller.message('Local LLM archive suitability', [
-      `${assessment.assessment} · ${assessment.confidence} confidence · ${assessment.mode} review`,
-      ...assessment.reasons,
+      `Assessment: ${titleCase(assessment.assessment)}`,
+      `Confidence: ${titleCase(assessment.confidence)}`,
+      `Review: ${reviewModeLabel(assessment.mode)}`,
+      ...assessment.reasons.map((reason) => `Reason: ${reason}`),
     ], assessment.assessment === 'suitable' ? 'success' : 'warning', {
       collapsedSummary: `Local LLM · ${assessment.assessment} · ${assessment.confidence} confidence`,
     });
@@ -230,6 +232,7 @@ function emitLlmResult(controller, llm, reviewMode) {
         `Patch coverage: ${coverage.patchCoveragePercent}% · ${coverage.omittedFiles} files omitted`,
       ] : []),
     ], 'info', {
+      collapsible: false,
       collapsedSummary: coverage
         ? `Local LLM · ${coverage.reviewedFiles}/${coverage.totalFiles} files with content`
         : `Local LLM · ${deliveryLabel(delivery.resolved)}`,
@@ -245,6 +248,19 @@ function emitLlmResult(controller, llm, reviewMode) {
     ...(llm.diagnosticsPath ? [`Diagnostics: ${displayPath(llm.diagnosticsPath)}`] : []),
     'The update can continue and project files have not been affected by this error.',
   ], 'warning', { collapsedSummary: `Local LLM · unavailable · ${llm.error}` });
+}
+
+
+function titleCase(value) {
+  const text = String(value ?? '').trim();
+  return text ? `${text[0].toUpperCase()}${text.slice(1)}` : 'Unknown';
+}
+
+function reviewModeLabel(value) {
+  if (value === 'structure') return 'Structure guard';
+  if (value === 'sample') return 'Sample guard';
+  if (value === 'patch') return 'Deep patch review';
+  return titleCase(value);
 }
 
 function llmRecord(state, result, diagnosticsPath, durationMs = 0) {

@@ -99,11 +99,11 @@ export async function startChecks(controller) {
     state.run.checks = checksResult;
     state.run.status = checksResult.ok ? 'checks_passed' : 'checks_failed';
     state.run = await saveRunRecord(state.run);
-    if (!checksResult.ok) return handleFailedChecks(controller, checksResult);
+    if (!checksResult.ok) return operation.handoff(() => handleFailedChecks(controller, checksResult));
     controller.message('All checks passed', [`${checksResult.passed} checks passed`], 'success', {
       collapsedSummary: `Checks · ${checksResult.passed}/${checksResult.passed} passed`,
     });
-    return continueAfterChecks(controller);
+    return operation.handoff(() => continueAfterChecks(controller));
   } catch (error) {
     if (error.code === 'cancelled') return showChecksCancelled(controller);
     await failRun(controller, error);

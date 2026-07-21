@@ -109,8 +109,8 @@ test('LM Studio generation uses native streaming settings and a safe context len
   assert.match(chatBody.input, /Project: fixture/);
   assert.equal(chatBody.stream, true);
   assert.equal(chatBody.reasoning, 'off');
-  assert.equal(chatBody.model, 'gemma');
-  assert.equal(chatBody.context_length, 16_384, 'loaded instances may use the Zipflow request context without loading another model');
+  assert.equal(chatBody.model, 'gemma-loaded');
+  assert.equal(chatBody.context_length, undefined, 'reusing a loaded instance must not request a second context allocation');
 });
 
 test('LM Studio native stream exposes model loading, prompt progress, reasoning, and answer chunks', async () => {
@@ -260,8 +260,8 @@ test('LM Studio reuses a loaded instance when the saved model is the catalog key
 
   const chat = requests.find((item) => item.url.endsWith('/api/v1/chat'));
   assert.ok(chat);
-  assert.equal(chat.body.model, 'gemma');
-  assert.equal(chat.body.context_length, 16_384);
+  assert.equal(chat.body.model, 'gemma-loaded');
+  assert.equal(chat.body.context_length, undefined);
   assert.equal(result.diagnostics.profile.loadedModel, true);
 });
 
@@ -283,7 +283,7 @@ test('Escape cancellation aborts a local LLM stream with a dedicated error', asy
 });
 
 
-test('LM Studio chat never sends a numbered loaded instance ID as the model identifier', async () => {
+test('LM Studio chat reuses the saved numbered loaded instance ID', async () => {
   let chatBody;
   const fetchImpl = async (url, options = {}) => {
     if (url.endsWith('/api/v1/models')) return jsonResponse({
@@ -305,5 +305,6 @@ test('LM Studio chat never sends a numbered loaded instance ID as the model iden
     patchContent: 'diff --git a/a.js b/a.js\n@@ -1 +1 @@\n-old\n+new\n',
   }, { fetchImpl });
 
-  assert.equal(chatBody.model, 'gemma-4-e4b-it-mlx');
+  assert.equal(chatBody.model, 'gemma-4-e4b-it-mlx:2');
+  assert.equal(chatBody.context_length, undefined);
 });

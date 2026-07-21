@@ -99,9 +99,9 @@ export async function createResultCommit(controller, message) {
     if (operation.isCancellationRequested()) {
       controller.message('Cancellation completed after Git commit', ['The atomic commit was allowed to finish. Deployment was skipped.'], 'warning');
       state.postCheckContinuation = null;
-      return completeRun(controller, completionStatus(state));
+      return operation.handoff(() => completeRun(controller, completionStatus(state)));
     }
-    return continueAfterCommitChoice(controller);
+    return operation.handoff(() => continueAfterCommitChoice(controller));
   } catch (error) {
     if (error.code === 'cancelled') {
       controller.message('Commit cancelled', ['No result commit was recorded. Check the Git status before retrying.'], 'warning');
@@ -135,9 +135,9 @@ export async function rewriteResultCommit(controller, kind, candidate, message) 
     if (operation.isCancellationRequested()) {
       controller.message('Cancellation completed after Git rewrite', ['The atomic rewrite was allowed to finish. Deployment was skipped.'], 'warning');
       state.postCheckContinuation = null;
-      return completeRun(controller, completionStatus(state));
+      return operation.handoff(() => completeRun(controller, completionStatus(state)));
     }
-    return continueAfterCommitChoice(controller);
+    return operation.handoff(() => continueAfterCommitChoice(controller));
   } catch (error) {
     if (error.code === 'cancelled') {
       controller.message('Commit rewrite cancelled', ['The rewrite backup ref remains available if Git changed before cancellation.'], 'warning');

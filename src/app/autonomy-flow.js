@@ -28,9 +28,14 @@ export async function decideAtGate(controller, {
     label: label || `Autopilot decision · ${gate}`,
     onCancel: () => { state.run.autonomy.paused = true; },
   });
-  const progress = beginLlmProgress(controller);
+  const decisionLabel = label || `Autopilot decision · ${gate}`;
+  const progress = beginLlmProgress(controller, { presentation: 'decision' });
   const startedAt = Date.now();
-  controller.setStatus(label || `Autopilot is deciding · ${gate}`);
+  state.busy = true;
+  state.screen = 'autopilot-decision';
+  state.busyLabel = decisionLabel;
+  state.progress = { value: 0, total: 1, detail: 'Waiting for the local model' };
+  controller.setStatus(decisionLabel);
   try {
     const decision = await requestDecision({
       settings: activeRunSettings(state),
@@ -85,6 +90,7 @@ export async function decideAtGate(controller, {
       ...(!decision.accepted ? ['Confidence or context quality was below the profile threshold; control returns to you.'] : []),
       ...(!stateValid ? ['Project state changed while the model was deciding; the proposed action was not executed.'] : []),
     ], validAction === 'ask-user' || validAction === 'abort' ? 'warning' : 'choice', {
+      collapsible: false,
       collapsedSummary: `Autopilot · ${actionLabel(validAction)} · ${Math.round(decision.effectiveConfidence * 100)}%`,
     });
     return { ...decision, action: validAction, record };
@@ -112,6 +118,8 @@ export async function decideAtGate(controller, {
   } finally {
     progress.stop();
     operation.finish();
+    state.busy = false;
+    controller.invalidate();
   }
 }
 

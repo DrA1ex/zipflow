@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { renderToString } from 'terlio.js';
 import { tempDir } from '../test-support/helpers.js';
-import { DEFAULT_SETTINGS, loadSettings, saveSettings } from '../src/settings/store.js';
+import { writeFile, readFile } from 'node:fs/promises';
+import { DEFAULT_SETTINGS, loadSettings, normalizeSettings, saveSettings, settingsBackupPath, settingsPath } from '../src/settings/store.js';
 import { createInitialState } from '../src/app/state.js';
 import { renderZipflow } from '../src/ui/render.js';
 import { ZipflowController } from '../src/app/controller.js';
@@ -347,3 +348,43 @@ test('Local LLM settings expose delivery and failed-check analysis choices', asy
     'llmFailureAnalysis:disabled', 'llmFailureAnalysis:same-context', 'llmFailureAnalysis:new-context',
   ]);
 }));
+
+
+test('1.0 settings migration preserves LLM credentials and archive storage choices', () => {
+  const settings = normalizeSettings({
+    version: 11,
+    llmProvider: 'lmstudio',
+    llmModel: 'gemma',
+    llmApiToken: 'persisted-token',
+    llmLanguage: 'Russian',
+    archivePolicy: 'move',
+    archiveDirectory: '~/existing-archives',
+    backupMaxBytes: 2_000_000_000,
+  });
+  assert.equal(settings.llmApiToken, 'persisted-token');
+  assert.equal(settings.llmProvider, 'lmstudio');
+  assert.equal(settings.llmModel, 'gemma');
+  assert.equal(settings.archivePolicy, 'move');
+  assert.equal(settings.archiveDirectory, '~/existing-archives');
+  assert.equal(settings.backupMaxBytes, 2_000_000_000);
+});
+
+test('settings recover from the backup file without resetting tokens or archive policy', async () => withSettingsHome(async () => {
+  const preserved = {
+    ...DEFAULT_SETTINGS,
+    llmProvider: 'lmstudio', llmModel: 'gemma', llmApiToken: 'secret-token',
+    archivePolicy: 'move', archiveDirectory: '~/saved-archives',
+  };
+  await writeFile(settingsBackupPath(), `${JSON.stringify(preserved)}\n`);
+  await writeFile(settingsPath(), '{ broken json');
+  const loaded = await loadSettings();
+  assert.equal(loaded.llmApiToken, 'secret-token');
+  assert.equal(loaded.archivePolicy, 'move');
+  const restored = JSON.parse(await readFile(settingsPath(), 'utf8'));
+  assert.equal(restored.llmApiToken, 'secret-token');
+  assert.equal(restored.archivePolicy, 'move');
+}));
+
+test('rollback backup storage defaults to 2 GB', () => {
+  assert.equal(DEFAULT_SETTINGS.backupMaxBytes, 2_000_000_000);
+});

@@ -246,10 +246,9 @@ test('disabling managed-file recording preserves existing history and blocks inc
   assert.equal(disabled.disabled, true);
   assert.match(disabled.disabledReason, /active workflow uses managed-file history/i);
 
-  state.run = { id: 'active', status: 'checks_passed' };
+  state.run = { id: 'stale', status: 'checks_passed' };
   const clear = settingsParameters(state, definition).find((item) => item.id === 'managedHistoryClear');
-  assert.equal(clear.disabled, true);
-  assert.match(clear.disabledReason, /active update/i);
+  assert.equal(clear.disabled, false, 'a stale run record must not prevent clearing while Settings is available');
 }));
 
 test('run details hide rollback after its backup was removed', () => {

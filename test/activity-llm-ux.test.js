@@ -56,3 +56,35 @@ test('final summary keeps the LLM result last with one compact checks and deploy
   assert.match(lines[2], /Deployment/);
   assert.match(lines.at(-1), /Commit not created/);
 });
+
+
+test('autopilot decision streaming presents structured fields instead of raw JSON', () => {
+  const lines = llmActivityLines({
+    presentation: 'decision', provider: 'lmstudio', model: 'gemma',
+    label: 'Receiving the model response', elapsedMs: 1_200, chunks: 4,
+    content: '{"schemaVersion":1,"gate":"plan-application","action":"apply","confidence":0.91,"summary":"The plan is conflict-free.","evidence":["Checks are configured"],"risks":["One file is removed"],"conditions":["Keep deployment disabled"]}',
+    reasoning: '',
+  }, 80);
+  const output = lines.join('\n');
+  assert.match(output, /Autopilot decision/);
+  assert.match(output, /Decision: Apply/);
+  assert.match(output, /Confidence: 91%/);
+  assert.match(output, /Summary: The plan is conflict-free/);
+  assert.match(output, /Risk: One file is removed/);
+  assert.doesNotMatch(output, /"schemaVersion"|"action"/);
+});
+
+test('Activity visually separates key labels and mutes the collapsed expansion hint', () => {
+  const state = createInitialState();
+  appendMessage(state, 'Review coverage', [
+    'Delivery: Representative sample',
+    'Reviewed content: 3 of 20 changed files',
+    'Patch coverage: 42%',
+    'Condition: Deployment remains disabled',
+    'Extra detail',
+  ], 'info');
+  const theme = { accent: '\\x1b[35m', textMuted: '\\x1b[2m', title: '\\x1b[1m' };
+  const output = buildTranscript(state, theme, 90).lines.join('\n');
+  assert.match(output, /\\x1b\[35mDelivery:/);
+  assert.match(output, /\\x1b\[2m… 3 more lines · click or press E to expand/);
+});

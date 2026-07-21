@@ -47,13 +47,22 @@ export const DEFAULT_SETTINGS = Object.freeze({
 
 export async function loadSettings() {
   await ensureZipflowHome();
-  const stored = await readJson(settingsPath(), null);
-  return normalizeSettings(stored);
+  const primary = await readSettingsFile(settingsPath());
+  if (primary) return normalizeSettings(primary);
+  const backup = await readSettingsFile(settingsBackupPath());
+  if (backup) {
+    const restored = normalizeSettings(backup);
+    await writeJsonAtomic(settingsPath(), restored);
+    return restored;
+  }
+  return normalizeSettings(null);
 }
 
 export async function saveSettings(settings) {
   await ensureZipflowHome();
   const value = normalizeSettings(settings);
+  const current = await readSettingsFile(settingsPath());
+  if (current) await writeJsonAtomic(settingsBackupPath(), normalizeSettings(current));
   await writeJsonAtomic(settingsPath(), value);
   return value;
 }
@@ -153,6 +162,18 @@ function normalizeLanguage(value, fallback) {
 
 export function settingsPath() {
   return path.join(getZipflowHome(), 'settings.json');
+}
+
+export function settingsBackupPath() {
+  return path.join(getZipflowHome(), 'settings.backup.json');
+}
+
+async function readSettingsFile(target) {
+  try {
+    return await readJson(target, null);
+  } catch {
+    return null;
+  }
 }
 
 function normalizeInteger(value, fallback, min, max) {

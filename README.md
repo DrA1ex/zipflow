@@ -1,5 +1,7 @@
 # Zipflow
 
+Current release: **1.0.1**.
+
 Zipflow is an interactive terminal application for safely applying ZIP archives with source updates to local projects.
 
 It is designed for the workflow where an archive is generated after each development iteration and must be merged into an existing working tree, checked, optionally committed, deployed, and sometimes rolled back.
@@ -58,7 +60,7 @@ Dotfiles and dot-directories are ordinary project paths. Zipflow synchronizes pa
 
 ## Daily project screen
 
-For an existing workflow, Zipflow starts directly in archive-waiting mode. The framed **Project detected** Activity block contains the selected archive mode, checks, conflict policy, commit behavior, and deployment policy without consuming vertical space in the action pane. A separate startup hint explains that `Esc` opens the compact project menu when you need **Change workflow**, history, ZIP export, or other project actions.
+For an existing workflow, Zipflow starts directly in archive-waiting mode. The framed **Project detected** Activity block contains the selected archive mode, checks, conflict policy, commit behavior, and deployment policy without consuming vertical space in the action pane. The archive editor itself contains one concise instruction; `Esc` opens the compact project menu when you need **Change workflow**, history, ZIP export, or other project actions.
 
 Change workflow keeps `Continue` selected when each wizard page opens, and returns focus there after a setting is changed. This makes a one-setting adjustment quick while the complete selected configuration remains visible in the final review. The saved workflow remains active until the changed workflow is confirmed and saved.
 
@@ -74,7 +76,7 @@ During an update, the header shows the current five-stage progression:
 Archive -> Review -> Apply -> Checks -> Finish
 ```
 
-Activity entries use stable `INFO`, `RUN`, `DONE`, `WARN`, `FAIL`, `YOU`, and `SUM` roles so current work, completed work, problems, user decisions, and the final result remain distinguishable. Expanded large logs use Terlio 1.1.2 viewport rendering together with a cached Zipflow transcript, so scrolling a 10,000-line test output does not repeatedly wrap and recolor the whole block. Any durable block longer than three lines starts collapsed with a visible arrow; scroll to it and press `E` to expand or collapse it. Project discovery and the final summary stay expanded. Long-running LLM and check steps explain what result is expected before they start.
+Activity entries use stable `INFO`, `RUN`, `DONE`, `WARN`, `FAIL`, `YOU`, and `SUM` roles so current work, completed work, problems, user decisions, and the final result remain distinguishable. Expanded large logs use Terlio 1.1.2 viewport rendering together with a cached Zipflow transcript, so scrolling a 10,000-line test output does not repeatedly wrap and recolor the whole block. Expansion hints are muted, while structured keys such as `Assessment`, `Confidence`, `Delivery`, and `Patch coverage` use the active accent color. Short generated coverage blocks remain expanded. Any other durable block longer than three lines starts collapsed with a visible arrow; scroll to it and press `E` to expand or collapse it. Project discovery and the final summary stay expanded.
 
 ## Supported project workflows
 
@@ -92,9 +94,13 @@ When adding a custom check, Zipflow first asks for the exact command and then as
 
 When a ZIP contains one top-level directory, Zipflow compares two interpretations before LLM review or filesystem changes: treating that directory as the project root, or keeping it as a literal subdirectory. If the literal interpretation would create one new folder while removing or replacing the existing project tree, Zipflow shows both compact plans and requires an explicit choice. Swift packages (`Package.swift`) and Xcode project/workspace markers participate in root detection.
 
+## Settings persistence
+
+Global settings are loaded before the interactive runtime starts accepting input. They are stored in `~/.zipflow/settings.json`; before a valid settings file is replaced, Zipflow also writes `settings.backup.json`. If the primary file is unreadable, the backup is restored automatically. LLM credentials, selected model and instance, source-archive policy, storage directories, and retention limits are preserved across patch upgrades. The default rollback-backup size limit remains 2 GB.
+
 ## Applying an archive
 
-For a configured project, drag a ZIP file into the initial archive prompt or enter its path. Path input scans the entered location while you type and shows multiple matching directories and ZIP files in an overlay without shifting the layout. Use `Up`/`Down` to select a suggestion and `Tab` or `Enter` to insert it. A directory opens its contents; a ZIP file only fills the path. Press `Enter` again to submit the completed path, so completion never starts an update unexpectedly. Existing directory paths also expose an explicit **Use this directory** action in directory pickers. 
+For a configured project, drag a ZIP file into the initial archive prompt or enter its path. In an autopilot workflow, selecting an archive whose hash was used before rebuilds the plan against the current project; if the project already matches, Zipflow records a `duplicate_skipped` run and returns to archive waiting without checks, commit, deployment, or an unnecessary LLM decision. Path input scans the entered location while you type and shows multiple matching directories and ZIP files in an overlay without shifting the layout. Use `Up`/`Down` to select a suggestion and `Tab` or `Enter` to insert it. A directory opens its contents; a ZIP file only fills the path. Press `Enter` again to submit the completed path, so completion never starts an update unexpectedly. Existing directory paths also expose an explicit **Use this directory** action in directory pickers.
 The completion overlay uses leading folder and file markers instead of trailing type descriptions, keeping names aligned and easy to scan.
 
 Press `Esc` to return to the project menu. After a completed run, **Finish and wait for next archive** returns directly to the same prompt. `Esc` on the project menu itself does not exit Zipflow; use `Ctrl+C` or **Exit**.
@@ -188,7 +194,7 @@ Other supported message sources are the archive filename, a generated run identi
 
 ## Local LLM summaries and commit messages
 
-Zipflow supports Ollama and LM Studio with provider-specific adapters. LM Studio uses its native model catalog and streaming chat API so Zipflow can read model parameter counts, loaded-instance configuration, context size, and model-load or prompt-processing progress. The model list uses a radio marker for the selected model and shows `Loaded` or `Not loaded` as muted secondary information. Selecting a model opens a configuration page where context length, evaluation batch size, Flash Attention, KV-cache placement, and expert count can be edited even when the model is already loaded. **Save and select** unloads stale LM Studio LLM instances when necessary and reloads the selected model with the saved configuration, leaving one active LLM instance. Ollama uses its native model metadata endpoints to discover the active or configured context size, then uses its OpenAI-compatible chat-completion stream for generation. Configure the provider, optional bearer token, selected model, and separate prompt, summary, and commit-message languages in `Ctrl+B` settings.
+Zipflow supports Ollama and LM Studio with provider-specific adapters. LM Studio uses its native model catalog and streaming chat API so Zipflow can read model parameter counts, loaded-instance configuration, context size, and model-load or prompt-processing progress. The model list uses a radio marker for the selected model and shows `Loaded` or `Not loaded` as muted secondary information. Selecting a model opens a configuration page where context length, evaluation batch size, Flash Attention, KV-cache placement, and expert count can be edited even when the model is already loaded. **Save and select** unloads stale LM Studio LLM instances when necessary and reloads the selected model with the saved configuration, leaving one active LLM instance. Subsequent reviews and compatibility tests address that loaded instance directly and do not send a new context allocation, preventing LM Studio from creating a second copy of the same model. Ollama uses its native model metadata endpoints to discover the active or configured context size, then uses its OpenAI-compatible chat-completion stream for generation. Configure the provider, optional bearer token, selected model, and separate prompt, summary, and commit-message languages in `Ctrl+B` settings.
 
 Default local endpoints:
 

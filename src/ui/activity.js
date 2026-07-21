@@ -34,13 +34,15 @@ function activityMessageLines(message, theme, width) {
   const cached = messageLineCache.get(message);
   if (cached?.theme === theme && cached.width === width && cached.at === message.at
     && cached.collapsed === message.collapsed && cached.linesRef === message.lines
-    && cached.title === message.title && cached.tone === message.tone) return cached.result;
+    && cached.title === message.title && cached.tone === message.tone
+    && cached.collapsedSummary === message.collapsedSummary && cached.collapsible === message.collapsible) return cached.result;
   const result = message.tone === 'project'
     ? projectActivityBlock(message, theme, width)
     : standardActivityMessage(message, theme, width);
   messageLineCache.set(message, {
     theme, width, at: message.at, collapsed: message.collapsed, linesRef: message.lines,
-    title: message.title, tone: message.tone, result,
+    title: message.title, tone: message.tone, collapsedSummary: message.collapsedSummary,
+    collapsible: message.collapsible, result,
   });
   return result;
 }
@@ -96,9 +98,23 @@ function standardActivityMessage(message, theme, width) {
 function formatActivityBodyLine(message, line, theme, width) {
   const value = String(line ?? '');
   const wrapped = wrapText(value, width, '  ');
-  if (message.tone !== 'diff') return wrapped.map((part) => `  ${part}`);
-  const token = diffToken(value);
-  return wrapped.map((part) => `  ${token ? color(theme, token, part) : part}`);
+  if (message.tone === 'diff') {
+    const token = diffToken(value);
+    return wrapped.map((part) => `  ${token ? color(theme, token, part) : part}`);
+  }
+  if (isExpansionHint(value)) return wrapped.map((part) => `  ${color(theme, 'textMuted', part)}`);
+  return wrapped.map((part, index) => `  ${formatKeyValue(part, index === 0, theme)}`);
+}
+
+function formatKeyValue(value, firstLine, theme) {
+  if (!firstLine) return value;
+  const match = String(value).match(/^([A-Za-z][A-Za-z0-9 /_-]{0,42}:)(\s*)(.*)$/);
+  if (!match) return value;
+  return `${color(theme, 'accent', match[1])}${match[2]}${match[3]}`;
+}
+
+function isExpansionHint(value) {
+  return /click or press E to expand$/i.test(String(value ?? ''));
 }
 
 function diffToken(line) {

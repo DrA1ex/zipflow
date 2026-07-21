@@ -1,6 +1,6 @@
 import { color, wrapText } from 'terlio.js';
 import { activeRunSettings } from './runtime-settings.js';
-export function beginLlmProgress(controller, { expectedMs = 0 } = {}) {
+export function beginLlmProgress(controller, { expectedMs = 0, presentation = 'review' } = {}) {
   const { state } = controller;
   const startedAt = Date.now();
   const settings = activeRunSettings(state);
@@ -26,6 +26,7 @@ export function beginLlmProgress(controller, { expectedMs = 0 } = {}) {
     deliveryMode: null,
     batchIndex: null,
     batchTotal: null,
+    presentation,
   };
   const timer = setInterval(() => {
     if (!state.llmRuntime) return;
@@ -153,6 +154,7 @@ export function updateLlmProgress(controller, event) {
 
 export function llmActivityLines(runtime, width = 100, theme = null) {
   if (!runtime) return [];
+  if (runtime.presentation === 'decision') return decisionActivityLines(runtime, width, theme);
   const lines = [
     paint(theme, 'accent', `Local LLM · ${runtime.provider} · ${runtime.model}`),
     runtime.transport ? `  Transport: ${runtime.transport} · POST ${runtime.endpoint}` : null,
@@ -182,6 +184,103 @@ export function llmActivityLines(runtime, width = 100, theme = null) {
   if (content.length) lines.push(paint(theme, 'accent', '  Model response:'), ...content.map((line) => `    ${line}`));
   lines.push('');
   return lines;
+}
+
+function decisionActivityLines(runtime, width, theme) {
+  const title = paint(theme, 'accent', `Autopilot decision · ${runtime.provider} · ${runtime.model}`);
+  const lines = [
+    title,
+    `  ${paint(theme, 'accent', runtime.label)} · ${formatElapsed(runtime.elapsedMs)} · ${runtime.chunks} chunks`,
+  ];
+  const decision = partialDecision(runtime.content || runtime.reasoning);
+  if (!decision.hasValues) {
+    lines.push(`  ${paint(theme, 'textMuted', 'Receiving a structured decision…')}`);
+  } else {
+    if (decision.action) lines.push(`  ${paint(theme, 'accent', 'Decision:')} ${actionLabel(decision.action)}`);
+    if (decision.confidence !== null) lines.push(`  ${paint(theme, 'accent', 'Confidence:')} ${Math.round(decision.confidence * 100)}%`);
+    if (decision.summary) lines.push(...wrappedField('Summary:', decision.summary, width, theme));
+    for (const value of decision.evidence) lines.push(...wrappedField('Evidence:', value, width, theme));
+    for (const value of decision.risks) lines.push(...wrappedField('Risk:', value, width, theme, 'warning'));
+    for (const value of decision.conditions) lines.push(...wrappedField('Condition:', value, width, theme));
+  }
+  lines.push('');
+  return lines;
+}
+
+function wrappedField(label, value, width, theme, valueToken = null) {
+  const available = Math.max(24, width - 8 - label.length);
+  const wrapped = wrapText(String(value ?? ''), available);
+  if (!wrapped.length) return [];
+  return wrapped.map((line, index) => index === 0
+    ? `  ${paint(theme, 'accent', label)} ${valueToken ? paint(theme, valueToken, line) : line}`
+    : `  ${' '.repeat(label.length + 1)}${valueToken ? paint(theme, valueToken, line) : line}`);
+}
+
+function partialDecision(value) {
+  const text = String(value ?? '').trim();
+  const complete = parseJsonObject(text);
+  const source = complete ?? {};
+  const action = stringField(text, 'action') ?? stringValue(source.action);
+  const summary = stringField(text, 'summary') ?? stringValue(source.summary);
+  const confidence = numberField(text, 'confidence') ?? finiteConfidence(source.confidence);
+  const evidence = arrayField(text, 'evidence', source.evidence);
+  const risks = arrayField(text, 'risks', source.risks);
+  const conditions = arrayField(text, 'conditions', source.conditions);
+  return {
+    action, summary, confidence, evidence, risks, conditions,
+    hasValues: Boolean(action || summary || confidence !== null || evidence.length || risks.length || conditions.length),
+  };
+}
+
+function parseJsonObject(text) {
+  const candidates = [text];
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start >= 0 && end > start) candidates.push(text.slice(start, end + 1));
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+    } catch {}
+  }
+  return null;
+}
+
+function stringField(text, key) {
+  const match = text.match(new RegExp(`"${key}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`));
+  if (!match) return null;
+  try { return JSON.parse(`"${match[1]}"`); } catch { return match[1]; }
+}
+
+function numberField(text, key) {
+  const match = text.match(new RegExp(`"${key}"\\s*:\\s*(-?\\d+(?:\\.\\d+)?)`));
+  return match ? finiteConfidence(match[1]) : null;
+}
+
+function arrayField(text, key, fallback) {
+  if (Array.isArray(fallback)) return fallback.map(stringValue).filter(Boolean).slice(0, 8);
+  const match = text.match(new RegExp(`"${key}"\\s*:\\s*\\[([\\s\\S]*?)(?:\\]|$)`));
+  if (!match) return [];
+  const values = [];
+  const pattern = /"((?:\\.|[^"\\])*)"/g;
+  let item;
+  while ((item = pattern.exec(match[1])) && values.length < 8) {
+    try { values.push(JSON.parse(`"${item[1]}"`)); } catch { values.push(item[1]); }
+  }
+  return values.filter(Boolean);
+}
+
+function finiteConfidence(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(0, Math.min(1, number)) : null;
+}
+
+function stringValue(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function actionLabel(value) {
+  return String(value ?? '').split('-').map((part) => part ? `${part[0].toUpperCase()}${part.slice(1)}` : '').join(' ');
 }
 
 function preview(value, maxLines, width) {

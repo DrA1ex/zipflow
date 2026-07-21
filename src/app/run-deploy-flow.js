@@ -68,17 +68,22 @@ export async function startDeploy(controller, { fromCompleted = false, expectedS
         deploy.commandText,
         lastNonEmptyLine(`${result.stdout}\n${result.stderr}`) || 'No output',
       ], 'error', { collapsedSummary: `Deployment · failed · ${deploy.commandText}` });
-      const handled = await handleDeploymentFailureAutonomy(controller, {
-        retry: () => startDeploy(controller),
-        finishWithError: () => completeRun(controller, 'completed_with_errors'),
-        rollbackLocal: () => automaticRollback(controller, { externalEffectsWarning: true }),
+      return operation.handoff(async () => {
+        const handled = await handleDeploymentFailureAutonomy(controller, {
+          retry: () => startDeploy(controller),
+          finishWithError: () => completeRun(controller, 'completed_with_errors'),
+          rollbackLocal: () => automaticRollback(controller, { externalEffectsWarning: true }),
+        });
+        if (handled !== false) return handled;
+        return showDeployFailed(controller);
       });
-      if (handled !== false) return handled;
-      return showDeployFailed(controller);
     }
     controller.message('Deployment completed', [deploy.commandText], 'success', { collapsedSummary: `Deployment · completed · ${deploy.commandText}` });
-    if (fromCompleted) return showCompleted(controller);
-    return completeRun(controller, hasFailedChecks(state) ? 'completed_with_errors' : 'completed');
+    return operation.handoff(() => (
+      fromCompleted
+        ? showCompleted(controller)
+        : completeRun(controller, hasFailedChecks(state) ? 'completed_with_errors' : 'completed')
+    ));
   } catch (error) {
     if (error.code === 'cancelled') return showDeployCancelled(controller);
     await failRun(controller, error);

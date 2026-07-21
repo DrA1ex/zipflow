@@ -3,7 +3,7 @@ import { clearRunSettings } from './runtime-settings.js';
 import { confirmRollback, showRunDetails } from './run-rollback.js';
 
 const TERMINAL_STATUSES = new Set([
-  'completed', 'completed_with_errors', 'failed', 'cancelled', 'rolled_back', 'interrupted_closed',
+  'completed', 'completed_with_errors', 'failed', 'cancelled', 'rolled_back', 'interrupted_closed', 'duplicate_skipped',
 ]);
 
 export async function offerInterruptedRunRecovery(controller) {

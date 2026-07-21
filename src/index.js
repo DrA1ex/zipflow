@@ -35,8 +35,8 @@ export async function startZipflow({ input = process.stdin, output = process.std
     },
   });
   controller.attachRuntime(app);
-  app.start();
   await controller.boot();
+  app.start();
   return app;
 }
 

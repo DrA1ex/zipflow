@@ -91,7 +91,7 @@ test('archive inspection persists changes.patch and records the local LLM result
     const suitability = state.messages.find((message) => message.title === 'Local LLM archive suitability');
     assert.ok(suitability);
     assert.match(suitability.lines.join(' '), /Suitable/i);
-    assert.match(suitability.lines.join(' '), /high confidence/i);
+    assert.match(suitability.lines.join(' '), /Confidence: High/i);
     assert.match(suitability.lines.join(' '), /Структура и маркеры проекта совпадают/);
     assert.match(requestBody.messages[0].content, /Write summary and reasons in Russian[\s\S]*Write commitMessage in Russian/);
     assert.equal('response_format' in requestBody, false, 'visible generation must stream readable text instead of JSON');
