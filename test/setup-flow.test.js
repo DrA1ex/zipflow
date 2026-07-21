@@ -58,6 +58,7 @@ test('deployment command is requested only when deployment is enabled', async ()
   await activateSetup(controller, 'use-project');
   await activateSetup(controller, 'checks-continue');
   await activateSetup(controller, 'policy-continue');
+  await activateSetup(controller, 'autonomy-continue');
   await activateSetup(controller, 'archive-continue');
   await activateSetup(controller, 'checkpoint-continue');
   await activateSetup(controller, 'result-never');
@@ -132,6 +133,7 @@ test('deployment setup offers detected commands before a custom command', async 
   await activateSetup(controller, 'use-project');
   await activateSetup(controller, 'checks-continue');
   await activateSetup(controller, 'policy-continue');
+  await activateSetup(controller, 'autonomy-continue');
   await activateSetup(controller, 'archive-continue');
   await activateSetup(controller, 'checkpoint-continue');
   await activateSetup(controller, 'result-never');

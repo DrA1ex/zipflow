@@ -31,11 +31,16 @@ export async function activateRollback(controller, itemId) {
     if (itemId === 'another-archive') return false;
     if (itemId === 'view-run-files') return showRunFileGroups(controller);
     if (itemId === 'view-run-diff') return showCompleteRunDiff(controller);
+    if (itemId === 'view-run-decisions') return showRunDecisions(controller);
     if (itemId === 'copy-run-summary') {
       const copied = await copyTextToClipboard(formatCompletionForClipboard(controller.state.run), { output: controller.runtime?.output });
       return copied ? controller.toast('Run summary copied', 'success') : controller.setStatus('Clipboard transfer unavailable');
     }
     if (itemId === 'back-home') return returnFromDetails(controller);
+  }
+  if (controller.state.screen === 'run-decisions') {
+    if (itemId.startsWith('run-decision:')) return showDecisionDetails(controller, Number(itemId.slice(13)));
+    if (itemId === 'run-decisions-back') return showRunDetails(controller, controller.state.run, { origin: controller.state.runDetailsOrigin });
   }
   if (controller.state.screen === 'run-file-groups') {
     if (itemId.startsWith('run-group:')) return showRunFileList(controller, itemId.slice(10));
@@ -54,6 +59,7 @@ export async function activateRollback(controller, itemId) {
 
 export function backRollback(controller) {
   if (controller.state.screen === 'run-details') return returnFromDetails(controller);
+  if (controller.state.screen === 'run-decisions') return showRunDetails(controller, controller.state.run, { origin: controller.state.runDetailsOrigin });
   if (controller.state.screen === 'run-file-groups') return showRunDetails(controller, controller.state.run, { origin: controller.state.runDetailsOrigin });
   if (controller.state.screen === 'run-file-list') return showRunFileGroups(controller);
   if (controller.state.screen === 'rollback-confirm') return showRunDetails(controller, controller.state.run, { origin: controller.state.runDetailsOrigin });
@@ -66,6 +72,7 @@ export function showRunDetails(controller, run, { origin = null, announce = true
     `Run: ${run.id}`,
     `Type: ${runTypeTag(run)}${run.kind ? ` · ${manualActionLabel(run.kind)}` : ' · Archive update'}`,
     `Status: ${runStatusLabel(run.status)}`,
+    `Decision mode: ${autonomyLabel(run.autonomy?.mode)}${run.autonomy?.paused ? ' · paused' : ''}`,
     ...(run.archivePath ? [`Archive: ${formatArchiveName(run.archivePath)}`, `Source ZIP: ${archiveDispositionSummary(run.archiveDisposition)}`] : []),
     ...(run.plan?.counts ? planSummary({ counts: run.plan.counts }) : []),
     `Checks: ${run.checks ? `${run.checks.passed} passed · ${run.checks.failed} failed` : 'not run'}`,
@@ -73,7 +80,7 @@ export function showRunDetails(controller, run, { origin = null, announce = true
     `Archive warnings: ${run.archiveSafety?.warnings?.length ?? 0}`,
     `Commit: ${run.commit ? `${run.commit.revision} ${firstLine(run.commit.message)}` : 'none'}`,
     `Deploy: ${deploySummary(run.deploy)}`,
-    `Decisions: ${run.decisions?.length ?? 0}`,
+    `Decisions: ${decisionSummary(run)}`,
     ...(run.applied ? [`Rollback: ${run.applied.backupAvailable === false ? `unavailable · backup removed (${run.applied.backupRemovalReason || 'storage cleanup'})` : 'available while the backup remains stored'}`] : []),
     `Report: ${displayPath(runReportPath(run.id))}`,
   ];
@@ -86,12 +93,15 @@ export function showRunDetails(controller, run, { origin = null, announce = true
       { id: 'copy-run-summary', label: 'Copy run summary', description: 'Copy changes, checks, commit, deployment, and report details' },
     );
   }
+  if (run.decisions?.some?.((item) => item.gate)) {
+    items.push({ id: 'view-run-decisions', label: 'Autopilot decisions', description: 'Review allowed actions, confidence, evidence, risks, drift, and execution status.' });
+  }
   if (run.applied && run.applied.backupAvailable !== false && run.rollback?.status !== 'completed') {
     items.push({ id: 'rollback', label: 'Roll back this update' });
   }
   items.push(
     { id: 'another-archive', label: run.kind ? 'Start an update' : 'Apply another archive' },
-    { id: 'back-home', label: controller.state.runDetailsOrigin === 'history' ? 'Back to run history' : 'Back to project' },
+    { id: 'back-home', label: controller.state.runDetailsOrigin === 'history' ? 'Back to run history' : controller.state.runDetailsOrigin === 'interrupted' ? 'Back to recovery' : 'Back to project' },
   );
   const intro = run.plan?.counts
     ? [`[${runTypeTag(run)}] Archive update`, compactPlanLine({ counts: run.plan.counts }), compactPlanMeta({ counts: run.plan.counts }), `Status: ${runStatusLabel(run.status)}`]
@@ -111,8 +121,9 @@ export async function confirmRollback(controller, run) {
   ], 'Confirm rollback');
 }
 
-async function performRollback(controller) {
+export async function performRollback(controller, { automatic = false } = {}) {
   const { state } = controller;
+  const operation = controller.beginOperation({ kind: 'rollback', label: 'Rolling back update', critical: true });
   state.busy = true;
   state.screen = 'rolling-back';
   state.busyLabel = 'Rolling back update';
@@ -120,6 +131,7 @@ async function performRollback(controller) {
   controller.invalidate();
   try {
     const result = await rollbackRun(state.run.id, {
+      signal: operation.signal,
       onProgress: (progress) => {
         state.progress = { value: progress.current, total: progress.total, detail: progress.path };
         controller.invalidate();
@@ -131,14 +143,55 @@ async function performRollback(controller) {
     state.run = await saveRunRecord(state.run);
     state.busy = false;
     controller.message('Rollback completed', [`${result.restored} paths restored`], 'success');
+    if (automatic) return { ok: true, run: state.run, restored: result.restored };
     return showRunDetails(controller, state.run, { origin: controller.state.runDetailsOrigin });
   } catch (error) {
     state.busy = false;
     controller.message('Rollback failed', [error.message], 'error');
+    if (automatic) return { ok: false, error };
     return showRunDetails(controller, state.run, { origin: controller.state.runDetailsOrigin });
+  } finally {
+    operation.finish();
   }
 }
 
+
+function showRunDecisions(controller) {
+  const decisions = controller.state.run.decisions?.filter?.((item) => item.gate) ?? [];
+  const items = decisions.map((decision, index) => ({
+    id: `run-decision:${index}`,
+    label: `${decision.gate} · ${decision.action} · ${decision.executionStatus ?? 'unknown'}`,
+    context: decision.summary ?? 'No decision summary was recorded.',
+  }));
+  items.push({ id: 'run-decisions-back', label: 'Back to run details' });
+  controller.showMenu('run-decisions', items, 'Autopilot decisions', 0, [
+    `${decisions.length} bounded decision${decisions.length === 1 ? '' : 's'} recorded`,
+    'Every action was selected from a Zipflow-provided allowlist and revalidated before execution.',
+  ]);
+}
+
+function showDecisionDetails(controller, index) {
+  const decision = (controller.state.run.decisions?.filter?.((item) => item.gate) ?? [])[index];
+  if (!decision) return showRunDecisions(controller);
+  const confidence = decision.effectiveConfidence ?? decision.confidence;
+  controller.message('Autopilot decision details', [
+    `Gate: ${decision.gate}`,
+    `Action: ${decision.action}${decision.proposedAction && decision.proposedAction !== decision.action ? ` · proposed ${decision.proposedAction}` : ''}`,
+    `Execution: ${decision.executionStatus ?? 'unknown'}${decision.executionError ? ` · ${decision.executionError}` : ''}`,
+    `Source: ${decision.source ?? 'llm'} · Model: ${decision.model ?? 'unknown'}`,
+    `Confidence: ${confidence == null ? 'n/a' : `${Math.round(Number(confidence) * 100)}%`}`,
+    `Allowed: ${(decision.allowedActions ?? []).join(', ') || 'not recorded'}`,
+    '',
+    decision.summary ?? 'No summary recorded.',
+    ...(decision.evidence?.length ? ['', 'Evidence:', ...decision.evidence.map((item) => `• ${item}`)] : []),
+    ...(decision.risks?.length ? ['', 'Risks:', ...decision.risks.map((item) => `• ${item}`)] : []),
+    ...(decision.conditions?.length ? ['', 'Conditions:', ...decision.conditions.map((item) => `• ${item}`)] : []),
+    ...(decision.stateDrift ? ['', 'Project state changed while the decision was pending; the proposed action was not executed.'] : []),
+  ], decision.executionStatus === 'failed' || decision.stateDrift ? 'warning' : 'info', {
+    collapsedSummary: `Autopilot · ${decision.gate} · ${decision.action} · ${decision.executionStatus ?? 'unknown'}`,
+  });
+  return showRunDecisions(controller);
+}
 
 function showRunFileGroups(controller) {
   const groups = runChangedGroups(controller.state.run);
@@ -213,6 +266,10 @@ async function returnFromDetails(controller) {
     const { showRunHistory } = await import('./history-flow.js');
     return showRunHistory(controller, controller.state.historyReturnIndex ?? null);
   }
+  if (controller.state.runDetailsOrigin === 'interrupted') {
+    const { showInterruptedRun } = await import('./interrupted-run.js');
+    return showInterruptedRun(controller);
+  }
   return controller.showHome();
 }
 
@@ -233,6 +290,19 @@ function deploySummary(deploy) {
   if (!deploy) return 'not run';
   if (deploy.skipped) return 'skipped';
   return deploy.ok ? `passed (${deploy.commandText})` : `failed (${deploy.commandText})`;
+}
+
+function decisionSummary(run) {
+  const autonomous = run.decisions?.filter?.((item) => item.gate) ?? [];
+  const manual = run.decisions?.filter?.((item) => !item.gate) ?? [];
+  const pending = autonomous.filter((item) => ['pending', 'interrupted'].includes(item.executionStatus)).length;
+  return `${autonomous.length} autopilot${pending ? ` · ${pending} unresolved` : ''} · ${manual.length} manual`;
+}
+
+function autonomyLabel(mode) {
+  if (mode === 'guarded') return 'Guarded autopilot';
+  if (mode === 'full') return 'Full autopilot · Dangerous';
+  return 'Manual';
 }
 
 function manualActionLabel(kind) {

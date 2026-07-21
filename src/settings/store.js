@@ -3,7 +3,7 @@ import { themes } from 'terlio.js';
 import { readJson, writeJsonAtomic } from '../utils/fs.js';
 import { ensureZipflowHome, getZipflowHome } from '../workflow/store.js';
 
-export const SETTINGS_VERSION = 11;
+export const SETTINGS_VERSION = 12;
 export const THEME_NAMES = Object.keys(themes);
 export const LLM_PROVIDERS = ['disabled', 'ollama', 'lmstudio'];
 export const LLM_LANGUAGES = ['English', 'Russian', 'German', 'French', 'Spanish', 'Chinese', 'Japanese'];
@@ -29,6 +29,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   llmArchiveReview: 'disabled',
   llmChangeDelivery: 'adaptive',
   llmFailureAnalysis: 'disabled',
+  llmDecisionCompatibility: null,
   llmModelLoadConfigs: {},
   archivePolicy: 'keep',
   archiveDirectory: '~/zipflow-archive',
@@ -86,6 +87,7 @@ export function normalizeSettings(settings) {
   if (!LLM_ARCHIVE_REVIEW_MODES.includes(value.llmArchiveReview)) value.llmArchiveReview = DEFAULT_SETTINGS.llmArchiveReview;
   if (!LLM_CHANGE_DELIVERY_MODES.includes(value.llmChangeDelivery)) value.llmChangeDelivery = DEFAULT_SETTINGS.llmChangeDelivery;
   if (!LLM_FAILURE_ANALYSIS_MODES.includes(value.llmFailureAnalysis)) value.llmFailureAnalysis = DEFAULT_SETTINGS.llmFailureAnalysis;
+  value.llmDecisionCompatibility = normalizeDecisionCompatibility(value.llmDecisionCompatibility, value);
   value.llmModelLoadConfigs = normalizeModelLoadConfigs(value.llmModelLoadConfigs);
   if (value.llmProvider === 'disabled') value.llmModel = '';
   if (!ARCHIVE_POLICIES.includes(value.archivePolicy)) value.archivePolicy = DEFAULT_SETTINGS.archivePolicy;
@@ -101,6 +103,21 @@ export function normalizeSettings(settings) {
   if (typeof value.lastExportDirectory !== 'string') value.lastExportDirectory = '';
   if (!['unified', 'side-by-side'].includes(value.lastDiffMode)) value.lastDiffMode = DEFAULT_SETTINGS.lastDiffMode;
   return value;
+}
+
+
+function normalizeDecisionCompatibility(value, settings) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const provider = typeof value.provider === 'string' ? value.provider : '';
+  const model = typeof value.model === 'string' ? value.model : '';
+  if (!provider || !model || provider !== settings.llmProvider || model !== settings.llmModel) return null;
+  return {
+    provider,
+    model,
+    supported: Boolean(value.supported),
+    testedAt: typeof value.testedAt === 'string' ? value.testedAt : null,
+    error: typeof value.error === 'string' ? value.error : null,
+  };
 }
 
 function normalizeModelLoadConfigs(value) {

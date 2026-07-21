@@ -1,5 +1,4 @@
 import path from 'node:path';
-import { stat } from 'node:fs/promises';
 import { extractArchive } from '../archive/extract.js';
 import { readArchiveMetadata } from '../archive/metadata.js';
 import { evaluateArchiveRisks } from '../archive/risk.js';
@@ -9,11 +8,12 @@ import { updateManagedHistory } from '../history/managed.js';
 import { buildUpdatePlan } from '../plan/build.js';
 import { applyUpdatePlan } from '../apply/apply.js';
 import { acquireProjectLock } from '../apply/lock.js';
-import { createCommit } from '../git/repository.js';
+import { createCheckpointRef } from '../git/repository.js';
 import { createRunId } from '../utils/id.js';
 import { exists } from '../utils/fs.js';
 import { hashFile } from '../utils/hash.js';
 import { displayPath, parseEnteredPath } from '../utils/paths.js';
+import { inspectArchiveFile } from '../security/archive-input.js';
 import { getZipflowHome } from '../workflow/store.js';
 import { createRunRecord, findAppliedArchiveRun, saveRunRecord } from '../runs/store.js';
 import { compactPlanLine, formatArchiveName, planActivityLines } from '../ui/format.js';
@@ -30,13 +30,20 @@ import {
 } from './run-review.js';
 import { prepareArchiveRootReview, selectArchiveRoot, showArchiveRootChoice } from './archive-root.js';
 import { activeRunSettings, captureRunSettings } from './runtime-settings.js';
-import { skipPendingLlmReview, startLlmReview } from './run-llm-review.js';
+import { skipPendingLlmReview, startLlmReview, waitForPendingLlmReview } from './run-llm-review.js';
 import { rememberArchivePath } from '../settings/recent.js';
+import { decideAtGate, autonomyEnabledFor, markAutonomyDecision } from './autonomy-flow.js';
+import { activateInterruptedRun, showInterruptedRun } from './interrupted-run.js';
+import { getGitStatus } from '../git/repository.js';
+import {
+  gitStateValidator, handleLocalWorkAutonomy, resolveConflictsAutonomously,
+  serializeGitStatus, serializePlanForDecision,
+} from './run-plan-autonomy.js';
 
 export { showLastRun };
 
 export function handlesRunScreen(screen) {
-  return ['archive-input', 'archive-duplicate', 'archive-root-choice', 'applying', 'run-details', 'run-file-groups', 'run-file-list', 'rollback-confirm', 'rolling-back'].includes(screen)
+  return ['archive-input', 'archive-duplicate', 'archive-root-choice', 'interrupted-run', 'applying', 'run-details', 'run-decisions', 'run-file-groups', 'run-file-list', 'rollback-confirm', 'rolling-back'].includes(screen)
     || handlesReviewScreen(screen) || isPostCheckScreen(screen);
 }
 
@@ -60,6 +67,7 @@ export async function activateRun(controller, itemId) {
   const { state } = controller;
   if (state.screen === 'archive-duplicate') return activateDuplicate(controller, itemId);
   if (state.screen === 'archive-root-choice') return activateArchiveRootChoice(controller, itemId);
+  if (state.screen === 'interrupted-run') return activateInterruptedRun(controller, itemId);
   if (handlesReviewScreen(state.screen)) {
     return activateReview(controller, itemId, {
       startApply,
@@ -71,7 +79,7 @@ export async function activateRun(controller, itemId) {
     });
   }
   if (isPostCheckScreen(state.screen)) return activatePostCheck(controller, itemId);
-  if (['run-details', 'run-file-groups', 'run-file-list', 'rollback-confirm'].includes(state.screen)) {
+  if (['run-details', 'run-decisions', 'run-file-groups', 'run-file-list', 'rollback-confirm'].includes(state.screen)) {
     const result = await activateRollback(controller, itemId);
     if (result !== false) return result;
     if (itemId === 'another-archive') return beginArchiveInput(controller);
@@ -86,10 +94,11 @@ export function backRun(controller) {
   const screen = controller.state.screen;
   if (screen === 'archive-input' || screen === 'archive-duplicate') return controller.showHome();
   if (screen === 'archive-root-choice') return cancelRun(controller);
+  if (screen === 'interrupted-run') return showInterruptedRun(controller);
   if (screen === 'archive-safety' || screen === 'plan-review' || screen === 'conflict-summary') return cancelRun(controller);
   if (handlesReviewScreen(screen)) return backReview(controller);
   if (isPostCheckScreen(screen)) return backPostCheck(controller);
-  if (['run-details', 'run-file-groups', 'run-file-list', 'rollback-confirm'].includes(screen)) return backRollback(controller);
+  if (['run-details', 'run-decisions', 'run-file-groups', 'run-file-list', 'rollback-confirm'].includes(screen)) return backRollback(controller);
   return false;
 }
 
@@ -98,19 +107,37 @@ export async function inspectArchivePath(controller, enteredPath, { allowDuplica
   const archivePath = parseEnteredPath(enteredPath, state.project.root);
   if (!(await exists(archivePath))) return controller.message('Archive not found', [displayPath(archivePath)], 'error');
   if (!archivePath.toLowerCase().endsWith('.zip')) return controller.message('Unsupported archive', ['Zipflow currently accepts .zip files only.'], 'error');
-  const archiveStat = await stat(archivePath);
-  if (!archiveStat.isFile()) return controller.message('Archive path is not a file', [displayPath(archivePath)], 'error');
-  const archiveInfo = { size: archiveStat.size, modifiedAt: archiveStat.mtime.toISOString() };
-  await rememberArchivePath(state, archivePath);
-  const digest = archiveHash ?? await hashFile(archivePath);
-  if (!allowDuplicate) {
-    const previous = await findAppliedArchiveRun(state.project.root, digest);
-    if (previous) return showDuplicateWarning(controller, archivePath, digest, previous);
+  let inspectedArchive;
+  try {
+    inspectedArchive = await inspectArchiveFile(archivePath);
+  } catch (error) {
+    return controller.message('Unsafe archive path', [error.message], 'error');
   }
-  return inspectArchive(controller, archivePath, digest, archiveInfo);
+  const operation = controller.beginOperation({ kind: 'archive-inspection', label: 'Inspecting archive' });
+  try {
+    const archiveInfo = { size: inspectedArchive.size, modifiedAt: inspectedArchive.modifiedAt };
+    await rememberArchivePath(state, archivePath);
+    operation.update({ phase: 'Hashing archive' });
+    const digest = archiveHash ?? await hashFile(archivePath, { signal: operation.signal });
+    if (!allowDuplicate) {
+      const previous = await findAppliedArchiveRun(state.project.root, digest);
+      if (previous) {
+        operation.finish();
+        return showDuplicateWarning(controller, archivePath, digest, previous);
+      }
+    }
+    return inspectArchive(controller, archivePath, digest, archiveInfo, operation);
+  } catch (error) {
+    operation.finish();
+    if (error.code === 'cancelled') {
+      controller.message('Archive inspection cancelled', ['No project files were changed.'], 'warning');
+      return beginArchiveInput(controller);
+    }
+    throw error;
+  }
 }
 
-async function inspectArchive(controller, archivePath, archiveHash, archiveInfo) {
+async function inspectArchive(controller, archivePath, archiveHash, archiveInfo, operation) {
   const { state } = controller;
   const runId = createRunId();
   state.pendingArchive = null;
@@ -121,11 +148,13 @@ async function inspectArchive(controller, archivePath, archiveHash, archiveInfo)
     controller.activeLock = await acquireProjectLock(state.project.root, runId);
     const temp = path.join(getZipflowHome(), 'tmp', runId);
     setBusy(controller, 'Inspecting archive', 1, 7, 'Reading ZIP entries');
-    const extracted = await extractArchive(archivePath, temp);
+    operation.update({ phase: 'Reading ZIP entries' });
+    const extracted = await extractArchive(archivePath, temp, { signal: operation.signal });
     const rootReview = await prepareArchiveRootReview({ project: state.project, workflow: state.workflow, extracted });
     if (rootReview.prompt) {
       state.pendingArchiveInspection = { archivePath, archiveHash, archiveInfo, rootReview };
       state.busy = false;
+      operation.finish();
       return showArchiveRootChoice(controller, rootReview);
     }
     return continueArchiveInspection(controller, {
@@ -134,8 +163,15 @@ async function inspectArchive(controller, archivePath, archiveHash, archiveInfo)
       archiveInfo,
       extracted: rootReview.extracted,
       plan: rootReview.plan,
+      operation,
     });
   } catch (error) {
+    operation.finish();
+    if (error.code === 'cancelled') {
+      controller.message('Archive inspection cancelled', ['No project files were changed.'], 'warning');
+      await cancelRun(controller);
+      return beginArchiveInput(controller);
+    }
     await failRun(controller, error, {
       kind: 'archive',
       retry: () => inspectArchivePath(controller, archivePath, { allowDuplicate: true, archiveHash }),
@@ -143,15 +179,20 @@ async function inspectArchive(controller, archivePath, archiveHash, archiveInfo)
   }
 }
 
-async function continueArchiveInspection(controller, { archivePath, archiveHash, archiveInfo, extracted, plan = null }) {
+async function continueArchiveInspection(controller, { archivePath, archiveHash, archiveInfo, extracted, plan = null, operation = null }) {
   const { state } = controller;
+  const activeOperation = operation ?? controller.beginOperation({ kind: 'archive-inspection', label: 'Inspecting archive' });
   try {
+    activeOperation.update({ phase: 'Reading archive metadata' });
     setBusy(controller, 'Inspecting archive', 2, 7, 'Reading archive metadata');
     const metadata = await readArchiveMetadata(extracted);
+    if (activeOperation.signal.aborted) throw Object.assign(new Error('Operation cancelled.'), { code: 'cancelled' });
     setProgress(controller, 3, 7, 'Comparing project files');
-    const resolvedPlan = plan ?? await buildUpdatePlan({ project: state.project, workflow: state.workflow, extracted });
+    activeOperation.update({ phase: 'Comparing project files' });
+    const resolvedPlan = plan ?? await buildUpdatePlan({ project: state.project, workflow: state.workflow, extracted, signal: activeOperation.signal });
     setProgress(controller, 4, 7, 'Creating changes.patch');
-    const patch = await createPlanPatch(state.run.id, resolvedPlan);
+    activeOperation.update({ phase: 'Creating changes.patch' });
+    const patch = await createPlanPatch(state.run.id, resolvedPlan, { projectPath: state.project.root, signal: activeOperation.signal });
     setProgress(controller, 5, 7, 'Checking deterministic archive risks');
     const archiveRisk = await evaluateArchiveRisks({
       projectPath: state.project.root,
@@ -166,9 +207,9 @@ async function continueArchiveInspection(controller, { archivePath, archiveHash,
     state.plan = resolvedPlan;
     state.decisions = new Map(resolvedPlan.conflicts.map((item) => [
       item.path,
-      state.workflow.policy.conflictPolicy === 'overwrite' ? 'archive' : null,
+      state.workflow.autonomy?.mode === 'manual' && state.workflow.policy.conflictPolicy === 'overwrite' ? 'archive' : null,
     ]));
-    state.run.plan = serializePlan(resolvedPlan);
+    state.run.plan = serializePlanForDecision(resolvedPlan);
     state.run.patch = { path: patch.path, omitted: patch.omitted };
     state.run.archiveInfo = { ...archiveInfo, fileCount: extracted.fileCount, totalSize: extracted.totalSize, rootPrefix: extracted.rootPrefix };
     state.run.llm = null;
@@ -184,6 +225,7 @@ async function continueArchiveInspection(controller, { archivePath, archiveHash,
     state.pendingArchiveInspection = null;
     setProgress(controller, 7, 7, 'Plan ready');
     state.busy = false;
+    activeOperation.finish();
 
     controller.message('Archive inspected', [
       `${formatArchiveName(archivePath)} · ${extracted.fileCount} files${extracted.rootPrefix ? ` · root ${extracted.rootPrefix}/` : ''}`,
@@ -201,10 +243,18 @@ async function continueArchiveInspection(controller, { archivePath, archiveHash,
     if (requiresSafetyReview(state.archiveSafety)) return showArchiveSafetyReview(controller);
     return continueAfterSafety(controller);
   } catch (error) {
+    activeOperation.finish();
+    if (error.code === 'cancelled') {
+      controller.message('Archive inspection cancelled', ['No project files were changed.'], 'warning');
+      await cancelRun(controller);
+      return beginArchiveInput(controller);
+    }
     await failRun(controller, error, {
       kind: 'archive',
       retry: () => inspectArchivePath(controller, archivePath, { allowDuplicate: true, archiveHash }),
     });
+  } finally {
+    activeOperation.finish();
   }
 }
 
@@ -230,11 +280,14 @@ async function activateArchiveRootChoice(controller, itemId) {
 
 export async function startApply(controller, { checkpointCreated = false } = {}) {
   const { state } = controller;
+  const operation = controller.beginOperation({
+    kind: 'apply', label: 'Applying update', critical: true,
+  });
   try {
     if (state.llmReviewPending && activeRunSettings(state).llmArchiveReview !== 'disabled') return showPlanReview(controller);
     if (requiresSafetyReview(state.archiveSafety) && !state.archiveSafety.acknowledged) return showArchiveSafetyReview(controller);
     if (!checkpointCreated && state.workflow.git.checkpoint === 'ask' && archiveConflictPaths(state).length) return showConflictCheckpoint(controller);
-    if (!checkpointCreated && state.workflow.git.checkpoint === 'auto' && archiveConflictPaths(state).length) await createCheckpoint(controller);
+    if (!checkpointCreated && state.workflow.git.checkpoint === 'auto' && archiveConflictPaths(state).length) await createCheckpoint(controller, { operation });
     if (changedCount(state.plan) === 0) {
       state.run.applied = { paths: [], changedPaths: [], backupPath: null, skippedConflicts: [] };
       state.run.status = 'applied';
@@ -245,7 +298,12 @@ export async function startApply(controller, { checkpointCreated = false } = {})
     setBusy(controller, 'Applying update', 0, Math.max(1, changedCount(state.plan)), 'Creating backup');
     const applied = await applyUpdatePlan({
       runId: state.run.id, projectPath: state.project.root, plan: state.plan, decisions: state.decisions,
-      onProgress: (progress) => setProgress(controller, progress.current, progress.total, `${progress.stage}${progress.path ? ` · ${progress.path}` : ''}`),
+      signal: operation.signal,
+      shouldCancel: operation.isCancellationRequested,
+      onProgress: (progress) => {
+        operation.update({ phase: progress.stage, critical: true });
+        setProgress(controller, progress.current, progress.total, `${progress.stage}${progress.path ? ` · ${progress.path}` : ''}`);
+      },
     });
     const managedHistory = await updateManagedHistory(state.project.root, applied.applied, {
       enabled: activeRunSettings(state).managedHistoryPolicy !== 'disabled',
@@ -268,19 +326,40 @@ export async function startApply(controller, { checkpointCreated = false } = {})
     state.busy = false;
     return startChecks(controller);
   } catch (error) {
+    state.busy = false;
+    if (error.code === 'cancelled') {
+      controller.message('Update cancelled', ['The active filesystem transaction was stopped and every touched path was restored from backup.'], 'warning');
+      return cancelRun(controller);
+    }
     await failRun(controller, error);
+  } finally {
+    operation.finish();
   }
 }
 
-export async function createCheckpoint(controller) {
-  const paths = archiveConflictPaths(controller.state);
-  if (!paths.length) return;
-  const message = `zipflow: checkpoint ${controller.state.run.id}`;
-  const commit = await createCommit(controller.state.project.root, paths, message);
-  if (!commit.ok) throw new Error(`Checkpoint commit failed: ${commit.reason}`);
-  controller.state.run.checkpoint = { revision: commit.revision, message, paths };
+export async function createCheckpoint(controller, { force = false, operation = null } = {}) {
+  const ownOperation = operation ? null : controller.beginOperation({ kind: 'git-checkpoint', label: 'Creating Git checkpoint' });
+  const activeOperation = operation ?? ownOperation;
+  let paths = archiveConflictPaths(controller.state);
+  if (!paths.length && force) {
+    const status = await getGitStatus(controller.state.project.root).catch(() => null);
+    paths = [...new Set([...(status?.staged ?? []), ...(status?.unstaged ?? [])].map((item) => item.path))].sort();
+  }
+  if (!paths.length) { ownOperation?.finish(); return; }
+  const checkpoint = await createCheckpointRef(controller.state.project.root, controller.state.run.id, { signal: activeOperation.signal });
+  if (!checkpoint.ok) throw new Error(`Checkpoint ref failed: ${checkpoint.reason}`);
+  controller.state.run.checkpoint = {
+    revision: checkpoint.revision,
+    ref: checkpoint.ref,
+    paths,
+    preservesIndex: true,
+  };
   controller.state.run = await saveRunRecord(controller.state.run);
-  controller.message('Checkpoint created', [`${commit.revision} ${message}`], 'success');
+  controller.message('Checkpoint created', [
+    checkpoint.ref ? `${checkpoint.revision} · ${checkpoint.ref}` : 'No tracked local changes required a Git checkpoint.',
+    'The working tree and user index were not modified; untracked conflicts remain protected by the normal file backup.',
+  ], 'success');
+  ownOperation?.finish();
 }
 
 export async function retryArchive(controller) {
@@ -318,34 +397,86 @@ async function activateDuplicate(controller, itemId) {
   }
 }
 
-function serializePlan(plan) {
-  return {
-    counts: plan.counts,
-    created: plan.created.map((item) => item.path),
-    updated: plan.updated.map((item) => item.path),
-    deleted: plan.deleted.map((item) => item.path),
-    preserved: plan.preserved.map((item) => ({ path: item.path, reason: item.reason })),
-    unchanged: plan.unchanged.map((item) => item.path),
-    conflicts: plan.conflicts.map((item) => ({ path: item.path, reason: item.reason })),
-  };
-}
-
-export function continueAfterSafety(controller) {
+export async function continueAfterSafety(controller) {
   const { state } = controller;
   const plan = state.plan;
-  if (plan.conflicts.length && state.workflow.policy.conflictPolicy !== 'overwrite') return showConflictSummary(controller);
-  if (plan.conflicts.length) controller.message('Saved conflict policy applied', [`Archive versions selected for ${plan.conflicts.length} conflicts; each file will be backed up.`], 'warning');
-  if (state.llmReviewPending || state.workflow.policy.confirmPlan || plan.skipped.length > 0 || (state.archiveSafety?.warnings?.length && !state.archiveSafety.acknowledged)) return showPlanReview(controller);
-  controller.message('Safe plan accepted automatically', [compactPlanLine(plan), 'The saved workflow allows conflict-free plans to continue after the normal backup.'], 'choice');
-  return startApply(controller);
-}
+  const localWork = await handleLocalWorkAutonomy(controller);
+  if (localWork === 'cancelled') return cancelRun(controller);
+  if (localWork === false) return showPlanReview(controller);
+  if (state.llmReviewPending && autonomyEnabledFor(state, 'decidePlanApplication')) {
+    await waitForPendingLlmReview(controller);
+  }
+  const unresolvedConflicts = plan.conflicts.filter((item) => !state.decisions.get(item.path));
+  if (unresolvedConflicts.length) {
+    if (autonomyEnabledFor(state, 'decideConflicts')) {
+      const resolved = await resolveConflictsAutonomously(controller);
+      if (resolved === 'cancelled') return cancelRun(controller);
+      if (!resolved) return showConflictSummary(controller);
+    } else if (state.workflow.autonomy?.mode === 'manual' && state.workflow.policy.conflictPolicy === 'overwrite') {
+      for (const conflict of unresolvedConflicts) state.decisions.set(conflict.path, 'archive');
+      controller.message('Saved conflict policy applied', [`Archive versions selected for ${unresolvedConflicts.length} conflicts; each file will be backed up.`], 'warning');
+    } else {
+      return showConflictSummary(controller);
+    }
+  }
 
+  if (autonomyEnabledFor(state, 'decidePlanApplication')) {
+    const highRisk = Boolean(state.archiveSafety?.warnings?.length)
+      || ['suspicious', 'unsuitable'].includes(state.archiveSafety?.llm?.assessment)
+      || (state.workflow.autonomy.mode === 'guarded' && plan.conflicts.length > 0);
+    if (highRisk && state.workflow.autonomy.mode === 'guarded') {
+      controller.message('Guarded autopilot paused', ['Archive warnings, an adverse LLM verdict, or unresolved local conflicts require your review.'], 'warning');
+      return showPlanReview(controller);
+    }
+    const beforeStatus = await getGitStatus(state.project.root).catch(() => null);
+    const decision = await decideAtGate(controller, {
+      gate: 'plan-application',
+      capability: 'decidePlanApplication',
+      allowedActions: ['apply', 'abort', 'ask-user'],
+      fallback: 'ask-user',
+      label: 'Autopilot is reviewing the update plan',
+      context: {
+        state: {
+          plan: serializePlanForDecision(plan),
+          archiveWarnings: state.archiveSafety?.warnings ?? [],
+          llmAssessment: state.archiveSafety?.llm ?? null,
+          gitStatus: serializeGitStatus(beforeStatus),
+        },
+        riskLevel: highRisk ? 'high' : plan.counts.deleted > 0 ? 'medium' : 'low',
+        coverage: state.run.llm?.diagnostics?.delivery?.coverage ?? null,
+        complete: !state.llmReviewPending,
+      },
+      validateDecision: gitStateValidator(state.project.root, beforeStatus),
+    });
+    if (decision.action === 'apply') {
+      try {
+        await markAutonomyDecision(controller, decision, 'executing');
+        const result = await startApply(controller, { checkpointCreated: Boolean(state.run.checkpoint) });
+        await markAutonomyDecision(controller, decision, 'executed', { result: 'apply-started' });
+        return result;
+      } catch (error) {
+        await markAutonomyDecision(controller, decision, 'failed', { error }).catch(() => {});
+        throw error;
+      }
+    }
+    if (decision.action === 'abort') {
+      await markAutonomyDecision(controller, decision, 'executing');
+      const result = await cancelRun(controller);
+      await markAutonomyDecision(controller, decision, 'executed', { result: 'run-cancelled' });
+      return result;
+    }
+    return showPlanReview(controller);
+  }
+  if (state.llmReviewPending || state.workflow.policy.confirmPlan || plan.skipped.length > 0
+    || (state.archiveSafety?.warnings?.length && !state.archiveSafety.acknowledged)) return showPlanReview(controller);
+  controller.message('Safe plan accepted automatically', [compactPlanLine(plan), 'The saved workflow allows conflict-free plans to continue after the normal backup.'], 'choice');
+  return startApply(controller, { checkpointCreated: Boolean(state.run.checkpoint) });
+}
 function requiresSafetyReview(safety) {
   if (!safety) return false;
   if (safety.warnings?.length) return true;
   return ['suspicious', 'unsuitable'].includes(safety.llm?.assessment);
 }
-
 function setBusy(controller, label, value, total, detail) {
   controller.state.busy = true;
   controller.state.screen = 'applying';

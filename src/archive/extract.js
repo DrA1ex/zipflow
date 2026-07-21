@@ -6,12 +6,12 @@ import yauzl from 'yauzl';
 import { ensureDir } from '../utils/fs.js';
 import { DEFAULT_ARCHIVE_LIMITS, validateZipEntry } from './security.js';
 
-export async function extractArchive(archivePath, destination, { limits = DEFAULT_ARCHIVE_LIMITS } = {}) {
+export async function extractArchive(archivePath, destination, { limits = DEFAULT_ARCHIVE_LIMITS, signal = null } = {}) {
   await rm(destination, { recursive: true, force: true });
   await ensureDir(destination);
   const zip = await openZip(archivePath);
   const entries = [];
-  const seenPaths = new Set();
+  const seenPaths = new Map();
   let processedEntries = 0;
   let totalSize = 0;
   try {
@@ -20,13 +20,13 @@ export async function extractArchive(archivePath, destination, { limits = DEFAUL
       zip.on('end', resolve);
       zip.on('entry', async (entry) => {
         try {
+          if (signal?.aborted) throw Object.assign(new Error('Operation cancelled.'), { code: 'cancelled' });
           const validated = validateZipEntry(entry, limits);
           processedEntries += 1;
           if (processedEntries > limits.maxFiles) throw new Error('Archive contains too many entries.');
           if (!validated.skip) {
-            const collisionKey = validated.path.toLocaleLowerCase('en-US');
-            if (seenPaths.has(collisionKey)) throw new Error(`Archive contains duplicate or case-colliding paths: ${validated.path}`);
-            seenPaths.add(collisionKey);
+            assertNoArchivePathCollision(seenPaths, validated);
+            seenPaths.set(validated.collisionKey, { path: validated.path, directory: validated.directory });
             totalSize += entry.uncompressedSize;
             if (totalSize > limits.maxTotalSize) throw new Error('Archive expands beyond the configured size limit.');
             const target = safeJoin(destination, validated.path);
@@ -35,7 +35,9 @@ export async function extractArchive(archivePath, destination, { limits = DEFAUL
             } else {
               await mkdir(path.dirname(target), { recursive: true });
               const stream = await openEntryStream(zip, entry);
-              await pipeline(stream, createWriteStream(target, { mode: validated.mode || 0o644 }));
+              const output = createWriteStream(target, { mode: validated.mode || 0o644, flags: 'wx' });
+              if (signal) await pipeline(stream, output, { signal });
+              else await pipeline(stream, output);
               if (validated.mode) await chmod(target, validated.mode);
               entries.push({
                 path: validated.path,
@@ -85,6 +87,27 @@ function openEntryStream(zip, entry) {
   return new Promise((resolve, reject) => {
     zip.openReadStream(entry, (error, stream) => error ? reject(error) : resolve(stream));
   });
+}
+
+
+function assertNoArchivePathCollision(seenPaths, entry) {
+  if (seenPaths.has(entry.collisionKey)) {
+    throw new Error(`Archive contains duplicate or case-colliding paths, including Unicode-equivalent names: ${entry.path}`);
+  }
+  const segments = entry.path.split('/');
+  for (let index = 1; index < segments.length; index += 1) {
+    const ancestor = segments.slice(0, index).join('/').normalize('NFKC').toLocaleLowerCase('en-US');
+    const existing = seenPaths.get(ancestor);
+    if (existing && !existing.directory) {
+      throw new Error(`Archive path is nested below a file entry: ${entry.path}`);
+    }
+  }
+  if (!entry.directory) {
+    const prefix = `${entry.collisionKey}/`;
+    for (const key of seenPaths.keys()) {
+      if (key.startsWith(prefix)) throw new Error(`Archive file collides with an existing directory path: ${entry.path}`);
+    }
+  }
 }
 
 function safeJoin(root, relative) {

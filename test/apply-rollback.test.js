@@ -85,3 +85,22 @@ test('partial application failures restore every touched file automatically', as
   assert.equal(await readFile(path.join(root, 'delete.txt'), 'utf8'), 'keep me\n');
   assert.equal(await readFile(path.join(root, 'update.txt'), 'utf8'), 'old\n');
 });
+
+test('a deferred Ctrl+C request rolls back the completed filesystem step before apply stops', async () => {
+  process.env.ZIPFLOW_HOME = await tempDir('zipflow-home-cancel-');
+  const root = await tempDir('zipflow-apply-cancel-');
+  await writeFiles(root, { 'a.txt': 'old a\n', 'b.txt': 'old b\n' });
+  const extracted = await extractedFixture(root, { 'a.txt': 'new a\n', 'b.txt': 'new b\n' });
+  const project = { root, name: 'fixture', git: null, technologies: [], labels: [], checks: [], deploymentCandidates: [] };
+  const workflow = createRecommendedWorkflow(project);
+  const plan = await buildUpdatePlan({ project, workflow, extracted });
+  let cancellationRequested = false;
+  await assert.rejects(applyUpdatePlan({
+    runId: 'zf-test-cancel-atomic', projectPath: root, plan,
+    decisions: new Map([['a.txt', 'archive'], ['b.txt', 'archive']]),
+    shouldCancel: () => cancellationRequested,
+    onProgress: ({ stage }) => { if (stage === 'update') cancellationRequested = true; },
+  }), (error) => error.code === 'cancelled' && /restored/.test(error.message));
+  assert.equal(await readFile(path.join(root, 'a.txt'), 'utf8'), 'old a\n');
+  assert.equal(await readFile(path.join(root, 'b.txt'), 'utf8'), 'old b\n');
+});

@@ -2,16 +2,18 @@ import path from 'node:path';
 import { readdir, rm, stat } from 'node:fs/promises';
 import { exists, readJson } from '../utils/fs.js';
 import { getZipflowHome } from '../workflow/store.js';
+import { throwIfCancelled } from '../operations/manager.js';
 
 export function backupDirectory() {
   return path.join(getZipflowHome(), 'backups');
 }
 
-export async function inspectBackupStorage() {
+export async function inspectBackupStorage({ signal = null } = {}) {
   const root = backupDirectory();
   const entries = await safeDirectories(root);
   const records = [];
   for (const entry of entries) {
+    throwIfCancelled(signal);
     const directory = path.join(root, entry.name);
     const manifest = await readJson(path.join(directory, 'manifest.json'), null);
     if (!manifest?.runId) continue;
@@ -20,7 +22,7 @@ export async function inspectBackupStorage() {
       runId: manifest.runId,
       path: directory,
       createdAt: manifest.createdAt ?? info?.birthtime?.toISOString() ?? info?.mtime?.toISOString() ?? null,
-      size: await directorySize(directory),
+      size: await directorySize(directory, signal),
       files: Array.isArray(manifest.items) ? manifest.items.length : 0,
     });
   }
@@ -35,21 +37,27 @@ export async function inspectBackupStorage() {
   };
 }
 
-export async function clearBackupStorage({ excludeRunId = null } = {}) {
-  const storage = await inspectBackupStorage();
+export async function clearBackupStorage({ excludeRunId = null, signal = null, onProgress = null } = {}) {
+  const storage = await inspectBackupStorage({ signal });
   const removed = [];
   const failed = [];
+  let cancelled = false;
   for (const record of storage.records) {
+    if (signal?.aborted) {
+      cancelled = true;
+      break;
+    }
     if (excludeRunId && record.runId === excludeRunId) continue;
     try {
       await rm(record.path, { recursive: true, force: true });
       removed.push(record);
+      onProgress?.({ removed: removed.length, record });
     } catch (error) {
       failed.push({ record, error: error.message });
     }
   }
   return {
-    removed, failed,
+    removed, failed, cancelled,
     totalBytes: removed.reduce((sum, record) => sum + record.size, 0),
   };
 }
@@ -97,13 +105,15 @@ async function removeBackups(records) {
   return { removed, failed, totalBytes: removed.reduce((sum, record) => sum + record.size, 0) };
 }
 
-async function directorySize(root) {
+async function directorySize(root, signal = null) {
   let total = 0;
   const pending = [root];
   while (pending.length) {
+    throwIfCancelled(signal);
     const current = pending.pop();
     const entries = await readdir(current, { withFileTypes: true }).catch(() => []);
     for (const entry of entries) {
+      throwIfCancelled(signal);
       const target = path.join(current, entry.name);
       if (entry.isDirectory()) pending.push(target);
       else if (entry.isFile()) total += Number((await stat(target).catch(() => null))?.size ?? 0);

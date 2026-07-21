@@ -5,6 +5,7 @@ import { listIgnoredPaths, listTrackedFiles } from '../git/repository.js';
 import { createRootGitignoreMatcher } from '../git/ignore.js';
 import { isProtectedProjectPath } from '../archive/protected.js';
 import { normalizeRelativePath } from '../plan/matcher.js';
+import { assertSafeProjectPath } from '../security/project-path.js';
 
 export async function listExportTopLevel(projectRoot) {
   const entries = await readdir(projectRoot, { withFileTypes: true });
@@ -50,7 +51,9 @@ async function filterExistingFiles(root, paths, { onProgress = null, signal = nu
     onProgress?.({ phase: 'tracked', current: index + 1, total: paths.length, detail: relative });
     const normalized = normalizeRelativePath(relative);
     if (isProtectedProjectPath(normalized)) continue;
-    if (await exists(path.join(root, normalized))) result.push(normalized);
+    if (!(await exists(path.join(root, normalized)))) continue;
+    await assertSafeProjectPath(root, normalized, { allowMissingLeaf: false, requireFile: true });
+    result.push(normalized);
   }
   return result.sort();
 }

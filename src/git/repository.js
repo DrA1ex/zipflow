@@ -69,7 +69,7 @@ export async function createInitialCommit(projectPath, message = 'Initial commit
   return { ok: true, revision: revision.stdout.trim(), paths, output: commit.stdout.trim() };
 }
 
-export async function createCommit(projectPath, paths, message) {
+export async function createCommit(projectPath, paths, message, { signal = null } = {}) {
   const status = await getGitStatus(projectPath);
   if (status.staged.length) {
     return { ok: false, reason: 'The Git index already contains staged changes.' };
@@ -82,19 +82,40 @@ export async function createCommit(projectPath, paths, message) {
     return { ok: false, reason: 'There are no committable applied paths. Protected and untracked ignored files are excluded automatically.' };
   }
   for (const chunk of chunks(uniquePaths, 100)) {
-    const add = await runGit(projectPath, ['add', '--all', '--', ...chunk], { allowFailure: true });
+    const add = await runGit(projectPath, ['add', '--all', '--', ...chunk], { allowFailure: true, signal });
     if (!add.ok) {
-      await unstagePaths(projectPath, uniquePaths);
+      await unstagePaths(projectPath, uniquePaths, { signal });
       return { ok: false, reason: add.stderr || add.stdout || 'git add failed' };
     }
   }
-  const commit = await runGit(projectPath, ['commit', '-m', message], { allowFailure: true });
+  const commit = await runGit(projectPath, ['commit', '-m', message], { allowFailure: true, signal });
   if (!commit.ok) {
-    await unstagePaths(projectPath, uniquePaths);
+    await unstagePaths(projectPath, uniquePaths, { signal });
     return { ok: false, reason: commit.stderr || commit.stdout || 'git commit failed' };
   }
-  const revision = await runGit(projectPath, ['rev-parse', '--short', 'HEAD']);
+  const revision = await runGit(projectPath, ['rev-parse', '--short', 'HEAD'], { signal });
   return { ok: true, revision: revision.stdout.trim(), output: commit.stdout.trim(), paths: uniquePaths, omittedPaths: requestedPaths.filter((item) => !uniquePaths.includes(item)) };
+}
+
+
+export async function createCheckpointRef(projectPath, runId, { signal = null } = {}) {
+  const status = await getGitStatus(projectPath);
+  const trackedEntries = status.entries.filter((item) => item.status !== '??');
+  const untrackedPaths = status.entries.filter((item) => item.status === '??').map((item) => item.path);
+  if (!trackedEntries.length) {
+    return { ok: true, revision: null, ref: null, empty: true, paths: [], untrackedPaths };
+  }
+  const created = await runGit(projectPath, ['stash', 'create', `zipflow checkpoint ${runId}`], { allowFailure: true, signal });
+  if (!created.ok) return { ok: false, reason: created.stderr.trim() || created.stdout.trim() || 'git stash create failed' };
+  const revision = created.stdout.trim();
+  if (!revision) return { ok: true, revision: null, ref: null, empty: true, paths: [], untrackedPaths };
+  const ref = `refs/zipflow/checkpoints/${runId}`;
+  const updated = await runGit(projectPath, ['update-ref', ref, revision], { allowFailure: true, signal });
+  if (!updated.ok) return { ok: false, reason: updated.stderr.trim() || updated.stdout.trim() || 'git update-ref failed' };
+  return {
+    ok: true, revision: revision.slice(0, 12), fullRevision: revision, ref,
+    paths: trackedEntries.map((item) => item.path), untrackedPaths,
+  };
 }
 
 export async function currentRevision(projectPath) {
@@ -102,8 +123,8 @@ export async function currentRevision(projectPath) {
   return result.ok ? result.stdout.trim() : null;
 }
 
-export async function runGit(cwd, args, { allowFailure = false, input = null } = {}) {
-  const result = await runProcess('git', args, { cwd, input, timeoutMs: 120_000 });
+export async function runGit(cwd, args, { allowFailure = false, input = null, signal = null } = {}) {
+  const result = await runProcess('git', args, { cwd, input, timeoutMs: 120_000, signal });
   if (!result.ok && !allowFailure) {
     const detail = result.stderr.trim() || result.stdout.trim() || `git ${args.join(' ')} failed`;
     throw new Error(detail);
@@ -111,9 +132,9 @@ export async function runGit(cwd, args, { allowFailure = false, input = null } =
   return result;
 }
 
-async function unstagePaths(projectPath, paths) {
+async function unstagePaths(projectPath, paths, { signal = null } = {}) {
   for (const chunk of chunks(paths, 100)) {
-    await runGit(projectPath, ['reset', '-q', 'HEAD', '--', ...chunk], { allowFailure: true });
+    await runGit(projectPath, ['reset', '-q', 'HEAD', '--', ...chunk], { allowFailure: true, signal });
   }
 }
 
@@ -158,4 +179,159 @@ function chunks(values, size) {
   const result = [];
   for (let index = 0; index < values.length; index += size) result.push(values.slice(index, index + size));
   return result;
+}
+
+export async function getCommitRewriteCandidates(projectPath, runs, { maxCommits = 3, currentPaths = [] } = {}) {
+  const status = await getGitStatus(projectPath);
+  if (status.staged.length || status.conflicted.length) return [];
+  const log = await runGit(projectPath, ['log', `-${maxCommits}`, '--format=%H%x09%P%x09%s'], { allowFailure: true });
+  if (!log.ok) return [];
+  const entries = log.stdout.trim().split('\n').filter(Boolean).map((line) => {
+    const [revision, parents = '', subject = ''] = line.split('\t');
+    return { revision, parents: parents.split(' ').filter(Boolean), subject };
+  });
+  const currentPathSet = new Set(currentPaths);
+  const knownRuns = runs.filter((run) => run.commit?.revision).map((run) => {
+    const changedPaths = [...new Set(run.applied?.paths ?? [])].sort();
+    return {
+      runId: run.id,
+      revision: run.commit.revision,
+      message: run.commit.message,
+      createdAt: run.createdAt,
+      archiveName: run.archivePath ? path.basename(run.archivePath) : null,
+      summary: run.llm?.summary ?? [],
+      changedPaths,
+      overlappingPaths: changedPaths.filter((item) => currentPathSet.has(item)),
+    };
+  });
+  const mapped = [];
+  for (const entry of entries) {
+    const run = knownRuns.find((item) => entry.revision.startsWith(item.revision) || item.revision.startsWith(entry.revision));
+    const published = await isCommitPublished(projectPath, entry.revision);
+    mapped.push({ ...entry, run, published, eligible: Boolean(run && entry.parents.length === 1 && !published) });
+  }
+  const result = [];
+  if (mapped[0]?.eligible) result.push({
+    id: 'amend-head', kind: 'amend', count: 1,
+    revision: mapped[0].revision, runIds: [mapped[0].run.runId],
+    commits: [rewriteContext(mapped[0])],
+    label: `Amend unpublished Zipflow commit ${mapped[0].revision.slice(0, 8)}`,
+  });
+  for (let count = 2; count <= Math.min(maxCommits, mapped.length); count += 1) {
+    const slice = mapped.slice(0, count);
+    if (!slice.every((item) => item.eligible)) break;
+    result.push({
+      id: `squash-${count}`, kind: 'squash', count,
+      revision: slice[0].revision, runIds: slice.map((item) => item.run.runId),
+      commits: slice.map(rewriteContext),
+      label: `Squash ${count} unpublished Zipflow commits with this update`,
+    });
+  }
+  return result;
+}
+
+function rewriteContext(item) {
+  return {
+    revision: item.revision,
+    subject: item.subject,
+    runId: item.run.runId,
+    message: item.run.message,
+    createdAt: item.run.createdAt,
+    archiveName: item.run.archiveName,
+    summary: item.run.summary,
+    changedPaths: item.run.changedPaths,
+    overlappingPaths: item.run.overlappingPaths,
+  };
+}
+
+export async function amendZipflowCommit(projectPath, { runId, paths, message, candidate, signal = null }) {
+  const eligibility = await validateRewriteState(projectPath, candidate, { signal });
+  if (!eligibility.ok) return eligibility;
+  const backupRef = await createRewriteBackupRef(projectPath, runId, { signal });
+  try {
+    const staged = await stageCommitPaths(projectPath, paths, { signal });
+    if (!staged.ok) return { ...staged, backupRef };
+    const commit = await runGit(projectPath, ['commit', '--amend', '-m', message], { allowFailure: true, signal });
+    if (!commit.ok) {
+      await restoreRewriteRef(projectPath, backupRef);
+      return { ok: false, reason: commit.stderr.trim() || commit.stdout.trim() || 'git commit --amend failed', backupRef };
+    }
+    const revision = await runGit(projectPath, ['rev-parse', '--short', 'HEAD'], { signal });
+    return { ok: true, revision: revision.stdout.trim(), paths: staged.paths, backupRef, rewrittenRunIds: candidate.runIds };
+  } catch (error) {
+    await restoreRewriteRef(projectPath, backupRef).catch(() => {});
+    throw error;
+  }
+}
+
+export async function squashZipflowCommits(projectPath, { runId, paths, message, candidate, signal = null }) {
+  if (!Number.isInteger(candidate?.count) || candidate.count < 2 || candidate.count > 3) {
+    return { ok: false, reason: 'The requested squash is outside the supported 2–3 commit range.' };
+  }
+  const eligibility = await validateRewriteState(projectPath, candidate, { signal });
+  if (!eligibility.ok) return eligibility;
+  const backupRef = await createRewriteBackupRef(projectPath, runId, { signal });
+  try {
+    const reset = await runGit(projectPath, ['reset', '--soft', `HEAD~${candidate.count}`], { allowFailure: true, signal });
+    if (!reset.ok) return { ok: false, reason: reset.stderr.trim() || reset.stdout.trim() || 'git reset --soft failed', backupRef };
+    const staged = await stageCommitPaths(projectPath, paths, { signal });
+    if (!staged.ok) {
+      await restoreRewriteRef(projectPath, backupRef);
+      return { ...staged, backupRef };
+    }
+    const commit = await runGit(projectPath, ['commit', '-m', message], { allowFailure: true, signal });
+    if (!commit.ok) {
+      await restoreRewriteRef(projectPath, backupRef);
+      return { ok: false, reason: commit.stderr.trim() || commit.stdout.trim() || 'git squash commit failed', backupRef };
+    }
+    const revision = await runGit(projectPath, ['rev-parse', '--short', 'HEAD'], { signal });
+    return { ok: true, revision: revision.stdout.trim(), paths: staged.paths, backupRef, rewrittenRunIds: candidate.runIds };
+  } catch (error) {
+    await restoreRewriteRef(projectPath, backupRef).catch(() => {});
+    throw error;
+  }
+}
+
+async function validateRewriteState(projectPath, candidate, { signal = null } = {}) {
+  if (!candidate?.eligible && candidate?.eligible !== undefined) return { ok: false, reason: 'The selected commit is not eligible for rewriting.' };
+  const status = await getGitStatus(projectPath);
+  if (status.staged.length) return { ok: false, reason: 'The Git index contains staged user changes.' };
+  if (status.conflicted.length) return { ok: false, reason: 'The repository contains unresolved merge conflicts.' };
+  const head = await runGit(projectPath, ['rev-parse', 'HEAD'], { allowFailure: true, signal });
+  if (!head.ok || !candidate?.revision || !head.stdout.trim().startsWith(candidate.revision) && !candidate.revision.startsWith(head.stdout.trim())) {
+    return { ok: false, reason: 'Git HEAD changed after the rewrite option was prepared.' };
+  }
+  return { ok: true };
+}
+
+async function restoreRewriteRef(projectPath, backupRef) {
+  await runGit(projectPath, ['reset', '--mixed', backupRef], { allowFailure: true });
+}
+
+async function createRewriteBackupRef(projectPath, runId, { signal = null } = {}) {
+  const ref = `refs/zipflow/checkpoints/${runId}-rewrite`;
+  const update = await runGit(projectPath, ['update-ref', ref, 'HEAD'], { allowFailure: true, signal });
+  if (!update.ok) throw new Error(update.stderr.trim() || update.stdout.trim() || 'Could not create Git rewrite backup ref.');
+  return ref;
+}
+
+async function isCommitPublished(projectPath, revision) {
+  const branches = await runGit(projectPath, ['branch', '-r', '--contains', revision], { allowFailure: true });
+  return branches.ok && Boolean(branches.stdout.trim());
+}
+
+async function stageCommitPaths(projectPath, paths, { signal = null } = {}) {
+  const requestedPaths = [...new Set(paths)].filter(Boolean);
+  const safePaths = requestedPaths.filter((item) => !isProtectedProjectPath(item));
+  const ignored = await listIgnoredPaths(projectPath, safePaths);
+  const uniquePaths = safePaths.filter((item) => !ignored.has(normalizeGitPath(item)));
+  if (!uniquePaths.length) return { ok: false, reason: 'There are no committable applied paths.' };
+  for (const chunk of chunks(uniquePaths, 100)) {
+    const add = await runGit(projectPath, ['add', '--all', '--', ...chunk], { allowFailure: true, signal });
+    if (!add.ok) {
+      await unstagePaths(projectPath, uniquePaths, { signal });
+      return { ok: false, reason: add.stderr.trim() || add.stdout.trim() || 'git add failed' };
+    }
+  }
+  return { ok: true, paths: uniquePaths };
 }

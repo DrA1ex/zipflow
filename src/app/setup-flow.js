@@ -13,6 +13,7 @@ import {
   activateDeployCommand, activateDeployPolicy, deployPolicyDescription, showDeployCommandStep,
   showDeployPolicyStep, submitDeployEditor,
 } from './setup-deploy.js';
+import { activateAutonomy, autonomyReviewLines, showAutonomyStep } from './setup-autonomy.js';
 
 export async function beginSetup(controller, { fresh = false } = {}) {
   const { state } = controller;
@@ -41,6 +42,7 @@ export async function activateSetup(controller, itemId) {
   if (screen === 'setup-project') return activateProject(controller, itemId);
   if (screen === 'setup-checks') return activateChecks(controller, itemId, () => finishSetupSection(controller, () => showPolicyStep(controller)));
   if (screen === 'setup-policy') return activatePolicy(controller, itemId);
+  if (screen === 'setup-autonomy' || screen === 'setup-autonomy-confirm') return activateAutonomy(controller, itemId, () => finishSetupSection(controller, () => showArchiveModeStep(controller)));
   if (screen === 'setup-archive-mode') return activateArchiveMode(controller, itemId);
   if (screen === 'setup-deletion-scope') return activateDeletionScope(controller, itemId);
   if (screen === 'setup-git-checkpoint') return activateCheckpoint(controller, itemId);
@@ -82,7 +84,9 @@ export function backSetup(controller) {
   if (screen === 'setup-project') return isEditingSection(controller, 'project') ? showWorkflowSections(controller) : controller.showHome();
   if (screen === 'setup-checks') return isEditingSection(controller, 'checks') ? showWorkflowSections(controller) : showProjectStep(controller);
   if (screen === 'setup-policy') return isEditingSection(controller, 'policy') ? showWorkflowSections(controller) : showChecksStep(controller);
-  if (screen === 'setup-archive-mode') return isEditingSection(controller, 'archive') ? showWorkflowSections(controller) : showPolicyStep(controller);
+  if (screen === 'setup-autonomy') return isEditingSection(controller, 'autonomy') ? showWorkflowSections(controller) : showPolicyStep(controller);
+  if (screen === 'setup-autonomy-confirm') return showAutonomyStep(controller);
+  if (screen === 'setup-archive-mode') return isEditingSection(controller, 'archive') ? showWorkflowSections(controller) : showAutonomyStep(controller);
   if (screen === 'setup-deletion-scope') return showArchiveModeStep(controller);
   if (screen === 'setup-git-checkpoint') return isEditingSection(controller, 'git') ? showWorkflowSections(controller) : previousBeforeCheckpoint(controller);
   if (screen === 'setup-git-result') return showCheckpointStep(controller);
@@ -132,6 +136,7 @@ function showWorkflowSections(controller, selectedSection = null) {
     { id: 'section-project', label: 'Project', description: `${displayPath(controller.state.project.root)} · ${detectedLine(controller.state.project)}` },
     { id: 'section-checks', label: 'Checks', description: `${selectedChecks} selected check${selectedChecks === 1 ? '' : 's'}` },
     { id: 'section-policy', label: 'Update policy', description: workflow.policy.label },
+    { id: 'section-autonomy', label: 'Decision mode', description: workflow.autonomy?.mode === 'full' ? 'Full autopilot · Dangerous' : workflow.autonomy?.mode === 'guarded' ? 'Guarded autopilot' : 'Manual' },
     { id: 'section-archive', label: 'Archive mode', description: workflow.archive.mode === 'overlay' ? 'Overlay · missing files stay untouched' : deletionReviewLabel(workflow.deletion.scope) },
     ...(controller.state.project.git ? [{ id: 'section-git', label: 'Git', description: `${checkpointLabel(workflow.git.checkpoint)} · ${resultCommitLabel(workflow.git.resultCommit)}` }] : []),
     { id: 'section-deploy', label: 'Deployment', description: deployPolicyDescription(workflow.deploy.policy) },
@@ -154,6 +159,7 @@ function openWorkflowSection(controller, section) {
   if (section === 'project') return showProjectStep(controller);
   if (section === 'checks') return showChecksStep(controller);
   if (section === 'policy') return showPolicyStep(controller);
+  if (section === 'autonomy') return showAutonomyStep(controller);
   if (section === 'archive') return showArchiveModeStep(controller);
   if (section === 'git') return showCheckpointStep(controller);
   if (section === 'deploy') return showDeployPolicyStep(controller);
@@ -191,7 +197,7 @@ function activatePolicy(controller, itemId) {
     applyPolicyProfile(controller.state.draft, itemId.slice(8));
     return showPolicyStep(controller);
   }
-  if (itemId === 'policy-continue') return finishSetupSection(controller, () => showArchiveModeStep(controller));
+  if (itemId === 'policy-continue') return finishSetupSection(controller, () => showAutonomyStep(controller));
 }
 
 function showArchiveModeStep(controller) {
@@ -355,6 +361,9 @@ function workflowReviewLines(state, workflow) {
     'UPDATE POLICY',
     `  ${workflow.policy.label}`,
     `  ${policyReviewDescription(workflow.policy.id)}`,
+    '',
+    'DECISION MODE',
+    ...autonomyReviewLines(workflow),
     '',
     'ARCHIVE INTERPRETATION',
     `  ${workflow.archive.mode === 'overlay' ? 'Overlay archive' : 'Full project snapshot'}`,

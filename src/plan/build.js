@@ -9,8 +9,10 @@ import { isArchiveControlPath } from '../archive/metadata.js';
 import { isProtectedProjectPath } from '../archive/protected.js';
 import { createPathMatcher, normalizeRelativePath } from './matcher.js';
 import { deletionProtectionReason, isDeletionProtectedProjectPath } from './deletion-protection.js';
+import { assertSafeProjectPath } from '../security/project-path.js';
+import { throwIfCancelled } from '../operations/manager.js';
 
-export async function buildUpdatePlan({ project, workflow, extracted }) {
+export async function buildUpdatePlan({ project, workflow, extracted, signal = null }) {
   const excluded = createPathMatcher(workflow.exclude);
   const normalizedEntries = extracted.entries
     .map((entry) => ({ ...entry, relativePath: normalizeRelativePath(entry.relativePath) }))
@@ -18,6 +20,7 @@ export async function buildUpdatePlan({ project, workflow, extracted }) {
   const skipped = [];
   const candidates = [];
   for (const entry of normalizedEntries) {
+    throwIfCancelled(signal);
     const reason = incomingSkipReason(entry.relativePath, excluded);
     if (reason) skipped.push({ path: entry.relativePath, reason });
     else candidates.push(entry);
@@ -25,6 +28,7 @@ export async function buildUpdatePlan({ project, workflow, extracted }) {
   const ignoredIncoming = await ignoredPaths(project, candidates.map((entry) => entry.relativePath));
   const archiveEntries = [];
   for (const entry of candidates) {
+    throwIfCancelled(signal);
     if (ignoredIncoming.has(entry.relativePath)) skipped.push({ path: entry.relativePath, reason: 'ignored by .gitignore' });
     else archiveEntries.push(entry);
   }
@@ -32,7 +36,8 @@ export async function buildUpdatePlan({ project, workflow, extracted }) {
   const updated = [];
   const unchanged = [];
   for (const entry of archiveEntries) {
-    const currentPath = path.join(project.root, entry.relativePath);
+    throwIfCancelled(signal);
+    const { target: currentPath } = await assertSafeProjectPath(project.root, entry.relativePath);
     const afterHash = await hashFile(entry.absolutePath);
     if (!(await exists(currentPath))) {
       created.push(planItem('created', entry, currentPath, null, afterHash));
@@ -46,7 +51,7 @@ export async function buildUpdatePlan({ project, workflow, extracted }) {
   }
   const incomingSet = new Set([...created, ...updated, ...unchanged].map((item) => item.path));
   const snapshot = workflow.archive.mode === 'snapshot'
-    ? await findSnapshotChanges({ project, workflow, excluded, incomingSet })
+    ? await findSnapshotChanges({ project, workflow, excluded, incomingSet, signal })
     : { deleted: [], preserved: [] };
   const gitStatus = project.git ? await getGitStatus(project.root) : null;
   const conflicts = identifyConflicts([...updated, ...snapshot.deleted], gitStatus);
@@ -73,13 +78,13 @@ export async function buildUpdatePlan({ project, workflow, extracted }) {
   };
 }
 
-async function findSnapshotChanges({ project, workflow, excluded, incomingSet }) {
-  const allManaged = await walkManagedFiles(project.root, excluded);
+async function findSnapshotChanges({ project, workflow, excluded, incomingSet, signal }) {
+  const allManaged = await walkManagedFiles(project.root, excluded, signal);
   const ignored = await ignoredPaths(project, allManaged);
   const protectedMissing = deletionProtectedPreserved(allManaged, incomingSet);
   const eligible = allManaged.filter((relative) => !ignored.has(relative) && !isDeletionProtectedProjectPath(relative));
   if (workflow.deletion.scope === 'all') {
-    const deleted = await collectDeleted(project.root, eligible, incomingSet, excluded);
+    const deleted = await collectDeleted(project.root, eligible, incomingSet, excluded, signal);
     const policyPreserved = allManaged
       .filter((relative) => ignored.has(relative) && !incomingSet.has(relative))
       .map((relative) => ({ path: relative, reason: 'ignored local file kept by .gitignore policy' }));
@@ -93,6 +98,7 @@ async function findSnapshotChanges({ project, workflow, excluded, incomingSet })
       eligible.filter((relative) => managed.has(relative)),
       incomingSet,
       excluded,
+      signal,
     );
     const policyPreserved = allManaged
       .filter((relative) => !incomingSet.has(relative) && (ignored.has(relative) || !managed.has(relative)))
@@ -117,6 +123,7 @@ async function findSnapshotChanges({ project, workflow, excluded, incomingSet })
     eligible.filter((relative) => tracked.has(relative)),
     incomingSet,
     excluded,
+    signal,
   );
   const policyPreserved = allManaged
     .filter((relative) => !incomingSet.has(relative) && (!tracked.has(relative) || ignored.has(relative)))
@@ -153,19 +160,21 @@ async function ignoredPaths(project, paths) {
   return new Set(paths.filter((relative) => matcher(relative)));
 }
 
-async function walkManagedFiles(root, excluded) {
+async function walkManagedFiles(root, excluded, signal = null) {
   return walkFiles(root, {
     include: (relative) => !excluded(relative) && !isProtectedProjectPath(relative),
     descend: (relative) => !excluded(relative) && !isProtectedProjectPath(relative),
+    signal,
   });
 }
 
-async function collectDeleted(root, candidates, incomingSet, excluded) {
+async function collectDeleted(root, candidates, incomingSet, excluded, signal = null) {
   const deleted = [];
   for (const relative of candidates) {
+    throwIfCancelled(signal);
     const normalized = normalizeRelativePath(relative);
     if (excluded(normalized) || isProtectedProjectPath(normalized) || isDeletionProtectedProjectPath(normalized) || incomingSet.has(normalized)) continue;
-    const currentPath = path.join(root, normalized);
+    const { target: currentPath } = await assertSafeProjectPath(root, normalized);
     if (!(await exists(currentPath))) continue;
     const currentStat = await stat(currentPath);
     if (!currentStat.isFile()) continue;

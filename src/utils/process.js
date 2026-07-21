@@ -11,6 +11,7 @@ export async function runProcess(command, args = [], {
   input = null,
   outputLimit = DEFAULT_OUTPUT_LIMIT,
   onOutput = null,
+  signal = null,
 } = {}) {
   const startedAt = Date.now();
   return new Promise((resolve, reject) => {
@@ -24,6 +25,7 @@ export async function runProcess(command, args = [], {
     let stdout = '';
     let stderr = '';
     let timedOut = false;
+    let cancelled = false;
     const append = (kind, chunk) => {
       const text = chunk.toString();
       if (kind === 'stdout') stdout = trimOutput(stdout + text, outputLimit);
@@ -32,9 +34,19 @@ export async function runProcess(command, args = [], {
     };
     child.stdout.on('data', (chunk) => append('stdout', chunk));
     child.stderr.on('data', (chunk) => append('stderr', chunk));
+    const abort = () => {
+      cancelled = true;
+      terminateChild(child);
+    };
+    signal?.addEventListener('abort', abort, { once: true });
     child.on('error', (error) => {
       activeChildren.delete(child);
-      reject(error);
+      signal?.removeEventListener('abort', abort);
+      if (cancelled || signal?.aborted) {
+        const cancelledError = new Error('Operation cancelled.');
+        cancelledError.code = 'cancelled';
+        reject(cancelledError);
+      } else reject(error);
     });
     if (input !== null) child.stdin.end(input);
     else child.stdin.end();
@@ -43,14 +55,21 @@ export async function runProcess(command, args = [], {
       terminateChild(child);
     }, timeoutMs) : null;
     timer?.unref();
-    child.on('close', (code, signal) => {
+    child.on('close', (code, childSignal) => {
       activeChildren.delete(child);
+      signal?.removeEventListener('abort', abort);
       if (timer) clearTimeout(timer);
+      if (cancelled || signal?.aborted) {
+        const error = new Error('Operation cancelled.');
+        error.code = 'cancelled';
+        reject(error);
+        return;
+      }
       resolve({
         command,
         args,
         code,
-        signal,
+        signal: childSignal,
         timedOut,
         stdout,
         stderr,
@@ -58,6 +77,7 @@ export async function runProcess(command, args = [], {
         ok: code === 0 && !timedOut,
       });
     });
+    if (signal?.aborted) abort();
   });
 }
 

@@ -2,15 +2,18 @@ import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { ensureDir, writeTextAtomic } from '../utils/fs.js';
 import { getZipflowHome } from '../workflow/store.js';
+import { assertSafeAbsoluteProjectPath } from '../security/project-path.js';
+import { throwIfCancelled } from '../operations/manager.js';
 
 const MAX_TEXT_FILE_BYTES = 1024 * 1024;
 const MAX_PATCH_BYTES = 8 * 1024 * 1024;
 
-export async function createPlanPatch(runId, plan) {
+export async function createPlanPatch(runId, plan, { projectPath = null, signal = null } = {}) {
   const sections = [];
   let omitted = 0;
   for (const item of [...plan.created, ...plan.updated, ...plan.deleted]) {
-    const section = await itemPatch(item);
+    throwIfCancelled(signal);
+    const section = await itemPatch(item, { projectPath, signal });
     if (Buffer.byteLength(sections.join('\n') + section, 'utf8') > MAX_PATCH_BYTES) {
       omitted += 1;
       continue;
@@ -25,8 +28,11 @@ export async function createPlanPatch(runId, plan) {
   return { path: target, content: content || '# No file content changes.\n', omitted };
 }
 
-async function itemPatch(item) {
+async function itemPatch(item, { projectPath = null, signal = null } = {}) {
+  throwIfCancelled(signal);
+  if (projectPath && item.kind !== 'created') await assertSafeAbsoluteProjectPath(projectPath, item.currentPath, { allowMissingLeaf: false, requireFile: true });
   const before = item.kind === 'created' ? Buffer.alloc(0) : await readFile(item.currentPath);
+  throwIfCancelled(signal);
   const after = item.kind === 'deleted' ? Buffer.alloc(0) : await readFile(item.sourcePath);
   const header = [
     `diff --git a/${item.path} b/${item.path}`,

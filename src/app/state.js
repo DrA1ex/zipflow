@@ -30,6 +30,7 @@ export function createInitialState() {
     pathSuggestionActive: false,
     busy: false,
     busyLabel: 'Starting…',
+    activeOperation: null,
     progress: { value: 0, total: 1, detail: '' },
     checkRuntime: null,
     deployRuntime: null,

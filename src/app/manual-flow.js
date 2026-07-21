@@ -18,6 +18,7 @@ export async function beginManualChecks(controller) {
   const { state } = controller;
   const checks = state.workflow.checks.filter((check) => check.selected);
   if (!checks.length) return controller.message('No checks configured', ['Change the workflow to select at least one check.'], 'warning');
+  const operation = controller.beginOperation({ kind: 'manual-checks', label: 'Running manual checks' });
   const run = await createActionRunRecord({ id: createRunId(), project: state.project, workflow: state.workflow, action: 'manual-checks' });
   state.run = run;
   state.screen = 'manual-checks-running';
@@ -26,11 +27,12 @@ export async function beginManualChecks(controller) {
   controller.message('Manual checks starting', [`${checks.length} configured check${checks.length === 1 ? '' : 's'} will run against the current project files.`], 'process');
   controller.invalidate();
   try {
-    const changedPaths = await collectExportPaths({ project: state.project, mode: 'nonignored' });
+    const changedPaths = await collectExportPaths({ project: state.project, mode: 'nonignored', signal: operation.signal });
     const result = await runChecks({
       workflow: state.workflow,
       projectPath: state.project.root,
       changedPaths,
+      signal: operation.signal,
       onUpdate: (event) => updateCheckRuntime(controller, event),
     });
     run.checks = result;
@@ -42,17 +44,25 @@ export async function beginManualChecks(controller) {
     ], result.ok ? 'success' : 'error');
     return showManualChecksResult(controller);
   } catch (error) {
-    run.status = 'failed';
-    run.error = { message: error.message };
+    const cancelled = error.code === 'cancelled';
+    run.status = cancelled ? 'cancelled' : 'failed';
+    run.error = cancelled ? null : { message: error.message };
+    run.checks ??= { results: state.checkRuntime?.results ?? [], ok: false, cancelled };
     state.run = await saveRunRecord(run);
-    controller.message('Manual checks could not run', [error.message, `Report: ${displayPath(runReportPath(run.id))}`], 'error');
+    controller.message(cancelled ? 'Manual checks cancelled' : 'Manual checks could not run', [
+      cancelled ? 'The active check process was stopped. Zipflow remains open.' : error.message,
+      `Report: ${displayPath(runReportPath(run.id))}`,
+    ], cancelled ? 'warning' : 'error');
     return showManualChecksResult(controller);
+  } finally {
+    operation.finish();
   }
 }
 
 export async function beginManualDeploy(controller) {
   const { state } = controller;
   if (!state.workflow.deploy?.commandText) return controller.message('Deployment is not configured', ['Change the workflow to choose a deploy command.'], 'warning');
+  const operation = controller.beginOperation({ kind: 'manual-deploy', label: 'Running manual deployment' });
   const run = await createActionRunRecord({ id: createRunId(), project: state.project, workflow: state.workflow, action: 'manual-deploy' });
   state.run = run;
   state.screen = 'manual-deploy-running';
@@ -64,6 +74,7 @@ export async function beginManualDeploy(controller) {
     const result = await runDeploy({
       deploy: state.workflow.deploy,
       projectPath: state.project.root,
+      signal: operation.signal,
       onOutput: (event) => {
         state.deployRuntime.lastLine = lastNonEmptyLine(event.text);
         controller.invalidate();
@@ -78,11 +89,18 @@ export async function beginManualDeploy(controller) {
     ], result.ok ? 'success' : 'error');
     return showManualDeployResult(controller);
   } catch (error) {
-    run.status = 'failed';
-    run.error = { message: error.message };
+    const cancelled = error.code === 'cancelled';
+    run.status = cancelled ? 'cancelled' : 'failed';
+    run.error = cancelled ? null : { message: error.message };
+    run.deploy ??= { ok: false, cancelled, commandText: state.workflow.deploy.commandText };
     state.run = await saveRunRecord(run);
-    controller.message('Manual deployment could not run', [error.message, `Report: ${displayPath(runReportPath(run.id))}`], 'error');
+    controller.message(cancelled ? 'Manual deployment cancelled' : 'Manual deployment could not run', [
+      cancelled ? 'The deployment process was stopped. External effects may already exist.' : error.message,
+      `Report: ${displayPath(runReportPath(run.id))}`,
+    ], cancelled ? 'warning' : 'error');
     return showManualDeployResult(controller);
+  } finally {
+    operation.finish();
   }
 }
 
@@ -142,13 +160,13 @@ async function explainManualFailure(controller) {
   const failedCheck = state.run.checks?.results?.find((item) => !item.ok) ?? deployAsCheck(state.run.deploy);
   if (!failedCheck) return restoreResultScreen(controller);
   const progress = beginLlmProgress(controller);
-  const abortController = new AbortController();
-  state.llmAbortController = abortController;
+  const operation = controller.beginOperation({ kind: 'llm-failure-analysis', label: 'Explaining manual failure' });
+  state.llmAbortController = { abort: () => operation.abort() };
   controller.setStatus('Asking the local LLM to explain the error');
   const startedAt = Date.now();
   try {
     const result = await explainCheckFailure({ settings: state.settings, project: state.project, run: state.run, failedCheck }, {
-      onEvent: progress.onEvent, signal: abortController.signal,
+      onEvent: progress.onEvent, signal: operation.signal,
     });
     state.run.llmFailure = { ...result, durationMs: Date.now() - startedAt };
     state.run = await saveRunRecord(state.run);
@@ -169,8 +187,9 @@ async function explainManualFailure(controller) {
       cancelled ? 'The manual run report remains available without an explanation.' : error.message,
     ], 'warning');
   } finally {
-    if (state.llmAbortController === abortController) state.llmAbortController = null;
+    state.llmAbortController = null;
     progress.stop();
+    operation.finish();
   }
   return restoreResultScreen(controller);
 }

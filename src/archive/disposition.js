@@ -3,12 +3,15 @@ import { copyFile, rename, stat, unlink } from 'node:fs/promises';
 import { ensureDir, exists, readJson, writeJsonAtomic } from '../utils/fs.js';
 import { expandHome } from '../utils/paths.js';
 import { getZipflowHome } from '../workflow/store.js';
+import { throwIfCancelled } from '../operations/manager.js';
 
-export async function applySourceArchivePolicy({ archivePath, runId, settings, now = new Date() }) {
+export async function applySourceArchivePolicy({ archivePath, runId, settings, now = new Date(), signal = null }) {
+  throwIfCancelled(signal);
   const policy = settings.archivePolicy ?? 'keep';
   if (policy === 'keep') return { action: 'kept', originalPath: archivePath, path: archivePath, pruned: [] };
   if (!(await exists(archivePath))) return { action: 'missing', originalPath: archivePath, path: null, pruned: [] };
   if (policy === 'delete') {
+    throwIfCancelled(signal);
     await unlink(archivePath);
     return { action: 'deleted', originalPath: archivePath, path: null, pruned: [] };
   }
@@ -16,6 +19,7 @@ export async function applySourceArchivePolicy({ archivePath, runId, settings, n
   const directory = path.resolve(expandHome(settings.archiveDirectory || '~/zipflow-archive'));
   await ensureDir(directory);
   const destination = await chooseDestination(directory, path.basename(archivePath), runId, archivePath);
+  throwIfCancelled(signal);
   if (path.resolve(destination) !== path.resolve(archivePath)) await moveFile(archivePath, destination);
   const fileStat = await stat(destination);
   const index = await loadArchiveIndex();
@@ -31,16 +35,20 @@ export async function applySourceArchivePolicy({ archivePath, runId, settings, n
     now,
     retentionDays: settings.archiveRetentionDays,
     maxBytes: settings.archiveMaxBytes,
+    signal,
   });
   await saveArchiveIndex(index);
   return { action: 'moved', originalPath: archivePath, path: destination, pruned };
 }
 
-export async function pruneManagedArchives(index, { now = new Date(), retentionDays = 30, maxBytes = 1_000_000_000 } = {}) {
+export async function pruneManagedArchives(index, {
+  now = new Date(), retentionDays = 30, maxBytes = 1_000_000_000, signal = null,
+} = {}) {
   const active = [];
   const pruned = [];
   const deadline = Number(retentionDays) > 0 ? now.getTime() - Number(retentionDays) * 86_400_000 : null;
   for (const record of index.records ?? []) {
+    throwIfCancelled(signal);
     if (!(await exists(record.path))) continue;
     if (deadline !== null && new Date(record.addedAt).getTime() < deadline) {
       await removeManagedFile(record, 'retention', pruned);
@@ -53,6 +61,7 @@ export async function pruneManagedArchives(index, { now = new Date(), retentionD
   if (Number(maxBytes) > 0) {
     let total = active.reduce((sum, record) => sum + record.size, 0);
     while (active.length && total > Number(maxBytes)) {
+      throwIfCancelled(signal);
       const record = active.shift();
       await removeManagedFile(record, 'size', pruned);
       total -= record.size;
@@ -63,10 +72,11 @@ export async function pruneManagedArchives(index, { now = new Date(), retentionD
   return pruned;
 }
 
-export async function inspectManagedArchives() {
+export async function inspectManagedArchives({ signal = null } = {}) {
   const index = await loadArchiveIndex();
   const records = [];
   for (const record of index.records ?? []) {
+    throwIfCancelled(signal);
     if (!(await exists(record.path))) continue;
     const actual = await stat(record.path);
     records.push({ ...record, size: actual.size });
@@ -84,22 +94,36 @@ export async function inspectManagedArchives() {
   };
 }
 
-export async function clearManagedArchives() {
+export async function clearManagedArchives({ signal = null, onProgress = null } = {}) {
   const index = await loadArchiveIndex();
+  const records = index.records ?? [];
   const removed = [];
   const failed = [];
-  for (const record of index.records ?? []) {
+  const remaining = [];
+  let cancelled = false;
+  for (let indexPosition = 0; indexPosition < records.length; indexPosition += 1) {
+    const record = records[indexPosition];
+    if (signal?.aborted) {
+      cancelled = true;
+      remaining.push(...records.slice(indexPosition));
+      break;
+    }
     try {
       if (await exists(record.path)) await unlink(record.path);
       removed.push(record);
+      onProgress?.({ removed: removed.length, record });
     } catch (error) {
       failed.push({ record, error: error.message });
+      remaining.push(record);
     }
   }
-  index.records = failed.map((item) => item.record);
+  index.records = remaining;
   index.updatedAt = new Date().toISOString();
   await saveArchiveIndex(index);
-  return { removed, failed, totalBytes: removed.reduce((sum, record) => sum + Number(record.size ?? 0), 0) };
+  return {
+    removed, failed, cancelled,
+    totalBytes: removed.reduce((sum, record) => sum + Number(record.size ?? 0), 0),
+  };
 }
 
 export function archiveIndexPath() {
@@ -107,11 +131,15 @@ export function archiveIndexPath() {
 }
 
 async function loadArchiveIndex() {
-  return await readJson(archiveIndexPath(), { version: 1, records: [] });
+  return readJson(archiveIndexPath(), { version: 1, records: [] });
 }
 
 async function saveArchiveIndex(index) {
-  await writeJsonAtomic(archiveIndexPath(), { version: 1, records: index.records ?? [], updatedAt: index.updatedAt ?? new Date().toISOString() });
+  await writeJsonAtomic(archiveIndexPath(), {
+    version: 1,
+    records: index.records ?? [],
+    updatedAt: index.updatedAt ?? new Date().toISOString(),
+  });
 }
 
 async function chooseDestination(directory, filename, runId, sourcePath) {

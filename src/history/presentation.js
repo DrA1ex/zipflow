@@ -12,7 +12,12 @@ export function runTypeLabel(value) {
 }
 
 export function runTypeTag(run) {
-  return ({ update: 'UPDATE', test: 'TEST', deploy: 'DEPLOY' })[runType(run)];
+  const base = ({ update: 'UPDATE', test: 'TEST', deploy: 'DEPLOY' })[runType(run)];
+  if (runType(run) !== 'update') return base;
+  const mode = run?.autonomy?.mode;
+  if (mode === 'guarded') return `${base} · GUARDED`;
+  if (mode === 'full') return `${base} · FULL`;
+  return base;
 }
 
 export function runTypeDescription(run) {
@@ -28,7 +33,7 @@ export function matchesRunType(run, filter = 'all') {
 
 export function matchesRunStatus(run, filter = 'all') {
   if (filter === 'successful') return ['completed', 'checks_passed'].includes(run?.status);
-  if (filter === 'failed') return ['failed', 'checks_failed', 'completed_with_errors'].includes(run?.status) || run?.deploy?.ok === false;
+  if (filter === 'failed') return ['failed', 'checks_failed', 'completed_with_errors', 'interrupted', 'interrupted_closed', 'checks_cancelled'].includes(run?.status) || run?.deploy?.ok === false;
   if (filter === 'rolled-back') return run?.status === 'rolled_back' || run?.rollback?.status === 'completed';
   return true;
 }

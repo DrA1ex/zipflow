@@ -3,6 +3,7 @@ import { loadStoredFileDiff } from '../diff/stored-patch.js';
 import { rememberDiffMode } from '../settings/recent.js';
 import { compactPlanLine, compactPlanMeta } from '../ui/format.js';
 import { setScreen } from './state.js';
+import { autopilotPaused, resumeAutopilot } from './autonomy-flow.js';
 
 const PLAN_GROUPS = [
   ['created', 'Added', 'Files that do not exist locally and will be created'],
@@ -38,6 +39,10 @@ export async function activateReview(controller, itemId, actions) {
     if (itemId === 'skip-llm-review') {
       await actions.skipPendingLlmReview(controller);
       return showPlanReview(controller);
+    }
+    if (itemId === 'resume-autopilot') {
+      await resumeAutopilot(controller);
+      return actions.continueAfterSafety(controller);
     }
     if (itemId === 'apply-plan') return actions.startApply(controller);
     if (itemId === 'cancel-run') return actions.cancelRun(controller);
@@ -132,6 +137,7 @@ export function showPlanReview(controller) {
     { id: 'view-plan', label: 'Review changes', description: 'Open file groups and inspect unified or side-by-side diffs' },
   ];
   if (gated) items.push({ id: 'skip-llm-review', label: 'Continue without LLM verdict', description: 'Cancel the advisory LLM step; deterministic protections remain active' });
+  if (autopilotPaused(controller.state)) items.push({ id: 'resume-autopilot', label: 'Resume autopilot', description: 'Ask the local model to decide this plan checkpoint again.' });
   items.push({ id: 'cancel-run', label: 'Cancel update', description: 'Return without changing the project' });
   const intro = [compactPlanLine(plan), compactPlanMeta(plan), ...planWarnings(plan, controller.state.archiveSafety)];
   if (llmReviewPending) intro.push(gated ? 'LLM review is running. Files and diffs remain available while Apply waits for the verdict.' : 'LLM summary is running in the background and does not block Apply.');

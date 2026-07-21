@@ -1,6 +1,8 @@
 import { createLocalCompletion } from '../llm/client.js';
 import { isLocalLlmEnabled, parseResponse } from '../llm/generate.js';
 import { resolveLocalLlmSession } from '../llm/session.js';
+import { requestAutonomyDecision } from '../autonomy/decision-engine.js';
+import { saveSettings } from '../settings/store.js';
 
 export async function testSelectedModel(controller) {
   const { state } = controller;
@@ -12,14 +14,14 @@ export async function testSelectedModel(controller) {
     controller.toast('Model test could not start', 'error', 3, panel.modelTest.error);
     return false;
   }
-  const abortController = new AbortController();
+  const operation = controller.beginOperation({ kind: 'model-compatibility-test', label: 'Testing selected model' });
   const startedAt = Date.now();
   panel.modelTest = { status: 'running', running: true, startedAt };
-  state.settingsTestAbortController = abortController;
+  state.settingsTestAbortController = { abort: () => operation.abort() };
   state.status = `Testing ${settings.llmModel}`;
   controller.invalidate();
   try {
-    const session = await resolveLocalLlmSession(settings, { signal: abortController.signal });
+    const session = await resolveLocalLlmSession(settings, { signal: operation.signal });
     let streamSupported = false;
     const review = settings.llmArchiveReview !== 'disabled';
     const completion = await createLocalCompletion({
@@ -45,10 +47,34 @@ export async function testSelectedModel(controller) {
       contextLength: Math.min(session.profile.contextLength || 16_384, 16_384),
       reasoningOffSupported: session.profile.reasoningOffSupported,
     }, {
-      signal: abortController.signal,
+      signal: operation.signal,
       onEvent: (event) => { if (event.type === 'stream-open' || event.type === 'chunk') streamSupported = true; },
     });
     parseResponse(completion.content || completion.reasoning, { requireAssessment: review });
+    const autonomousDecision = await requestAutonomyDecision({
+      settings,
+      mode: 'guarded',
+      gate: 'compatibility-decision',
+      context: {
+        state: { compatibilityTest: true, projectFilesChanged: false },
+        riskLevel: 'low',
+        complete: true,
+      },
+      allowedActions: ['continue'],
+      signal: operation.signal,
+      onEvent: (event) => { if (event.type === 'stream-open' || event.type === 'chunk') streamSupported = true; },
+    });
+    if (autonomousDecision.action !== 'continue') throw new Error('Autonomous decision protocol returned an unexpected action.');
+    state.settings = await saveSettings({
+      ...state.settings,
+      llmDecisionCompatibility: {
+        provider: settings.llmProvider,
+        model: settings.llmModel,
+        supported: true,
+        testedAt: new Date().toISOString(),
+        error: null,
+      },
+    });
     const durationMs = Date.now() - startedAt;
     panel.modelTest = {
       status: 'passed', running: false, durationMs, streamSupported,
@@ -56,22 +82,35 @@ export async function testSelectedModel(controller) {
       contextLength: session.profile.contextLength,
       maxContextLength: session.profile.maxContextLength,
       contextSource: session.profile.source,
-      reviewProtocol: review,
+      reviewProtocol: review, autonomousDecisionProtocol: true,
     };
     state.status = `Model test passed · ${formatDuration(durationMs)}`;
     controller.toast('Model test passed', 'success', 3, `${streamSupported ? 'Streaming supported' : 'Response received'} · ${formatContext(session.profile.contextLength)}`);
     return true;
   } catch (error) {
-    const cancelled = abortController.signal.aborted || error?.name === 'AbortError' || ['ABORT_ERR', 'cancelled'].includes(error?.code);
+    const cancelled = operation.signal.aborted || error?.name === 'AbortError' || ['ABORT_ERR', 'cancelled'].includes(error?.code);
     panel.modelTest = {
       status: cancelled ? 'cancelled' : 'failed', running: false, durationMs: Date.now() - startedAt,
       error: cancelled ? 'Compatibility test cancelled.' : error.message, code: error.code ?? null,
     };
+    if (!cancelled) {
+      state.settings = await saveSettings({
+        ...state.settings,
+        llmDecisionCompatibility: {
+          provider: settings.llmProvider,
+          model: settings.llmModel,
+          supported: false,
+          testedAt: new Date().toISOString(),
+          error: error.message,
+        },
+      });
+    }
     state.status = cancelled ? 'Model test cancelled' : 'Model test failed';
     controller.toast(cancelled ? 'Model test cancelled' : 'Model test failed', cancelled ? 'info' : 'error', 3, panel.modelTest.error);
     return false;
   } finally {
-    if (state.settingsTestAbortController === abortController) state.settingsTestAbortController = null;
+    state.settingsTestAbortController = null;
+    operation.finish();
     controller.invalidate();
   }
 }
@@ -90,7 +129,7 @@ export function modelTestDescription(panel) {
   if (!test) return 'Check server access, authentication, exact model key, streaming, response parsing, and reported context.';
   if (test.running) return 'Sending a small safe compatibility request. Esc cancels the test.';
   if (test.status === 'failed' || test.status === 'cancelled') return test.error;
-  return `${test.streamSupported ? 'Streaming supported' : 'Text response received'} · Zipflow protocol passed · reported context ${formatContext(test.contextLength)}${test.contextSource ? ` · ${test.contextSource}` : ''}.`;
+  return `${test.streamSupported ? 'Streaming supported' : 'Text response received'} · Zipflow and autonomous decision protocols passed · reported context ${formatContext(test.contextLength)}${test.contextSource ? ` · ${test.contextSource}` : ''}.`;
 }
 
 function formatDuration(milliseconds) {

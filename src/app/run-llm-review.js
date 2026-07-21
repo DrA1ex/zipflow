@@ -87,13 +87,13 @@ async function generateLlmSummary(controller, { plan, patch, extracted }) {
     'Adaptive delivery uses a full patch, representative sample, or capped batches according to the model context. Esc cancels only this LLM step.',
   ], 'process');
   const progress = beginLlmProgress(controller, { expectedMs: llmEstimate });
-  const abortController = new AbortController();
-  state.llmAbortController = abortController;
+  const operation = controller.beginOperation({ kind: 'llm-review', label: 'Generating local LLM review' });
+  state.llmAbortController = { abort: () => operation.abort() };
   controller.invalidate();
   const startedAt = Date.now();
   try {
     progress.onEvent({ type: 'phase', phase: 'model-info', label: 'Reading the selected model context limit' });
-    const session = await resolveLocalLlmSession(settings, { signal: abortController.signal });
+    const session = await resolveLocalLlmSession(settings, { signal: operation.signal });
     progress.onEvent({ type: 'model-profile', profile: session.profile });
     let guardAssessment = null;
     let guardMode = null;
@@ -101,13 +101,13 @@ async function generateLlmSummary(controller, { plan, patch, extracted }) {
       guardMode = 'structure';
       guardAssessment = await reviewArchiveStructure(
         { settings, project: state.project, workflow: state.workflow, extracted, plan },
-        { onEvent: progress.onEvent, signal: abortController.signal, session },
+        { onEvent: progress.onEvent, signal: operation.signal, session },
       );
     } else if (settings.llmArchiveReview === 'sample') {
       guardMode = 'sample';
       guardAssessment = await reviewArchiveSample(
         { settings, project: state.project, workflow: state.workflow, extracted, plan, patchContent: patch.content },
-        { onEvent: progress.onEvent, signal: abortController.signal, session },
+        { onEvent: progress.onEvent, signal: operation.signal, session },
       );
     }
     if (guardAssessment?.assessment === 'unsuitable') {
@@ -131,7 +131,7 @@ async function generateLlmSummary(controller, { plan, patch, extracted }) {
     const summarySettings = guardAssessment ? { ...settings, llmArchiveReview: 'disabled' } : settings;
     const result = await generateChangeDescription(
       { settings: summarySettings, project: state.project, plan, patchContent: patch.content },
-      { onEvent: progress.onEvent, signal: abortController.signal, session },
+      { onEvent: progress.onEvent, signal: operation.signal, session },
     );
     if (guardAssessment) {
       result.guardAssessment = guardAssessment;
@@ -190,8 +190,9 @@ async function generateLlmSummary(controller, { plan, patch, extracted }) {
         },
     };
   } finally {
-    if (state.llmAbortController === abortController) state.llmAbortController = null;
+    state.llmAbortController = null;
     progress.stop();
+    operation.finish();
   }
 }
 

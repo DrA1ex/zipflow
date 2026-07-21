@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { runShell } from '../utils/process.js';
 
-export async function runDeploy({ deploy, projectPath, onOutput = null }) {
+export async function runDeploy({ deploy, projectPath, onOutput = null, signal = null }) {
   if (!deploy?.commandText?.trim()) {
     return failureResult('Deploy command is not configured.');
   }
@@ -9,6 +9,7 @@ export async function runDeploy({ deploy, projectPath, onOutput = null }) {
     cwd: path.resolve(projectPath, deploy.cwd || '.'),
     timeoutMs: deploy.timeoutMs || 900_000,
     onOutput,
+    signal,
   });
 }
 

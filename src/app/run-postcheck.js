@@ -1,65 +1,49 @@
 import { copyTextToClipboard } from 'terlio.js';
 import { runChecks } from '../checks/runner.js';
-import { runDeploy } from '../deploy/runner.js';
-import { createCommit } from '../git/repository.js';
 import { listProjectRuns, saveRunRecord, runReportPath } from '../runs/store.js';
 import { buildRunAnalytics } from '../history/analytics.js';
 import { formatCompletionForClipboard, formatFailureForClipboard } from '../runs/text-report.js';
-import { saveWorkflow } from '../workflow/store.js';
 import { displayPath } from '../utils/paths.js';
-import { compactPlanLine, compactPlanMeta, formatArchiveName } from '../ui/format.js';
 import { confirmRollback, showRunDetails } from './run-rollback.js';
-import { failRun, releaseRunResources } from './run-lifecycle.js';
-import { finalizeSourceArchive } from './archive-policy.js';
+import { failRun } from './run-lifecycle.js';
 import { explainCheckFailure } from '../llm/failure.js';
 import { isLocalLlmEnabled } from '../llm/generate.js';
 import { beginLlmProgress } from './llm-progress.js';
 import { saveLlmDiagnostics } from '../llm/diagnostics.js';
-import { activeRunSettings, clearRunSettings } from './runtime-settings.js';
-import { pruneBackupStorage } from '../apply/backup-storage.js';
-import { markBackupsRemoved } from '../runs/backup-status.js';
-import { waitForPendingLlmReview } from './run-llm-review.js';
-import { recentArchiveHint } from '../settings/recent.js';
-import { commitMessageCandidates, commitMessageEditorInitialValue, defaultCommitMessage } from './commit-options.js';
+import { activeRunSettings } from './runtime-settings.js';
+import { handleFailedChecksAutonomy } from './run-autonomy.js';
+import { autopilotPaused, resumeAutopilot } from './autonomy-flow.js';
+import {
+  activateCommitChoice, continueAfterChecks, offerCommitAfterFailedChecks,
+  showCommitPrompt, submitCommitMessage,
+} from './run-commit-flow.js';
+import {
+  activateDeployFailure, automaticRollback, continueToDeploy, showDeployPrompt,
+  skipDeploymentFromPrompt, startDeploy,
+} from './run-deploy-flow.js';
+import { beginAnotherArchive, completeRun, showCompleted } from './run-completion.js';
 
 export { commitMessageCandidates, commitMessageEditorInitialValue, defaultCommitMessage } from './commit-options.js';
+export { finalSummaryLines, showCompleted } from './run-completion.js';
 
 export function isPostCheckScreen(screen) {
   return [
     'checks-running', 'check-failed', 'commit', 'commit-message', 'deploy-prompt',
-    'deploy-running', 'deploy-failed', 'completed',
+    'deploy-running', 'deploy-failed', 'deploy-cancelled', 'checks-cancelled', 'completed',
   ].includes(screen);
 }
 
 export async function activatePostCheck(controller, itemId) {
   const { state } = controller;
   if (state.screen === 'check-failed') return activateFailedCheck(controller, itemId);
-  if (state.screen === 'commit') {
-    if (itemId === 'create-commit') {
-      const candidate = commitMessageCandidates(state)[0];
-      if (candidate) return createResultCommit(controller, candidate.message);
-    }
-    if (itemId.startsWith('create-commit:')) {
-      const candidate = commitMessageCandidates(state).find((item) => item.id === itemId.slice('create-commit:'.length));
-      if (candidate) return createResultCommit(controller, candidate.message);
-    }
-    if (itemId === 'edit-message') return controller.showEditor('commit-message', {
-      label: 'Commit message',
-      purpose: 'commit-message',
-      placeholder: 'Enter a commit message…',
-      multiline: true,
-      context: 'Edit the preferred proposal, then press Enter to create the commit.',
-    }, commitMessageEditorInitialValue(state));
-    if (itemId === 'finish-no-commit') return continueAfterCommitChoice(controller);
-  }
+  if (state.screen === 'commit') return activateCommitChoice(controller, itemId);
   if (state.screen === 'deploy-prompt') {
     if (itemId === 'run-deploy') return startDeploy(controller);
-    if (itemId === 'skip-deploy') {
-      state.run.deploy = { skipped: true, policy: state.workflow.deploy.policy, commandText: state.workflow.deploy.commandText };
-      return completeRun(controller, 'completed');
-    }
+    if (itemId === 'skip-deploy') return skipDeploymentFromPrompt(controller);
+    if (itemId === 'resume-autopilot') { await resumeAutopilot(controller); return continueToDeployFromPostcheck(controller); }
   }
-  if (state.screen === 'deploy-failed') return activateDeployFailed(controller, itemId);
+  if (state.screen === 'deploy-failed' || state.screen === 'deploy-cancelled') return activateDeployFailure(controller, itemId);
+  if (state.screen === 'checks-cancelled') return activateCancelledChecks(controller, itemId);
   if (state.screen === 'completed') {
     if (itemId === 'run-deploy') return startDeploy(controller, { fromCompleted: true });
     if (itemId === 'copy-summary') {
@@ -76,21 +60,19 @@ export async function activatePostCheck(controller, itemId) {
 
 export function backPostCheck(controller) {
   if (controller.state.screen === 'commit-message') return showCommitPrompt(controller);
-  if (controller.state.screen === 'deploy-prompt') return showCommitOrComplete(controller);
+  if (controller.state.screen === 'deploy-prompt') return showCompleted(controller);
   if (controller.state.screen === 'completed') return controller.showHome();
   return false;
 }
 
 export async function submitPostCheckEditor(controller) {
   if (controller.state.editorContext?.purpose !== 'commit-message') return false;
-  const message = controller.state.editor.value.trim();
-  if (!message) return controller.setStatus('Enter a commit message.');
-  await createResultCommit(controller, message);
-  return true;
+  return submitCommitMessage(controller);
 }
 
 export async function startChecks(controller) {
   const { state } = controller;
+  const operation = controller.beginOperation({ kind: 'checks', label: 'Running checks' });
   const checks = state.workflow.checks.filter((check) => check.selected);
   const estimate = await previousCheckEstimate(state);
   controller.message('Checks starting', [
@@ -106,6 +88,7 @@ export async function startChecks(controller) {
       workflow: state.workflow,
       projectPath: state.project.root,
       changedPaths: state.run.applied.changedPaths,
+      signal: operation.signal,
       onUpdate: (event) => {
         if (event.type === 'started') state.checkRuntime.activeIndex = event.index;
         if (event.type === 'output') state.checkRuntime.lastLine = lastNonEmptyLine(event.event.text);
@@ -116,43 +99,96 @@ export async function startChecks(controller) {
     state.run.checks = checksResult;
     state.run.status = checksResult.ok ? 'checks_passed' : 'checks_failed';
     state.run = await saveRunRecord(state.run);
-    if (!checksResult.ok) {
-      const failed = checksResult.results.find((item) => !item.ok);
-      controller.message('Checks failed', [
-        failed?.name ?? 'Required check',
-        lastNonEmptyLine(`${failed?.stdout ?? ''}\n${failed?.stderr ?? ''}`) || 'No output',
-      ], 'error', { collapsedSummary: `Checks failed · ${failed?.name ?? 'Required check'}` });
-      await maybeExplainFailedCheck(controller, failed);
-      controller.message('Check result summary', [checkSummaryLine(checksResult)], 'summary');
-      return showFailedCheck(controller);
-    }
-    controller.message('All checks passed', [`${checksResult.passed} checks passed`], 'success', { collapsedSummary: `Checks · ${checksResult.passed}/${checksResult.passed} passed` });
+    if (!checksResult.ok) return handleFailedChecks(controller, checksResult);
+    controller.message('All checks passed', [`${checksResult.passed} checks passed`], 'success', {
+      collapsedSummary: `Checks · ${checksResult.passed}/${checksResult.passed} passed`,
+    });
     return continueAfterChecks(controller);
   } catch (error) {
+    if (error.code === 'cancelled') return showChecksCancelled(controller);
     await failRun(controller, error);
+  } finally {
+    operation.finish();
   }
 }
 
-async function continueAfterChecks(controller) {
-  await waitForPendingLlmReview(controller);
+async function handleFailedChecks(controller, checksResult) {
   const { state } = controller;
-  if (!state.run.applied.paths.length || state.workflow.git.resultCommit === 'never') return continueToDeploy(controller);
-  if (state.workflow.git.resultCommit === 'auto') return createResultCommit(controller, defaultCommitMessage(state));
-  return showCommitPrompt(controller);
+  const failed = checksResult.results.find((item) => !item.ok);
+  controller.message('Checks failed', [
+    failed?.name ?? 'Required check',
+    lastNonEmptyLine(`${failed?.stdout ?? ''}\n${failed?.stderr ?? ''}`) || 'No output',
+  ], 'error', { collapsedSummary: `Checks failed · ${failed?.name ?? 'Required check'}` });
+  await maybeExplainFailedCheck(controller, failed);
+  controller.message('Check result summary', [checkSummaryLine(checksResult)], 'summary');
+  const handled = await attemptFailedChecksAutonomy(controller, failed);
+  if (handled !== false) return handled;
+  return showFailedCheck(controller);
+}
+
+async function attemptFailedChecksAutonomy(controller, failed) {
+  return handleFailedChecksAutonomy(controller, {
+    failedCheck: failed,
+    rerun: () => startChecks(controller),
+    rollback: () => automaticRollback(controller),
+    keepUncommitted: () => completeRun(controller, 'completed_with_errors'),
+    commitAnyway: () => offerCommitAfterFailedChecks(controller, { allowDeploy: true, autonomous: true }),
+  });
+}
+
+async function continueToDeployFromPostcheck(controller) {
+  return continueToDeploy(controller);
+}
+
+async function showChecksCancelled(controller) {
+  const { state } = controller;
+  const results = state.checkRuntime?.results ?? [];
+  state.run.checks = {
+    results,
+    passed: results.filter((item) => item.ok).length,
+    failed: results.filter((item) => !item.ok).length,
+    skipped: Math.max(0, (state.checkRuntime?.checks?.length ?? 0) - results.length),
+    ok: false,
+    cancelled: true,
+  };
+  state.run.status = 'checks_cancelled';
+  state.run = await saveRunRecord(state.run);
+  controller.message('Checks cancelled', [
+    'The active check process was stopped. The applied update remains available for retry, keeping, or rollback.',
+  ], 'warning');
+  controller.showMenu('checks-cancelled', [
+    { id: 'rerun-checks', label: 'Run checks again' },
+    { id: 'keep-changes', label: 'Keep changes without successful checks' },
+    { id: 'rollback', label: 'Roll back update' },
+  ], 'Checks cancelled');
+}
+
+function activateCancelledChecks(controller, itemId) {
+  if (itemId === 'rerun-checks') return startChecks(controller);
+  if (itemId === 'keep-changes') return offerCommitAfterFailedChecks(controller);
+  if (itemId === 'rollback') return confirmRollback(controller, controller.state.run);
 }
 
 function showFailedCheck(controller) {
-  controller.showMenu('check-failed', [
+  const items = [
+    ...(autopilotPaused(controller.state) ? [{ id: 'resume-autopilot', label: 'Resume autopilot', description: 'Ask the local model to decide this failed-check checkpoint again.' }] : []),
     { id: 'copy-failure', label: 'Copy failure report', description: 'Compact report for ChatGPT' },
     { id: 'view-failure', label: 'View full failed output' },
     { id: 'rerun-checks', label: 'Run checks again', description: 'Use after manually fixing files' },
     { id: 'keep-changes', label: 'Keep changes' },
     { id: 'rollback', label: 'Roll back update', description: 'Restore the exact pre-run files' },
-  ], 'Checks failed', 0, ['The update is still applied locally.', 'Fix files and re-run checks, keep the update, or restore the exact pre-run state.']);
+  ];
+  controller.showMenu('check-failed', items, 'Checks failed', 0, ['The update is still applied locally.', 'Fix files and re-run checks, keep the update, or restore the exact pre-run state.']);
 }
 
 async function activateFailedCheck(controller, itemId) {
   const { state } = controller;
+  if (itemId === 'resume-autopilot') {
+    await resumeAutopilot(controller);
+    const failed = state.run.checks.results.find((item) => !item.ok);
+    const handled = await attemptFailedChecksAutonomy(controller, failed);
+    return handled === false ? showFailedCheck(controller) : handled;
+  }
   if (itemId === 'copy-failure') {
     const copied = await copyTextToClipboard(formatFailureForClipboard(state.run), { output: controller.runtime.output });
     return copied ? controller.toast('Failure report copied', 'success') : controller.setStatus(`Report saved at ${runReportPath(state.run.id)}`);
@@ -167,164 +203,19 @@ async function activateFailedCheck(controller, itemId) {
   if (itemId === 'rollback') return confirmRollback(controller, state.run);
 }
 
-function showCommitPrompt(controller) {
-  const state = controller.state;
-  const failedChecks = state.postCheckContinuation?.status === 'completed_with_errors';
-  const candidates = commitMessageCandidates(state);
-  const items = candidates.map((candidate, index) => ({
-    id: index === 0 ? 'create-commit' : `create-commit:${candidate.id}`,
-    label: `Create commit · ${candidate.label}`,
-    description: candidate.message,
-    help: candidate.detail,
-  }));
-  items.push({
-    id: 'edit-message',
-    label: 'Edit message…',
-    description: candidates[0]?.message || 'Enter a custom commit message.',
-  }, {
-    id: 'finish-no-commit', label: 'Continue without commit',
-    description: failedChecks ? 'Keep the update without a commit; deployment remains skipped.' : 'Continue to the configured deployment step.',
-  });
-  controller.showMenu('commit', items, failedChecks ? 'Commit kept changes' : 'Commit result', 0,
-    failedChecks ? ['Required checks failed; deployment remains skipped for this run.'] : []);
-}
-
-async function createResultCommit(controller, message) {
-  const { state } = controller;
-  const result = await createCommit(state.project.root, state.run.applied.paths, message);
-  if (!result.ok) {
-    controller.message('Commit was not created', [result.reason], 'error');
-    return showCommitPrompt(controller);
-  }
-  state.run.commit = { revision: result.revision, message };
-  state.run = await saveRunRecord(state.run);
-  controller.message('Commit created', [`${result.revision} ${firstLine(message)}`], 'success');
-  return continueAfterCommitChoice(controller);
-}
-
-function continueAfterCommitChoice(controller) {
-  const continuation = controller.state.postCheckContinuation;
-  if (continuation?.skipDeploy) {
-    controller.state.postCheckContinuation = null;
-    return completeRun(controller, continuation.status);
-  }
-  controller.state.postCheckContinuation = null;
-  return continueToDeploy(controller);
-}
-
-function offerCommitAfterFailedChecks(controller) {
-  const { state } = controller;
-  if (!state.run.applied.paths.length || state.workflow.git.resultCommit === 'never') {
-    return completeRun(controller, 'completed_with_errors');
-  }
-  state.postCheckContinuation = { status: 'completed_with_errors', skipDeploy: true };
-  controller.message('Keeping changes after failed checks', [
-    'The update will remain applied. You can still create a commit that records this exact state.',
-    'Deployment will not run because required checks failed.',
-  ], 'warning');
-  return showCommitPrompt(controller);
-}
-
-function continueToDeploy(controller) {
-  const policy = controller.state.workflow.deploy?.policy ?? 'disabled';
-  if (policy === 'always') return startDeploy(controller);
-  if (policy === 'ask') return showDeployPrompt(controller);
-  return completeRun(controller, 'completed');
-}
-
-function showDeployPrompt(controller) {
-  const deploy = controller.state.workflow.deploy;
-  controller.showMenu('deploy-prompt', [
-    { id: 'run-deploy', label: 'Run deployment', description: deploy.commandText },
-    { id: 'skip-deploy', label: 'Finish without deployment', description: 'The update and successful checks remain recorded' },
-  ], 'Checks passed · deployment is ready', 0, ['Every required check passed.', 'Deployment is optional for this run and does not change the recorded local update.']);
-}
-
-async function startDeploy(controller, { fromCompleted = false } = {}) {
-  const { state } = controller;
-  const deploy = state.workflow.deploy;
-  state.screen = 'deploy-running';
-  state.deployRuntime = { commandText: deploy.commandText, lastLine: '', fromCompleted };
-  state.status = 'Deploying';
-  controller.invalidate();
-  try {
-    const result = await runDeploy({
-      deploy,
-      projectPath: state.project.root,
-      onOutput: (event) => {
-        state.deployRuntime.lastLine = lastNonEmptyLine(event.text);
-        controller.invalidate();
-      },
-    });
-    state.run.deploy = { ...result, policy: deploy.policy, commandText: deploy.commandText, cwd: deploy.cwd || '.' };
-    state.run = await saveRunRecord(state.run);
-    if (!result.ok) {
-      controller.message('Deployment failed', [
-        deploy.commandText,
-        lastNonEmptyLine(`${result.stdout}\n${result.stderr}`) || 'No output',
-      ], 'error', { collapsedSummary: `Deployment · failed · ${deploy.commandText}` });
-      return showDeployFailed(controller);
-    }
-    controller.message('Deployment completed', [deploy.commandText], 'success', { collapsedSummary: `Deployment · completed · ${deploy.commandText}` });
-    if (fromCompleted) return showCompleted(controller);
-    return completeRun(controller, 'completed');
-  } catch (error) {
-    await failRun(controller, error);
-  }
-}
-
-function showDeployFailed(controller) {
-  controller.showMenu('deploy-failed', [
-    { id: 'view-deploy-output', label: 'View full deployment output' },
-    { id: 'retry-deploy', label: 'Run deployment again' },
-    { id: 'finish-deploy-error', label: 'Finish and keep the update', description: 'Record the deployment failure without rolling back local files' },
-    { id: 'rollback', label: 'Roll back local update', description: 'External deployment effects cannot be undone by Zipflow' },
-  ], 'Deployment failed');
-}
-
-function activateDeployFailed(controller, itemId) {
-  const { state } = controller;
-  if (itemId === 'view-deploy-output') {
-    controller.message('Deployment output', [state.run.deploy.stdout, state.run.deploy.stderr].filter(Boolean).join('\n').split('\n'));
-    return showDeployFailed(controller);
-  }
-  if (itemId === 'retry-deploy') return startDeploy(controller);
-  if (itemId === 'finish-deploy-error') return completeRun(controller, 'completed_with_errors');
-  if (itemId === 'rollback') return confirmRollback(controller, state.run);
-}
-
-async function completeRun(controller, status) {
-  const { state } = controller;
-  state.run.status = status;
-  state.run = await saveRunRecord(state.run);
-  state.workflow.lastRunId = state.run.id;
-  state.workflow = await saveWorkflow(state.workflow);
-  await finalizeSourceArchive(controller);
-  const backupCleanup = await pruneBackupStorage(activeRunSettings(state), { activeRunId: state.run.id }).catch(() => null);
-  if (backupCleanup?.removed?.length) {
-    await markBackupsRemoved(backupCleanup.removed, { reason: 'retention' }).catch(() => null);
-    controller.toast(`${backupCleanup.removed.length} old backup${backupCleanup.removed.length === 1 ? '' : 's'} removed`, 'info');
-  }
-  await releaseRunResources(controller);
-  controller.message('Final summary', finalSummaryLines(state), 'summary', { collapsedSummary: `Run complete · ${compactPlanLine(state.plan)} · ${checkSummaryLine(state.run.checks)}` });
-  clearRunSettings(state);
-  showCompleted(controller);
-}
-
-
 async function maybeExplainFailedCheck(controller, failedCheck) {
   const { state } = controller;
   const settings = activeRunSettings(state);
   if (!failedCheck || !isLocalLlmEnabled(settings) || settings.llmFailureAnalysis === 'disabled') return null;
   const progress = beginLlmProgress(controller);
-  const abortController = new AbortController();
-  state.llmAbortController = abortController;
+  const operation = controller.beginOperation({ kind: 'llm-failure-analysis', label: 'Explaining failed check' });
+  state.llmAbortController = { abort: () => operation.abort() };
   controller.setStatus('Asking the local LLM to explain the failed check');
   const startedAt = Date.now();
   try {
-    const result = await explainCheckFailure({
-      settings, project: state.project, run: state.run, failedCheck,
-    }, { onEvent: progress.onEvent, signal: abortController.signal });
+    const result = await explainCheckFailure({ settings, project: state.project, run: state.run, failedCheck }, {
+      onEvent: progress.onEvent, signal: operation.signal,
+    });
     const record = { ...result, durationMs: Date.now() - startedAt };
     state.run.llmFailure = record;
     state.run = await saveRunRecord(state.run);
@@ -337,10 +228,8 @@ async function maybeExplainFailedCheck(controller, failedCheck) {
       model: settings.llmModel, stage: 'failure-analysis', ...(cancelled ? {} : { error }),
     }).catch(() => null);
     state.run.llmFailure = {
-      durationMs: Date.now() - startedAt,
-      provider: settings.llmProvider, model: settings.llmModel,
-      mode: settings.llmFailureAnalysis,
-      cancelled, error: cancelled ? null : error.message, diagnosticsPath,
+      durationMs: Date.now() - startedAt, provider: settings.llmProvider, model: settings.llmModel,
+      mode: settings.llmFailureAnalysis, cancelled, error: cancelled ? null : error.message, diagnosticsPath,
     };
     state.run = await saveRunRecord(state.run);
     controller.message(cancelled ? 'LLM error explanation cancelled' : 'LLM error explanation unavailable', [
@@ -349,72 +238,16 @@ async function maybeExplainFailedCheck(controller, failedCheck) {
     ], 'warning');
     return null;
   } finally {
-    if (state.llmAbortController === abortController) state.llmAbortController = null;
+    state.llmAbortController = null;
     progress.stop();
+    operation.finish();
   }
-}
-
-export function finalSummaryLines(state) {
-  const lines = [];
-  if (state.run.llm?.summary?.length) lines.push(...state.run.llm.summary);
-  lines.push(
-    `${compactPlanLine(state.plan)} · ${checkSummaryLine(state.run.checks)} · Deployment ${deploymentResultLine(state)} · Source archive ${archiveDispositionLine(state.run.archiveDisposition)}`,
-    `Commit ${state.run.commit ? `${state.run.commit.revision} ${firstLine(state.run.commit.message)}` : 'not created'} · Report ${displayPath(runReportPath(state.run.id))}`,
-  );
-  return lines;
 }
 
 function checkSummaryLine(checks) {
   if (!checks) return 'Checks not run';
   const total = Number(checks.passed ?? 0) + Number(checks.failed ?? 0);
-  return checks.failed
-    ? `Checks ${checks.passed}/${total} passed · ${checks.failed} failed`
-    : `Checks ${checks.passed}/${total} passed`;
-}
-
-export function showCompleted(controller) {
-  const { state } = controller;
-  const items = [
-    { id: 'home', label: 'Finish and wait for next archive', description: 'Keep Zipflow ready for the next ZIP; Esc returns to the project menu' },
-    { id: 'copy-summary', label: 'Copy run summary', description: 'Copy a compact summary with changes, checks, commit, and deployment' },
-    { id: 'view-report', label: 'View run details', description: 'Open the stored decisions, checks, commit, deployment, and report path' },
-  ];
-  if (state.workflow.deploy?.policy === 'on-demand' && !state.run.deploy?.ok) {
-    items.push({ id: 'run-deploy', label: 'Run deployment', description: state.workflow.deploy.commandText });
-  }
-  if (!state.run.rollback || state.run.rollback.status !== 'completed') {
-    items.push({ id: 'rollback', label: 'Roll back this update', description: 'Restore the exact local state from before this run' });
-  }
-  items.push({ id: 'project-menu', label: 'Return to project menu' });
-  items.push({ id: 'exit', label: 'Exit' });
-  controller.showMenu('completed', items, 'Run completed', 0);
-}
-
-function showCommitOrComplete(controller) {
-  if (controller.state.workflow.git.resultCommit === 'ask' && controller.state.run.applied.paths.length && !controller.state.run.commit) {
-    return showCommitPrompt(controller);
-  }
-  return completeRun(controller, 'completed');
-}
-
-function beginAnotherArchive(controller) {
-  controller.showEditor('archive-input', {
-    label: 'ZIP archive path',
-    placeholder: '~/Downloads/project-update.zip',
-    purpose: 'archive-path',
-    instructions: [
-      'Drop a ZIP file into the terminal or enter its path. Tab completes ZIP paths.',
-      ...(recentArchiveHint(controller.state.settings) ? [recentArchiveHint(controller.state.settings)] : []),
-    ],
-  }, '');
-  controller.setStatus('Waiting for archive');
-}
-
-
-function deploymentResultLine(state) {
-  if (!state.run.deploy) return state.workflow.deploy?.policy === 'on-demand' ? 'available on demand' : 'not run';
-  if (state.run.deploy.skipped) return 'skipped';
-  return state.run.deploy.ok ? 'passed' : 'failed';
+  return checks.failed ? `Checks ${checks.passed}/${total} passed · ${checks.failed} failed` : `Checks ${checks.passed}/${total} passed`;
 }
 
 async function previousCheckEstimate(state) {
@@ -432,18 +265,6 @@ function estimateLabel(milliseconds) {
   return `${Math.max(1, Math.round(milliseconds / 1000))} sec`;
 }
 
-function archiveDispositionLine(value) {
-  if (!value) return 'not processed';
-  if (value.action === 'moved') return `moved to ${displayPath(value.path)}`;
-  if (value.action === 'deleted') return 'deleted by global policy';
-  if (value.action === 'kept') return 'kept in original location';
-  return value.error ? `policy failed: ${value.error}` : value.action;
-}
-
 function lastNonEmptyLine(value) {
   return String(value ?? '').split('\n').map((line) => line.trim()).filter(Boolean).at(-1) ?? '';
-}
-
-function firstLine(value) {
-  return String(value).split('\n')[0];
 }

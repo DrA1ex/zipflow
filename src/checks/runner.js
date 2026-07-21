@@ -1,13 +1,14 @@
 import path from 'node:path';
 import { runProcess, runShell } from '../utils/process.js';
 
-export async function runChecks({ workflow, projectPath, changedPaths, onUpdate = null }) {
+export async function runChecks({ workflow, projectPath, changedPaths, onUpdate = null, signal = null }) {
   const checks = workflow.checks.filter((check) => check.selected);
   const results = [];
   for (let index = 0; index < checks.length; index += 1) {
     const check = checks[index];
     onUpdate?.({ type: 'started', check, index, total: checks.length, results });
-    const result = await runCheck(check, { projectPath, changedPaths, onOutput: (event) => onUpdate?.({ type: 'output', check, index, event, results }) });
+    if (signal?.aborted) throw Object.assign(new Error('Operation cancelled.'), { code: 'cancelled' });
+    const result = await runCheck(check, { projectPath, changedPaths, signal, onOutput: (event) => onUpdate?.({ type: 'output', check, index, event, results }) });
     const normalized = { ...result, id: check.id, name: check.name, required: check.required !== false, type: check.type };
     results.push(normalized);
     onUpdate?.({ type: 'finished', check, index, total: checks.length, result: normalized, results });
@@ -70,6 +71,7 @@ function commandOptions(check, context) {
     cwd: path.resolve(context.projectPath, check.cwd || '.'),
     timeoutMs: check.timeoutMs || 600_000,
     onOutput: context.onOutput,
+    signal: context.signal,
   };
 }
 

@@ -31,8 +31,9 @@ test('version 1 workflows load with deployment and archive-message defaults', as
     });
 
     const loaded = await loadWorkflow(projectPath);
-    assert.equal(loaded.version, 6);
+    assert.equal(loaded.version, 7);
     assert.equal(loaded.deploy.policy, 'disabled');
+    assert.equal(loaded.autonomy.mode, 'manual');
     assert.equal(loaded.git.messageStrategy, 'generated');
     assert.ok(loaded.exclude.includes('.commit_message'));
     assert.equal(loaded.exclude.includes('.env'), true);
@@ -42,7 +43,7 @@ test('version 1 workflows load with deployment and archive-message defaults', as
     assert.equal(loaded.archive.allowGitIgnoredIncomingFiles, 'no');
 
     const saved = await saveWorkflow(loaded);
-    assert.equal(saved.version, 6);
+    assert.equal(saved.version, 7);
   } finally {
     delete process.env.ZIPFLOW_HOME;
   }

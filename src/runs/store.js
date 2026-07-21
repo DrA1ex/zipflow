@@ -7,7 +7,7 @@ import { formatRunReport } from './text-report.js';
 
 export async function createRunRecord({ id, project, workflow, archivePath, archiveHash = null, archiveInfo = null }) {
   const record = {
-    version: 8,
+    version: 9,
     id,
     projectPath: project.root,
     projectName: project.name,
@@ -33,6 +33,9 @@ export async function createRunRecord({ id, project, workflow, archivePath, arch
     managedHistory: null,
     rollback: null,
     decisions: [],
+    autonomy: {
+      mode: workflow.autonomy?.mode ?? 'manual', paused: false, decisions: [], fallbackCount: 0, checkRetries: 0, deployRetries: 0,
+    },
     error: null,
   };
   await saveRunRecord(record);
@@ -42,7 +45,7 @@ export async function createRunRecord({ id, project, workflow, archivePath, arch
 
 export async function createActionRunRecord({ id, project, workflow, action }) {
   const record = {
-    version: 8,
+    version: 9,
     id,
     kind: action,
     projectPath: project.root,
@@ -69,6 +72,7 @@ export async function createActionRunRecord({ id, project, workflow, action }) {
     managedHistory: null,
     rollback: null,
     decisions: [],
+    autonomy: { mode: 'manual', paused: false, decisions: [], fallbackCount: 0, checkRetries: 0, deployRetries: 0 },
     error: null,
   };
   await saveRunRecord(record);

@@ -120,3 +120,31 @@ test('completed-run archive finalization records the disposition without failing
   assert.equal(await exists(result.path), true);
   assert.ok(messages.some((message) => message.title === 'Source archive moved'));
 }));
+
+test('source archive finalization leaves a replacement file untouched when its inspected hash changed', async () => withHome(async () => {
+  const { finalizeSourceArchive } = await import('../src/app/archive-policy.js');
+  const { createRunRecord } = await import('../src/runs/store.js');
+  const source = await tempDir('zipflow-finalize-race-source-');
+  const archive = path.join(source, 'update.zip');
+  await writeFile(archive, 'replacement archive');
+  const run = await createRunRecord({
+    id: 'run-finalize-race',
+    project: { root: source, name: 'fixture' },
+    workflow: { name: 'fixture' },
+    archivePath: archive,
+    archiveHash: 'hash-recorded-during-inspection',
+  });
+  const messages = [];
+  const controller = {
+    state: { run, settings: { archivePolicy: 'delete' } },
+    message: (title, lines, tone) => messages.push({ title, lines, tone }),
+  };
+
+  const result = await finalizeSourceArchive(controller);
+
+  assert.equal(result.action, 'failed');
+  assert.match(result.error, /changed after it was inspected/);
+  assert.equal(await exists(archive), true);
+  assert.equal(await readFile(archive, 'utf8'), 'replacement archive');
+  assert.ok(messages.some((message) => message.title === 'Source archive policy could not be applied'));
+}));

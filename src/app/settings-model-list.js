@@ -22,9 +22,9 @@ export async function refreshModels(controller, { quiet = false } = {}) {
     panel.modelsProvider = provider;
     const current = findConfiguredModel(panel.models, state.settings.llmModel);
     if (current && current.id !== state.settings.llmModel) {
-      state.settings = await saveSettings({ ...state.settings, llmModel: current.id });
+      state.settings = await saveSettings({ ...state.settings, llmModel: current.id, llmDecisionCompatibility: null });
     } else if (!current && state.settings.llmModel) {
-      state.settings = await saveSettings({ ...state.settings, llmModel: '' });
+      state.settings = await saveSettings({ ...state.settings, llmModel: '', llmDecisionCompatibility: null });
     }
     if (!quiet) {
       state.status = 'Local LLM';

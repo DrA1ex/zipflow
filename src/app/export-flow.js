@@ -156,8 +156,8 @@ function showExportMode(controller) {
 
 async function prepareExportPreview(controller, { custom = false } = {}) {
   const { state } = controller;
-  const abortController = new AbortController();
-  state.exportAbortController = abortController;
+  const operation = controller.beginOperation({ kind: 'export-preview', label: 'Preparing ZIP preview' });
+  state.exportAbortController = { abort: () => operation.abort() };
   state.busy = true;
   state.screen = 'export-running';
   state.busyLabel = 'Preparing ZIP preview';
@@ -167,18 +167,18 @@ async function prepareExportPreview(controller, { custom = false } = {}) {
     const paths = custom
       ? await collectCustomExportPaths({
         project: state.project,
-        signal: abortController.signal,
+        signal: operation.signal,
         onProgress: scanProgress(controller),
       })
       : await collectExportPaths({
         project: state.project,
         mode: state.exportDraft.mode,
-        signal: abortController.signal,
+        signal: operation.signal,
         onProgress: scanProgress(controller),
       });
     const sortedPaths = paths.sort((left, right) => left.localeCompare(right));
     const pathSizes = await collectPathSizes(state.project.root, sortedPaths, {
-      signal: abortController.signal,
+      signal: operation.signal,
       onProgress: (current, total, relative) => {
         state.progress = { value: current, total: Math.max(1, total), detail: `Reading sizes · ${relative}` };
         controller.invalidate();
@@ -205,12 +205,14 @@ async function prepareExportPreview(controller, { custom = false } = {}) {
     updateSelectedSize(state.exportDraft);
     state.busy = false;
     state.exportAbortController = null;
+    operation.finish();
     if (custom) return showExportFiles(controller, 0, { origin: 'mode' });
     if (sensitive.length) return showSensitiveReview(controller);
     return showExportPreview(controller);
   } catch (error) {
     state.busy = false;
     state.exportAbortController = null;
+    operation.finish();
     if (error.code === 'cancelled') {
       controller.toast('ZIP preview preparation cancelled', 'info');
       return showExportMode(controller);
@@ -432,6 +434,7 @@ function showExportPath(controller) {
 
 async function createArchive(controller) {
   const { state } = controller;
+  const operation = controller.beginOperation({ kind: 'export-create', label: 'Creating ZIP archive' });
   state.busy = true;
   state.screen = 'export-running';
   state.busyLabel = 'Creating ZIP archive';
@@ -444,6 +447,7 @@ async function createArchive(controller) {
       projectRoot: state.project.root,
       paths,
       outputPath: state.exportDraft.outputPath,
+      signal: operation.signal,
       onProgress: ({ current, total, path: currentPath }) => {
         state.progress = { value: current, total: Math.max(1, total), detail: currentPath };
         controller.invalidate();
@@ -469,8 +473,11 @@ async function createArchive(controller) {
     ]);
   } catch (error) {
     state.busy = false;
-    controller.message('Could not create ZIP archive', [error.message], 'error');
+    if (error.code === 'cancelled') controller.toast('ZIP creation cancelled', 'info');
+    else controller.message('Could not create ZIP archive', [error.message], 'error');
     showExportMode(controller);
+  } finally {
+    operation.finish();
   }
 }
 

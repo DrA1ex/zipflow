@@ -199,6 +199,7 @@ test('selected model compatibility test validates metadata and the Zipflow text 
   const originalFetch = globalThis.fetch;
   const toasts = [];
   try {
+    let chatCalls = 0;
     globalThis.fetch = async (url) => {
       if (url.endsWith('/api/v1/models')) return jsonResponse({
         models: [{
@@ -207,9 +208,18 @@ test('selected model compatibility test validates metadata and the Zipflow text 
           capabilities: { reasoning: { allowed_options: ['off'] } },
         }],
       });
-      if (url.endsWith('/api/v1/chat')) return jsonResponse({
-        output: [{ type: 'message', content: 'SUMMARY:\n- Model connection works.\nCOMMIT MESSAGE:\nTest local model compatibility' }],
-      });
+      if (url.endsWith('/api/v1/chat')) {
+        chatCalls += 1;
+        if (chatCalls === 1) return jsonResponse({
+          output: [{ type: 'message', content: 'SUMMARY:\n- Model connection works.\nCOMMIT MESSAGE:\nTest local model compatibility' }],
+        });
+        return jsonResponse({
+          output: [{ type: 'message', content: JSON.stringify({
+            schemaVersion: 1, gate: 'compatibility-decision', action: 'continue', targetId: null,
+            confidence: 1, summary: 'Autonomous decision protocol works.', evidence: [], risks: [], conditions: [],
+          }) }],
+        });
+      }
       throw new Error(`Unexpected URL: ${url}`);
     };
     const state = createInitialState();
@@ -227,6 +237,8 @@ test('selected model compatibility test validates metadata and the Zipflow text 
     assert.equal(ok, true);
     assert.equal(state.settingsPanel.modelTest.status, 'passed');
     assert.equal(state.settingsPanel.modelTest.contextLength, 16_384);
+    assert.equal(state.settingsPanel.modelTest.autonomousDecisionProtocol, true);
+    assert.equal(state.settings.llmDecisionCompatibility.supported, true);
     assert.ok(toasts.some(([message, level]) => message === 'Model test passed' && level === 'success'));
   } finally {
     globalThis.fetch = originalFetch;

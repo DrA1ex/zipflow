@@ -88,6 +88,7 @@ export function workflowOverviewLines(workflow) {
     `Archive: ${workflow.archive.mode === 'snapshot' ? snapshotLabel(workflow.deletion.scope) : 'Overlay · missing files are kept'}`,
     `Conflicts: ${workflow.policy.conflictPolicy === 'overwrite' ? 'use archive after backup' : 'ask only for affected files'} · Plan: ${workflow.policy.confirmPlan ? 'always review' : 'auto-apply when safe'}`,
     `Checks: ${checkNames.length ? checkNames.join(', ') : 'none'}`,
+    `Decision mode: ${workflow.autonomy?.mode === 'full' ? 'Full autopilot · Dangerous' : workflow.autonomy?.mode === 'guarded' ? 'Guarded autopilot' : 'Manual'}`,
     `Git: checkpoint ${shortPolicy(workflow.git.checkpoint)} · result commit ${shortPolicy(workflow.git.resultCommit)} · Deploy ${formatDeployPolicy(workflow.deploy?.policy).toLowerCase()}`,
   ];
 }
@@ -104,6 +105,7 @@ export function runStatusLabel(status) {
   const labels = {
     completed: 'Completed', completed_with_errors: 'Completed with errors', checks_failed: 'Checks failed',
     failed: 'Failed', cancelled: 'Cancelled', rolled_back: 'Rolled back', applied: 'Applied', checks_passed: 'Checks passed',
+    interrupted: 'Interrupted', interrupted_closed: 'Interrupted · closed', checks_cancelled: 'Checks cancelled',
   };
   return labels[status] ?? String(status || 'Unknown').replaceAll('_', ' ');
 }

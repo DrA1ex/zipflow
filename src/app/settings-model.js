@@ -152,6 +152,7 @@ async function useConfiguredModel(controller) {
   const config = state.settingsPanel.modelConfig;
   const model = config.model;
   if (config.loading) return true;
+  const operation = controller.beginOperation({ kind: 'model-load', label: `Applying ${model.label}` });
   config.loading = true;
   config.progressLabel = 'Applying model configuration…';
   config.error = null;
@@ -159,12 +160,13 @@ async function useConfiguredModel(controller) {
   controller.invalidate();
   try {
     const result = state.settings.llmProvider === 'lmstudio'
-      ? await reconcileLmStudioModel(controller, model, config)
+      ? await reconcileLmStudioModel(controller, model, config, operation.signal)
       : { instanceId: null, config: config.values };
     const configKey = modelConfigKey(state.settings.llmProvider, model.key);
     state.settings = await saveSettings({
       ...state.settings,
       llmModel: model.key,
+      llmDecisionCompatibility: null,
       llmSelectedInstanceId: result.instanceId,
       llmModelLoadConfigs: {
         ...(state.settings.llmModelLoadConfigs ?? {}),
@@ -180,9 +182,16 @@ async function useConfiguredModel(controller) {
     state.status = 'Model saved and selected';
     controller.toast(`${model.label} selected`, 'success');
   } catch (error) {
-    config.error = error.message;
-    state.status = error.message;
+    if (error.code === 'cancelled') {
+      config.error = null;
+      state.status = 'Model configuration cancelled';
+      controller.toast('Model configuration cancelled', 'info');
+    } else {
+      config.error = error.message;
+      state.status = error.message;
+    }
   } finally {
+    operation.finish();
     if (state.settingsPanel.modelConfig) {
       state.settingsPanel.modelConfig.loading = false;
       state.settingsPanel.modelConfig.progressLabel = '';
@@ -192,7 +201,7 @@ async function useConfiguredModel(controller) {
   return true;
 }
 
-async function reconcileLmStudioModel(controller, model, config) {
+async function reconcileLmStudioModel(controller, model, config, signal = null) {
   const { state } = controller;
   const loadedIds = uniqueLoadedInstanceIds(state.settingsPanel.models);
   const sameSingleInstance = loadedIds.length === 1
@@ -205,7 +214,7 @@ async function reconcileLmStudioModel(controller, model, config) {
     config.progressLabel = `Unloading ${instanceId}…`;
     state.status = config.progressLabel;
     controller.invalidate();
-    await unloadLmStudioModel(instanceId, { apiToken: state.settings.llmApiToken });
+    await unloadLmStudioModel(instanceId, { apiToken: state.settings.llmApiToken, signal });
     state.settingsPanel.models = state.settingsPanel.models.map((item) => item.loadedInstanceIds?.includes(instanceId)
       ? { ...item, loaded: false, loadedInstanceId: null, loadedInstanceIds: [], config: {}, contextLength: null }
       : item);
@@ -213,7 +222,7 @@ async function reconcileLmStudioModel(controller, model, config) {
   config.progressLabel = `Loading ${model.label}…`;
   state.status = config.progressLabel;
   controller.invalidate();
-  const loaded = await loadLmStudioModel(model.key, config.values, { apiToken: state.settings.llmApiToken });
+  const loaded = await loadLmStudioModel(model.key, config.values, { apiToken: state.settings.llmApiToken, signal });
   return {
     instanceId: loaded.instanceId,
     config: { ...config.values, ...normalizeApiConfig(loaded.config) },

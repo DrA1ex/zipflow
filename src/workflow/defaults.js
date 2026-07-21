@@ -1,4 +1,6 @@
-export const WORKFLOW_VERSION = 6;
+import { defaultAutonomy, normalizeAutonomy } from '../autonomy/policies.js';
+
+export const WORKFLOW_VERSION = 7;
 
 export const DEFAULT_EXCLUDES = [
   '.git/**',
@@ -62,6 +64,7 @@ export function createRecommendedWorkflow(project) {
     exclude: [...DEFAULT_EXCLUDES],
     checks: project.checks.map((check) => ({ ...check })),
     policy: { ...POLICY_PROFILES.practical },
+    autonomy: defaultAutonomy(),
     git: {
       checkpoint: 'ask',
       resultCommit: 'ask',
@@ -99,6 +102,7 @@ export function normalizeWorkflow(workflow) {
   normalized.archive.allowGitIgnoredIncomingFiles = 'no';
   normalized.deletion = { scope: 'tracked-only', ...(normalized.deletion ?? {}) };
   normalized.policy = { ...POLICY_PROFILES.practical, ...(normalized.policy ?? {}) };
+  normalized.autonomy = normalizeAutonomy(normalized.autonomy);
   normalized.git = {
     checkpoint: 'ask',
     resultCommit: 'ask',

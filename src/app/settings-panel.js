@@ -379,7 +379,11 @@ async function activateChoice(controller) {
     return returnAfterChoice(controller, parameter.id, `${result.removed} managed path${result.removed === 1 ? '' : 's'} cleared`);
   }
   if (option.settingId) {
-    state.settings = await saveSettings({ ...state.settings, [option.settingId]: option.value });
+    state.settings = await saveSettings({
+      ...state.settings,
+      [option.settingId]: option.value,
+      ...(['llmProvider', 'llmModel'].includes(option.settingId) ? { llmDecisionCompatibility: null } : {}),
+    });
     if (option.settingId === 'archivePolicy' && option.value === 'move') {
       await ensureDir(path.resolve(expandHome(state.settings.archiveDirectory)));
     }

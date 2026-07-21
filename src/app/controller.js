@@ -5,7 +5,7 @@ import { ensureZipflowHome, getZipflowHome, loadWorkflow } from '../workflow/sto
 import { loadSettings } from '../settings/store.js';
 import { displayPath } from '../utils/paths.js';
 import { ZIPFLOW_VERSION } from '../version.js';
-import { appendMessage, refreshMenuSearch, setScreen } from './state.js';
+import { appendMessage, setScreen } from './state.js';
 import {
   activateSetup, backSetup, beginSetup, handleSetupShortcut, handlesSetupScreen, submitSetupEditor,
 } from './setup-flow.js';
@@ -20,8 +20,13 @@ import { handleReplayDispatch } from './settings-model-replay.js';
 import { projectSummary } from '../ui/format.js';
 import { toggleActivityBlockAtRow, toggleActivityBlockAtScroll } from '../ui/activity.js';
 import { terminateActiveProcesses } from '../utils/process.js';
+import { OperationManager } from '../operations/manager.js';
 import { removeIfExists } from '../utils/fs.js';
 import { clearRunSettings } from './runtime-settings.js';
+import { offerInterruptedRunRecovery } from './interrupted-run.js';
+import {
+  beginMenuSearch, followLatestActivity, handleMenuSearchKey, showContextHelp,
+} from './controller-navigation.js';
 import {
   activateExport, backExport, beginCreateZip, handleExportShortcut, handlesExportScreen, submitExportEditor,
 } from './export-flow.js';
@@ -37,6 +42,10 @@ export class ZipflowController {
     this.state = state;
     this.runtime = null;
     this.activeLock = null;
+    this.operations = new OperationManager({
+      onChange: (operation) => { state.activeOperation = operation; this.invalidate(); },
+      forceStop: () => terminateActiveProcesses({ graceMs: 0 }),
+    });
     state.dispatch = (action) => { void this.dispatch(action).catch((error) => this.handleUnexpected(error)); };
   }
 
@@ -53,10 +62,10 @@ export class ZipflowController {
       this.state.workflow = await loadWorkflow(this.state.project.root);
       this.message('Project detected', projectSummary(this.state.project, this.state.workflow), 'project');
       if (this.state.workflow) {
+        if (await offerInterruptedRunRecovery(this)) return;
         this.message('Hint', ['Current workflow loaded. Zipflow is waiting for a ZIP archive; press Esc to open the project menu or change the workflow.']);
         beginArchiveInput(this);
-      }
-      else this.showHome();
+      } else this.showHome();
     } catch (error) {
       this.message('Zipflow could not start', [error.message], 'error');
       this.showMenu('error', [{ id: 'exit', label: 'Exit' }], 'Startup failed');
@@ -65,6 +74,7 @@ export class ZipflowController {
 
   async handleKey(key) {
     const normalized = key.printable && key.text === ' ' ? { ...key, name: 'space' } : key;
+    if (normalized.ctrl && normalized.name === 'c') return this.handleInterrupt();
     if (this.state.helpToast) {
       if (normalized.name === 'escape') {
         this.state.helpToast = null;
@@ -79,7 +89,7 @@ export class ZipflowController {
         return this.invalidate();
       }
     }
-    if (this.state.menuSearch?.active) return this.handleMenuSearchKey(normalized);
+    if (this.state.menuSearch?.active) return handleMenuSearchKey(this, normalized);
     if (normalized.ctrl && normalized.name === 't') {
       const pointerEnabled = this.runtime?.togglePointerOverride?.();
       this.setStatus(pointerEnabled === false
@@ -110,7 +120,7 @@ export class ZipflowController {
       return;
     }
     if (this.state.busy || ['checks-running', 'deploy-running', 'manual-checks-running', 'manual-deploy-running'].includes(this.state.screen)) return;
-    if (normalized.printable && normalized.text === '?') return this.showContextHelp();
+    if (normalized.printable && normalized.text === '?') return showContextHelp(this);
     if (normalized.name === 'page-up' || normalized.name === 'page-down') {
       const delta = normalized.name === 'page-up' ? -8 : 8;
       const maxScroll = this.state.activityLayout?.maxScroll ?? Number.MAX_SAFE_INTEGER;
@@ -120,11 +130,11 @@ export class ZipflowController {
       return this.invalidate();
     }
     if (normalized.name === 'end' && !isEditorScreen(this.state.screen)) {
-      this.followLatestActivity();
+      followLatestActivity(this);
       return this.invalidate();
     }
     if (normalized.printable && normalized.text === '/' && isSearchableScreen(this.state.screen)) {
-      this.beginMenuSearch();
+      beginMenuSearch(this);
       return this.invalidate();
     }
     if (normalized.printable && normalized.text?.toLowerCase() === 'e' && !isEditorScreen(this.state.screen)) {
@@ -142,6 +152,33 @@ export class ZipflowController {
     if (normalized.name === 'enter' || normalized.name === 'space') return this.activateSelected();
     if (normalized.name === 'escape') return this.back();
   }
+
+  beginOperation(options) {
+    return this.operations.begin(options);
+  }
+
+  showContextHelp() {
+    return showContextHelp(this);
+  }
+
+  async handleInterrupt() {
+    const result = await this.operations.interrupt();
+    if (!result.handled) {
+      this.exit(0);
+      return;
+    }
+    const operation = result.operation;
+    if (result.waitingForCritical) {
+      this.setStatus(`Cancellation requested · finishing ${operation?.phase || operation?.label || 'the current transaction'}…`);
+      return;
+    }
+    if (result.forced) {
+      this.setStatus(`Force-stopping ${operation?.label || 'the active operation'}…`);
+      return;
+    }
+    this.setStatus(`Cancelling ${operation?.label || 'the active operation'}…`);
+  }
+
   async dispatch(action) {
     if (action.type === 'dismiss-help-toast') {
       this.state.helpToast = null;
@@ -149,7 +186,7 @@ export class ZipflowController {
       return;
     }
     if (action.type === 'activity-follow-latest') {
-      this.followLatestActivity();
+      followLatestActivity(this);
       this.invalidate();
       return;
     }
@@ -336,57 +373,6 @@ export class ZipflowController {
 
   async inspectArchivePath(archivePath, options = {}) {
     return inspectArchivePath(this, archivePath, options);
-  }
-
-  showContextHelp() {
-    const item = this.state.menuItems[this.state.selectedIndex];
-    if (!item) return;
-    const summary = item.context || item.description || 'No additional description is available for this action.'; const lines = [summary];
-    if (item.help && item.help !== summary) lines.push('', item.help);
-    this.state.helpToast = {
-      title: `Help · ${item.label}`,
-      lines,
-      level: 'info',
-      expiresAt: Date.now() + 12_000,
-    };
-    this.invalidate();
-  }
-
-  beginMenuSearch() {
-    const previousQuery = this.state.menuSearch?.screen === this.state.screen ? this.state.menuSearch.query : '';
-    this.state.menuSearch = { screen: this.state.screen, query: previousQuery, active: true };
-    this.state.searchEditor.set(previousQuery);
-    refreshMenuSearch(this.state, previousQuery);
-  }
-
-  handleMenuSearchKey(key) {
-    if (key.name === 'escape') {
-      if (this.state.searchEditor.value) {
-        this.state.searchEditor.set('');
-        refreshMenuSearch(this.state, '');
-      } else {
-        this.state.menuSearch.active = false;
-      }
-      return this.invalidate();
-    }
-    if (key.name === 'enter') {
-      this.state.menuSearch.active = false;
-      return this.invalidate();
-    }
-    if (key.name === 'up' || key.name === 'down') {
-      this.moveSelection(key.name === 'up' ? -1 : 1);
-      return this.invalidate();
-    }
-    handleInputEditorKey(this.state.searchEditor, key, { multiline: false });
-    refreshMenuSearch(this.state, this.state.searchEditor.value);
-    return this.invalidate();
-  }
-
-  followLatestActivity() {
-    const maxScroll = this.state.activityLayout?.maxScroll ?? this.state.transcriptScroll;
-    this.state.transcriptScroll = Math.max(0, maxScroll);
-    this.state.transcriptSticky = true;
-    this.state.activityUnread = 0;
   }
 
   recoveryText() {

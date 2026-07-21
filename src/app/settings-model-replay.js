@@ -66,13 +66,13 @@ export async function beginHistoricalModelReplay(controller) {
     controller.toast('The stored patch for this run is unavailable', 'warning');
     return false;
   }
-  const abortController = new AbortController();
+  const operation = controller.beginOperation({ kind: 'model-replay', label: 'Replaying historical model input' });
   Object.assign(workspace, {
     mode: 'progress', running: true, status: 'Preparing historical replay',
     startedAt: Date.now(), elapsedMs: 0, blocks: [], scroll: 0, maxScroll: 0,
-    follow: true, unread: 0, unreadBlockIds: new Set(), result: null, error: null, abortController,
+    follow: true, unread: 0, unreadBlockIds: new Set(), result: null, error: null, abortController: { abort: () => operation.abort() },
   });
-  state.settingsTestAbortController = abortController;
+  state.settingsTestAbortController = { abort: () => operation.abort() };
   addBlock(workspace, 'session', 'Session', [
     `Historical run: ${run.id}`,
     `Archive: ${run.archivePath || '(unknown)'}`,
@@ -92,7 +92,7 @@ export async function beginHistoricalModelReplay(controller) {
       plan: run.plan,
       patchContent: patch.content,
     }, {
-      signal: abortController.signal,
+      signal: operation.signal,
       onEvent: (event) => updateReplayWorkspace(controller, event),
     });
     workspace.result = result;
@@ -102,7 +102,7 @@ export async function beginHistoricalModelReplay(controller) {
     noteReplayChange(workspace, 'parsed-result');
     return true;
   } catch (error) {
-    const cancelled = abortController.signal.aborted || error.code === 'cancelled' || error.name === 'AbortError';
+    const cancelled = operation.signal.aborted || error.code === 'cancelled' || error.name === 'AbortError';
     workspace.status = cancelled ? 'Replay cancelled' : 'Replay failed';
     workspace.error = cancelled ? null : error.message;
     markActiveBlocksDone(workspace);
@@ -115,7 +115,8 @@ export async function beginHistoricalModelReplay(controller) {
     clearInterval(timer);
     workspace.running = false;
     workspace.elapsedMs = Date.now() - workspace.startedAt;
-    if (state.settingsTestAbortController === abortController) state.settingsTestAbortController = null;
+    state.settingsTestAbortController = null;
+    operation.finish();
     controller.invalidate();
   }
 }

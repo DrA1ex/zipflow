@@ -7,6 +7,7 @@ export function formatRunReport(run) {
     ...(run.archivePath ? [`Archive: ${run.archivePath}`] : []),
     `Status: ${run.status}`,
     `Created: ${run.createdAt}`,
+    ...(run.autonomy?.mode ? [`Decision mode: ${autonomyLabel(run.autonomy.mode)}${run.autonomy.paused ? ' · paused' : ''}`] : []),
   ];
   if (run.archiveMetadata?.source) lines.push(`Commit message source: ${run.archiveMetadata.source}`);
   if (run.archiveDisposition) lines.push(`Source archive: ${formatArchiveDisposition(run.archiveDisposition)}`);
@@ -73,9 +74,27 @@ export function formatRunReport(run) {
     if (run.deploy.commandText) lines.push(`Command: ${run.deploy.commandText}`);
     if (!run.deploy.ok && !run.deploy.skipped) appendCommandOutput(lines, run.deploy);
   }
-  if (run.decisions?.length) {
+  const autonomyDecisions = (run.decisions ?? []).filter((decision) => decision.gate);
+  const userDecisions = (run.decisions ?? []).filter((decision) => !decision.gate && decision.label);
+  if (autonomyDecisions.length) {
+    lines.push('', 'Autopilot decisions:');
+    for (const decision of autonomyDecisions) {
+      const confidence = decision.effectiveConfidence ?? decision.confidence;
+      lines.push(
+        `- ${decision.gate}: ${decision.action}${decision.proposedAction && decision.proposedAction !== decision.action ? ` (proposed ${decision.proposedAction})` : ''}`,
+        `  Source: ${decision.source ?? 'llm'} · Execution: ${decision.executionStatus ?? 'unknown'}`,
+        `  ${confidence == null ? 'Confidence: n/a' : `Confidence: ${Math.round(Number(confidence) * 100)}%`} · ${decision.model ?? 'unknown model'} · ${decision.durationMs ?? 0} ms`,
+        `  ${decision.summary ?? 'No summary recorded.'}`,
+      );
+      if (decision.executionError) lines.push(`  Execution error: ${decision.executionError}`);
+      for (const risk of decision.risks ?? []) lines.push(`  Risk: ${risk}`);
+      if (decision.stateDrift) lines.push('  State drift: detected; action was not executed.');
+    }
+    if (run.autonomy?.fallbackCount) lines.push(`Autopilot fallbacks: ${run.autonomy.fallbackCount}`);
+  }
+  if (userDecisions.length) {
     lines.push('', 'User decisions:');
-    for (const decision of run.decisions) lines.push(`- ${decision.label} [${decision.screen}]`);
+    for (const decision of userDecisions) lines.push(`- ${decision.label} [${decision.screen}]`);
   }
   if (run.rollback) lines.push('', `Rollback: ${run.rollback.status}`);
   if (run.error) lines.push('', `Error: ${run.error.message ?? run.error}`);
@@ -92,6 +111,7 @@ export function formatCompletionForClipboard(run) {
     ...(run.kind ? [`Action: ${actionLabel(run.kind)}`] : []),
     ...(run.archivePath ? [`Archive: ${run.archivePath}`] : []),
     `Status: ${run.status}`,
+    ...(run.autonomy?.mode && run.autonomy.mode !== 'manual' ? [`Decision mode: ${autonomyLabel(run.autonomy.mode)}`] : []),
     '',
     `Changes: ${counts.created ?? 0} added · ${counts.updated ?? 0} changed · ${counts.deleted ?? 0} removed`,
     `Unchanged: ${counts.unchanged ?? 0} · Ignored: ${counts.skipped ?? 0} · Preserved: ${counts.preserved ?? 0}`,
@@ -157,6 +177,12 @@ function formatDuration(milliseconds = 0) {
 
 function firstLine(value) {
   return String(value ?? '').split(/\r?\n/, 1)[0];
+}
+
+function autonomyLabel(mode) {
+  if (mode === 'guarded') return 'Guarded autopilot';
+  if (mode === 'full') return 'Full autopilot · Dangerous';
+  return 'Manual';
 }
 
 function actionLabel(kind) {
