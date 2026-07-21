@@ -24,7 +24,7 @@ export function buildTranscript(state, theme, width) {
     ranges.push({ messageId: message.id, start, end, collapsible: message.collapsible, collapsed: message.collapsed });
     lines.push('');
   }
-  if (state.llmRuntime) lines.push(...llmActivityLines(state.llmRuntime, width));
+  if (state.llmRuntime) lines.push(...llmActivityLines(state.llmRuntime, width, theme));
   const result = { lines, ranges };
   if (!state.llmRuntime) transcriptCache.set(state, { theme, width, signature, result });
   return result;

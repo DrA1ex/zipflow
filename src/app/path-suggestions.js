@@ -1,8 +1,9 @@
 import path from 'node:path';
 import { exists } from '../utils/fs.js';
 import { suggestPathEntries } from '../utils/paths.js';
+import { outputPathForDirectory } from '../export/output-path.js';
 
-const PATH_SCREENS = new Set(['project-path-input', 'archive-input']);
+const PATH_SCREENS = new Set(['project-path-input', 'archive-input', 'export-path']);
 
 export async function showRecentArchiveSuggestions(controller) {
   const { state } = controller;
@@ -56,7 +57,19 @@ export async function refreshPathSuggestions(controller, { settingsModal = false
   };
   controller.invalidate();
   try {
-    const items = await suggestPathEntries(state.editor.value, spec.options);
+    let items = await suggestPathEntries(state.editor.value, spec.options);
+    if (spec.owner === 'export-path') {
+      items = items.map((item) => item.id.startsWith('use:')
+        ? {
+            ...item,
+            insert: outputPathForDirectory(item.path, state.project, state.exportDraft?.outputPath),
+            label: `Use ${path.basename(item.path) || item.path} and generate ZIP name`,
+            detail: 'AUTO',
+            description: 'Generate the default archive filename in this directory.',
+            submit: true,
+          }
+        : item);
+    }
     if (state.pathSuggestions?.requestId !== requestId) return;
     const previousId = state.pathSuggestions.items?.[state.pathSuggestions.selectedIndex]?.id;
     const selectedIndex = Math.max(0, items.findIndex((item) => item.id === previousId));
@@ -134,6 +147,14 @@ function pathSuggestionSpec(state, settingsModal) {
     options: {
       cwd: state.project?.root ?? process.cwd(),
       extension: '.zip',
+    },
+  };
+  if (state.screen === 'export-path') return {
+    owner: state.screen,
+    options: {
+      cwd: state.settings?.lastExportDirectory || path.dirname(state.project?.root ?? process.cwd()),
+      extension: '.zip',
+      includeCurrentDirectory: true,
     },
   };
   return null;

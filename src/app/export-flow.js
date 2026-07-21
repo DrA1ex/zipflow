@@ -4,16 +4,18 @@ import { copyTextToClipboard } from 'terlio.js';
 import { collectCustomExportPaths, collectExportPaths, classifyCustomExportPaths } from '../export/candidates.js';
 import { inspectPotentiallySensitivePaths, sensitivePathMap } from '../export/sensitive.js';
 import { createProjectArchive } from '../export/create.js';
-import { displayPath, parseEnteredPath } from '../utils/paths.js';
+import { displayPath } from '../utils/paths.js';
 import { runProcess } from '../utils/process.js';
 import { rememberExportPath } from '../settings/recent.js';
+import { exists } from '../utils/fs.js';
+import { defaultArchivePath, normalizeOutputArchivePath } from '../export/output-path.js';
 import {
   enterTreeDirectory, exportTreeItems, initializeExportTree, leaveTreeDirectory,
   nextDirectoryItemIndex, selectAllTreePaths, toggleTreeEntry, treeLocationLabel,
 } from './export-tree.js';
 
 export function handlesExportScreen(screen) {
-  return ['export-mode', 'export-sensitive', 'export-protected', 'export-preview', 'export-files', 'export-path', 'export-running', 'export-complete'].includes(screen);
+  return ['export-mode', 'export-sensitive', 'export-protected', 'export-preview', 'export-files', 'export-path', 'export-overwrite', 'export-running', 'export-complete'].includes(screen);
 }
 
 export function beginCreateZip(controller) {
@@ -50,6 +52,17 @@ export async function activateExport(controller, itemId) {
     if (itemId === 'export-cancel') return controller.showHome();
   }
   if (state.screen === 'export-files') return activateTreeItem(controller, itemId);
+  if (state.screen === 'export-overwrite') {
+    if (itemId === 'export-overwrite-confirm') {
+      state.exportDraft.outputPath = state.exportDraft.pendingOutputPath;
+      state.exportDraft.pendingOutputPath = null;
+      return createArchive(controller);
+    }
+    if (itemId === 'export-overwrite-back') {
+      state.exportDraft.pendingOutputPath = null;
+      return showExportPath(controller);
+    }
+  }
   if (state.screen === 'export-complete') {
     if (itemId === 'export-copy-path') {
       const copied = await copyTextToClipboard(state.exportDraft.result.outputPath, { output: controller.runtime?.output });
@@ -86,12 +99,23 @@ export function handleExportShortcut(controller, key) {
 
 export async function submitExportEditor(controller) {
   if (controller.state.editorContext?.purpose !== 'export-path') return false;
-  const entered = controller.state.editor.value.trim();
-  if (!entered) {
-    controller.setStatus('Enter the output ZIP path.');
+  const state = controller.state;
+  const entered = state.editor.value.trim() || state.exportDraft.outputPath;
+  const outputPath = await normalizeOutputArchivePath(entered, {
+    cwd: path.dirname(state.project.root),
+    project: state.project,
+    settings: state.settings,
+    currentDefault: state.exportDraft.outputPath,
+  });
+  if (await exists(outputPath)) {
+    state.exportDraft.pendingOutputPath = outputPath;
+    controller.showMenu('export-overwrite', [
+      { id: 'export-overwrite-confirm', label: 'Replace existing archive', description: displayPath(outputPath) },
+      { id: 'export-overwrite-back', label: 'Choose another path' },
+    ], 'Archive already exists', 1, [`${displayPath(outputPath)} already exists.`]);
     return true;
   }
-  controller.state.exportDraft.outputPath = parseEnteredPath(entered, path.dirname(controller.state.project.root));
+  state.exportDraft.outputPath = outputPath;
   await createArchive(controller);
   return true;
 }
@@ -110,6 +134,7 @@ export function backExport(controller) {
     return showExportPreview(controller);
   }
   if (screen === 'export-path') return showExportPreview(controller);
+  if (screen === 'export-overwrite') return showExportPath(controller);
   if (screen === 'export-complete') return controller.showHome();
 }
 
@@ -399,13 +424,10 @@ function showExportPath(controller) {
   const draft = controller.state.exportDraft;
   controller.showEditor('export-path', {
     label: 'Output ZIP path',
-    placeholder: draft.outputPath,
+    placeholder: displayPath(draft.outputPath),
     purpose: 'export-path',
-    instructions: [
-      `Mode: ${modeLabel(draft.mode)}`,
-      'The archive is written outside the project by default so it cannot include itself.',
-    ],
-  }, draft.outputPath);
+    context: 'Tab completes paths. Choose a directory to generate the archive filename automatically.',
+  }, '');
 }
 
 async function createArchive(controller) {
@@ -450,16 +472,6 @@ async function createArchive(controller) {
     controller.message('Could not create ZIP archive', [error.message], 'error');
     showExportMode(controller);
   }
-}
-
-function defaultArchivePath(project, settings = {}) {
-  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, '').replace('T', '-');
-  const directory = settings.lastExportDirectory || path.dirname(project.root);
-  return path.join(directory, `${safeName(project.name)}-${stamp}.zip`);
-}
-
-function safeName(value) {
-  return String(value || 'project').replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'project';
 }
 
 function modeLabel(mode) {

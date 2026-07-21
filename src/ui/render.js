@@ -9,7 +9,6 @@ import {
   ScrollPane,
   SelectList,
   Text,
-  TextEditorView,
   WorkspaceFooter,
   WorkspacePane,
   WorkspaceShell,
@@ -29,6 +28,8 @@ import { renderSettings } from './settings-view.js';
 import { settingsViewModel } from '../app/settings-panel.js';
 import { PathCompletionPopup } from './path-completion.js';
 import { runSettingsStatus } from '../app/runtime-settings.js';
+import { ZipflowTextEditorView } from './editor-view.js';
+import { ContextDock, contextText } from './context-dock.js';
 
 export function renderZipflow({ state, width, height, animationFrame = 0 }) {
   const theme = themes[state.settings?.theme] ?? themes.ocean;
@@ -177,13 +178,8 @@ function renderCurrent(state, width, height, theme) {
   const intro = state.panelIntro ?? [];
   const selected = state.menuItems[state.selectedIndex];
   const inlineDescriptions = showsInlineDescriptions(state.screen);
-  const selectedDescription = inlineDescriptions ? '' : selected?.description ?? '';
-  const fixedRows = fixedDescriptionRows(state.screen);
-  const wrappedDescription = selectedDescription ? wrapText(selectedDescription, Math.max(20, width - 8)).slice(0, fixedRows || 4) : [];
-  const descriptionRows = fixedRows || (wrappedDescription.length ? wrappedDescription.length + 1 : 0);
-  const descriptionNodes = fixedRows
-    ? Array.from({ length: fixedRows }, (_, index) => Text(color(theme, 'textMuted', wrappedDescription[index] ?? ''), { wrap: false }))
-    : (selectedDescription ? [Text(color(theme, 'textMuted', selectedDescription), { wrap: true })] : []);
+  const contextRows = inlineDescriptions ? 0 : contextRowsForScreen(state.screen);
+  const selectedContext = inlineDescriptions ? '' : contextText(selected);
   return WorkspacePane({
     title: ` ${screenTitle(state)} `,
     active: true,
@@ -196,12 +192,13 @@ function renderCurrent(state, width, height, theme) {
         title: 'Choose',
         items: state.menuItems,
         selectedIndex: state.selectedIndex,
-        windowSize: Math.max(2, height - 5 - Math.min(6, intro.length) - descriptionRows),
+        windowSize: Math.max(2, height - 5 - Math.min(6, intro.length) - contextRows),
         getLabel: (item) => item.label,
         getDescription: (item) => inlineDescriptions ? item.description ?? '' : '',
         getDisabled: (item) => item.disabled,
         wrapItems: inlineDescriptions,
         maxItemLines: inlineDescriptions ? 3 : 1,
+        reserveItemLines: inlineDescriptions,
         theme,
         pointerId: 'zipflow:menu',
         onSelect: (_item, index) => state.dispatch?.({ type: 'activate-index', index }),
@@ -211,24 +208,23 @@ function renderCurrent(state, width, height, theme) {
           event.preventDefault();
         },
       }),
-      ...descriptionNodes,
+      ContextDock({ text: selectedContext, rows: contextRows, width: Math.max(20, width - 6), theme }),
     ].filter(Boolean),
   });
 }
 
 function renderEditor(state, width, height, theme) {
-  const instructions = state.editorContext?.instructions ?? [];
-  const instructionNodes = instructions.map((line) => Text(color(theme, 'textMuted', line), { wrap: true }));
-  const editorHeight = Math.max(2, height - 5 - instructions.length * 2);
+  const contextRows = Math.max(1, Number(state.editorContext?.contextRows) || 1);
+  const context = state.editorContext?.context
+    ?? (state.editorContext?.instructions ?? []).join(' · ');
+  const editorHeight = Math.max(2, height - 5 - contextRows);
   return WorkspacePane({
     title: ` ${screenTitle(state)} `,
     active: true,
     height,
     theme,
     children: [
-      ...instructionNodes,
-      instructions.length ? Text('') : null,
-      TextEditorView({
+      ZipflowTextEditorView({
         title: state.editorContext?.label ?? ' Input ',
         value: state.editor.value,
         cursor: state.editor.cursor,
@@ -236,7 +232,9 @@ function renderEditor(state, width, height, theme) {
         height: editorHeight,
         placeholder: state.editorContext?.placeholder ?? '',
         lineNumbers: false,
+        theme,
       }),
+      ContextDock({ text: context, rows: contextRows, width: Math.max(20, width - 6), theme }),
     ].filter(Boolean),
   });
 }
@@ -359,7 +357,7 @@ function screenTitle(state) {
     'deploy-failed': 'Deployment failed', completed: 'Completed', 'run-details': 'Last run', 'run-file-groups': 'Changed files', 'run-file-list': 'Changed files',
     'rollback-confirm': 'Rollback', 'rolling-back': 'Rolling back',
     'export-mode': 'Create ZIP', 'export-select': 'Choose archive contents', 'export-sensitive': 'ZIP safety review', 'export-protected': 'Protected project data', 'export-preview': 'ZIP preview', 'export-files': 'Included files', 'export-path': 'Output archive',
-    'export-running': 'Creating ZIP', 'export-complete': 'ZIP created',
+    'export-overwrite': 'Replace archive', 'export-running': 'Creating ZIP', 'export-complete': 'ZIP created',
     'setup-git-init': 'Initialize Git', 'setup-gitignore': 'Git ignore rules',
     'setup-initial-commit': 'First commit', 'initial-commit-message': 'First commit message',
     'run-history': 'Run history', 'run-history-filter': 'Filter run history', 'run-analytics': 'Performance analytics',
@@ -380,7 +378,11 @@ function footerHints(state) {
   if (state.llmAbortController) return ['Esc cancel LLM', 'Ctrl+C stop'];
   if (state.busy || ['checks-running', 'deploy-running', 'manual-checks-running', 'manual-deploy-running'].includes(state.screen)) return ['Ctrl+C stop'];
   if (state.menuSearch?.active) return ['Type to filter', 'Enter keep', 'Esc clear/close'];
-  if (isEditorScreen(state.screen)) return ['Enter confirm', 'Esc back', 'Tab complete'];
+  if (isEditorScreen(state.screen)) {
+    if (state.screen === 'commit-message') return ['Enter commit', 'Ctrl+Enter new line', 'Esc back'];
+    if (['archive-input', 'project-path-input', 'export-path'].includes(state.screen)) return ['Tab complete', '↑/↓ choose', 'Enter confirm', 'Esc back'];
+    return ['Enter confirm', 'Esc back'];
+  }
   if (isSearchableScreen(state.screen)) return ['↑/↓ choose', 'Enter select', '/ search', '? help'];
   return ['↑/↓ choose', 'Enter select', '? help', 'Ctrl+B settings'];
 }
@@ -405,16 +407,14 @@ function preferredPromptHeight(state, width = 80, mainHeight = 20) {
   }
   if (['deploy-running', 'manual-deploy-running'].includes(state.screen)) return Math.min(maximum, 8);
   if (isEditorScreen(state.screen)) {
-    const instructions = state.editorContext?.instructions ?? [];
-    const rows = instructions.reduce((total, line) => total + wrapText(String(line), Math.max(20, width - 8)).length, 0);
-    return Math.min(maximum, Math.max(8, rows + 7));
+    return Math.min(maximum, state.editorContext?.multiline ? 13 : 9);
   }
   const introRows = (state.panelIntro ?? []).reduce((total, line) => total + wrapText(String(line), Math.max(20, width - 8)).length, 0);
   const itemRows = showsInlineDescriptions(state.screen)
     ? state.menuItems.slice(0, 7).reduce((total, item) => total + 1 + Math.min(2, wrapText(String(item.description ?? ''), Math.max(20, width - 10)).length), 0)
     : Math.min(8, Math.max(2, state.menuItems.length));
-  const selectedDescription = showsInlineDescriptions(state.screen) ? 0 : (fixedDescriptionRows(state.screen) || Math.min(3, wrapText(String(state.menuItems[state.selectedIndex]?.description ?? ''), Math.max(20, width - 8)).length));
-  return Math.min(maximum, Math.max(7, introRows + itemRows + selectedDescription + 5));
+  const contextRows = showsInlineDescriptions(state.screen) ? 0 : contextRowsForScreen(state.screen);
+  return Math.min(maximum, Math.max(7, introRows + itemRows + contextRows + 5));
 }
 
 function isEditorScreen(screen) {
@@ -428,7 +428,7 @@ function renderMenuSearchOverlay(state, content, width, height, promptHeight, th
   if (!state.menuSearch?.active) return content;
   const overlayWidth = Math.max(32, Math.min(width - 6, 72));
   const overlay = Box({ border: true, padding: { left: 1, right: 1 }, title: ' Search ' },
-    TextEditorView({
+    ZipflowTextEditorView({
       title: ' Filter ',
       value: state.searchEditor.value,
       cursor: state.searchEditor.cursor,
@@ -436,6 +436,7 @@ function renderMenuSearchOverlay(state, content, width, height, promptHeight, th
       height: 3,
       placeholder: 'Type a path, name, or description',
       lineNumbers: false,
+      theme,
     }),
     Text(color(theme, 'textMuted', `${state.menuItems.length} matching item${state.menuItems.length === 1 ? '' : 's'} · Enter keeps filter · Esc clears/closes`), { wrap: true }),
   );
@@ -480,8 +481,9 @@ function showsInlineDescriptions(screen) {
   return screen === 'archive-safety';
 }
 
-function fixedDescriptionRows(screen) {
-  return screen === 'export-mode' ? 3 : 0;
+function contextRowsForScreen(screen) {
+  if (screen === 'archive-safety') return 0;
+  return 1;
 }
 
 function isWorkflowSetupScreen(screen) {

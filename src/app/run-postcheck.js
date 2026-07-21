@@ -20,6 +20,9 @@ import { pruneBackupStorage } from '../apply/backup-storage.js';
 import { markBackupsRemoved } from '../runs/backup-status.js';
 import { waitForPendingLlmReview } from './run-llm-review.js';
 import { recentArchiveHint } from '../settings/recent.js';
+import { commitMessageCandidates, commitMessageEditorInitialValue, defaultCommitMessage } from './commit-options.js';
+
+export { commitMessageCandidates, commitMessageEditorInitialValue, defaultCommitMessage } from './commit-options.js';
 
 export function isPostCheckScreen(screen) {
   return [
@@ -32,13 +35,20 @@ export async function activatePostCheck(controller, itemId) {
   const { state } = controller;
   if (state.screen === 'check-failed') return activateFailedCheck(controller, itemId);
   if (state.screen === 'commit') {
-    if (itemId === 'create-commit') return createResultCommit(controller, defaultCommitMessage(state));
+    if (itemId === 'create-commit') {
+      const candidate = commitMessageCandidates(state)[0];
+      if (candidate) return createResultCommit(controller, candidate.message);
+    }
+    if (itemId.startsWith('create-commit:')) {
+      const candidate = commitMessageCandidates(state).find((item) => item.id === itemId.slice('create-commit:'.length));
+      if (candidate) return createResultCommit(controller, candidate.message);
+    }
     if (itemId === 'edit-message') return controller.showEditor('commit-message', {
       label: 'Commit message',
       purpose: 'commit-message',
-      placeholder: defaultCommitMessage(state),
+      placeholder: 'Enter a commit message…',
       multiline: true,
-      instructions: commitMessageInstructions(state),
+      context: 'Edit the preferred proposal, then press Enter to create the commit.',
     }, commitMessageEditorInitialValue(state));
     if (itemId === 'finish-no-commit') return continueAfterCommitChoice(controller);
   }
@@ -158,21 +168,25 @@ async function activateFailedCheck(controller, itemId) {
 }
 
 function showCommitPrompt(controller) {
-  const message = defaultCommitMessage(controller.state);
-  const failedChecks = controller.state.postCheckContinuation?.status === 'completed_with_errors';
-  controller.showMenu('commit', [
-    { id: 'create-commit', label: 'Create commit', description: message },
-    { id: 'edit-message', label: 'Edit message', description: commitMessageSource(controller.state) },
-    {
-      id: 'finish-no-commit', label: 'Continue without commit',
-      description: failedChecks ? 'Keep the update without a commit; deployment remains skipped' : 'Deployment settings still apply after this step',
-    },
-  ], failedChecks ? 'Commit kept changes' : 'Commit result', 0, [
-    `Proposed source: ${commitMessageSource(controller.state)}`,
-    'The commit includes only paths applied by this Zipflow run.',
-    ...(controller.state.postCheckContinuation?.status === 'completed_with_errors'
-      ? ['Required checks failed; this commit records the kept state without running deployment.'] : []),
-  ]);
+  const state = controller.state;
+  const failedChecks = state.postCheckContinuation?.status === 'completed_with_errors';
+  const candidates = commitMessageCandidates(state);
+  const items = candidates.map((candidate, index) => ({
+    id: index === 0 ? 'create-commit' : `create-commit:${candidate.id}`,
+    label: `Create commit · ${candidate.label}`,
+    description: candidate.message,
+    help: candidate.detail,
+  }));
+  items.push({
+    id: 'edit-message',
+    label: 'Edit message…',
+    description: candidates[0]?.message || 'Enter a custom commit message.',
+  }, {
+    id: 'finish-no-commit', label: 'Continue without commit',
+    description: failedChecks ? 'Keep the update without a commit; deployment remains skipped.' : 'Continue to the configured deployment step.',
+  });
+  controller.showMenu('commit', items, failedChecks ? 'Commit kept changes' : 'Commit result', 0,
+    failedChecks ? ['Required checks failed; deployment remains skipped for this run.'] : []);
 }
 
 async function createResultCommit(controller, message) {
@@ -396,66 +410,6 @@ function beginAnotherArchive(controller) {
   controller.setStatus('Waiting for archive');
 }
 
-export function defaultCommitMessage(state) {
-  const strategy = state.workflow.git.messageStrategy;
-  const llmMessage = cleanCommitMessage(state.run.llm?.commitMessage);
-  const metadataMessage = cleanCommitMessage(state.archiveMetadata?.commitMessage);
-  if (strategy === 'llm' && llmMessage) return llmMessage;
-  if (strategy === 'llm' && metadataMessage) return metadataMessage;
-  if (strategy === 'metadata' && metadataMessage) return metadataMessage;
-  if (strategy === 'archive') return `Apply ${formatArchiveName(state.run.archivePath)}`;
-  if (strategy === 'fixed') return cleanCommitMessage(renderTemplate(state.workflow.git.fixedMessage, state)) || `zipflow: apply ${state.run.id}`;
-  return `zipflow: apply ${state.run.id}`;
-}
-
-export function commitMessageEditorInitialValue(state) {
-  if (state.workflow.git.messageStrategy === 'llm' && !cleanCommitMessage(state.run.llm?.commitMessage)) return '';
-  return defaultCommitMessage(state);
-}
-
-function cleanCommitMessage(value) {
-  if (typeof value !== 'string') return '';
-  const message = value.trim();
-  if (!message) return '';
-  if (/^[\[{]/.test(message)) {
-    try {
-      JSON.parse(message);
-      return '';
-    } catch {
-      // A normal commit message may legitimately begin with a bracket.
-    }
-  }
-  return message;
-}
-
-function renderTemplate(template, state) {
-  const now = new Date();
-  return String(template)
-    .replaceAll('{runId}', state.run.id)
-    .replaceAll('{archiveName}', formatArchiveName(state.run.archivePath))
-    .replaceAll('{projectName}', state.project.name)
-    .replaceAll('{date}', now.toISOString().slice(0, 10))
-    .replaceAll('{time}', now.toTimeString().slice(0, 8));
-}
-
-function commitMessageSource(state) {
-  if (state.workflow.git.messageStrategy === 'llm') {
-    if (state.run.llm?.commitMessage) return `Generated by ${state.run.llm.provider} · ${state.run.llm.model}`;
-    if (state.run.llm?.error) return `Local LLM failed: ${state.run.llm.error}; using the configured fallback`;
-    return 'Local LLM is not configured; using archive metadata or the run identifier';
-  }
-  if (state.workflow.git.messageStrategy === 'metadata') {
-    return state.archiveMetadata?.commitMessageSource
-      ? `Read from ${state.archiveMetadata.commitMessageSource}`
-      : 'No archive message file found; generated run identifier is used';
-  }
-  return 'Change the proposed message for this run only';
-}
-
-function commitMessageInstructions(state) {
-  const source = commitMessageSource(state);
-  return [source, 'The complete text, including additional lines, is passed to Git as the commit message.'];
-}
 
 function deploymentResultLine(state) {
   if (!state.run.deploy) return state.workflow.deploy?.policy === 'on-demand' ? 'available on demand' : 'not run';

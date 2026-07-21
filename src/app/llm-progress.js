@@ -1,4 +1,4 @@
-import { wrapText } from 'terlio.js';
+import { color, wrapText } from 'terlio.js';
 import { activeRunSettings } from './runtime-settings.js';
 export function beginLlmProgress(controller, { expectedMs = 0 } = {}) {
   const { state } = controller;
@@ -151,13 +151,13 @@ export function updateLlmProgress(controller, event) {
   controller.invalidate();
 }
 
-export function llmActivityLines(runtime, width = 100) {
+export function llmActivityLines(runtime, width = 100, theme = null) {
   if (!runtime) return [];
   const lines = [
-    `Local LLM · ${runtime.provider} · ${runtime.model}`,
+    paint(theme, 'accent', `Local LLM · ${runtime.provider} · ${runtime.model}`),
     runtime.transport ? `  Transport: ${runtime.transport} · POST ${runtime.endpoint}` : null,
     runtime.loadedModel ? `  Model instance: ${runtime.requestModel} · already loaded` : null,
-    `  ${runtime.label} · ${formatElapsed(runtime.elapsedMs)}${runtime.expectedMs ? ` / median ${formatElapsed(runtime.expectedMs)}` : ''} · ${runtime.chunks} chunks`,
+    `  ${paint(theme, 'accent', runtime.label)} · ${formatElapsed(runtime.elapsedMs)}${runtime.expectedMs ? ` / median ${formatElapsed(runtime.expectedMs)}` : ''} · ${runtime.chunks} chunks`,
     runtime.deliveryMode ? `  Delivery: ${deliveryLabel(runtime.deliveryMode)}${runtime.batchTotal ? ` · batch ${runtime.batchIndex}/${runtime.batchTotal}` : ''}` : null,
   ];
   const compact = lines.filter(Boolean);
@@ -178,8 +178,8 @@ export function llmActivityLines(runtime, width = 100) {
   const textWidth = Math.max(28, width - 10);
   const reasoning = preview(runtime.reasoning, 5, textWidth);
   const content = preview(runtime.content, 8, textWidth);
-  if (reasoning.length) lines.push('  Analysis:', ...reasoning.map((line) => `    ${line}`));
-  if (content.length) lines.push('  Model response:', ...content.map((line) => `    ${line}`));
+  if (reasoning.length) lines.push(paint(theme, 'textMuted', '  Analysis:'), ...reasoning.map((line) => `    ${paint(theme, 'textMuted', line)}`));
+  if (content.length) lines.push(paint(theme, 'accent', '  Model response:'), ...content.map((line) => `    ${line}`));
   lines.push('');
   return lines;
 }
@@ -189,6 +189,10 @@ function preview(value, maxLines, width) {
   if (!source) return [];
   const wrapped = source.split('\n').flatMap((line) => wrapText(line, width));
   return wrapped.slice(-maxLines);
+}
+
+function paint(theme, token, value) {
+  return theme ? color(theme, token, value) : String(value ?? '');
 }
 
 function deliveryLabel(value) {

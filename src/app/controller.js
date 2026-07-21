@@ -341,8 +341,8 @@ export class ZipflowController {
   showContextHelp() {
     const item = this.state.menuItems[this.state.selectedIndex];
     if (!item) return;
-    const lines = [item.description || 'No additional description is available for this action.'];
-    if (item.help) lines.push('', item.help);
+    const summary = item.context || item.description || 'No additional description is available for this action.'; const lines = [summary];
+    if (item.help && item.help !== summary) lines.push('', item.help);
     this.state.helpToast = {
       title: `Help · ${item.label}`,
       lines,

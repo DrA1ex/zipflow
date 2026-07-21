@@ -141,7 +141,7 @@ function noteActivityChange(state) {
 function applyMenuSearch(items, query) {
   const normalized = String(query ?? '').trim().toLowerCase();
   if (!normalized) return [...items];
-  return items.filter((item) => `${item.label ?? ''}\n${item.description ?? ''}\n${item.searchText ?? ''}`.toLowerCase().includes(normalized));
+  return items.filter((item) => `${item.label ?? ''}\n${item.value ?? ''}\n${item.context ?? ''}\n${item.description ?? ''}\n${item.help ?? ''}\n${item.searchText ?? ''}`.toLowerCase().includes(normalized));
 }
 
 function firstEnabledIndex(items) {

@@ -6,7 +6,6 @@ import {
   SelectList,
   Spinner,
   Text,
-  TextEditorView,
   WorkspacePane,
   color,
   renderNode,
@@ -15,6 +14,8 @@ import { settingsViewModel } from '../app/settings-panel.js';
 import { settingsPageSummary } from '../app/settings-options.js';
 import { PathCompletionPopup } from './path-completion.js';
 import { renderModelReplayWorkspace } from './model-replay-view.js';
+import { ZipflowTextEditorView } from './editor-view.js';
+import { ContextDock } from './context-dock.js';
 
 export function renderSettings(state, width, height, theme, animationFrame = 0) {
   const view = settingsViewModel(state);
@@ -67,9 +68,9 @@ function renderChoiceSearch({ content, state, width, height, theme }) {
   const overlay = WorkspacePane({
     title: ' SEARCH MODELS ', active: true, height: 5, theme,
     children: [
-      TextEditorView({
+      ZipflowTextEditorView({
         title: ' Filter ', value: state.searchEditor.value, cursor: state.searchEditor.cursor,
-        width: overlayWidth - 4, height: 3, placeholder: 'model name, author, parameters…', lineNumbers: false,
+        width: overlayWidth - 4, height: 3, placeholder: 'model name, author, parameters…', lineNumbers: false, theme,
       }),
     ],
   });
@@ -109,12 +110,13 @@ function renderSettingsPage(state, view, width, height, theme, animationFrame) {
         title: showingChoices ? 'Options' : 'Parameters',
         items,
         selectedIndex: showingChoices ? view.choiceIndex : view.parameterIndex,
-        windowSize: Math.max(2, height - (description ? 8 : 5) - summary.length - (parameterDescription ? 3 : 0)),
+        windowSize: Math.max(2, height - (description ? 8 : 5) - summary.length - 1),
         getLabel: (item) => showingChoices
           ? choiceLabel(state, item, theme, animationFrame)
           : parameterLabel(state, item, theme, animationFrame),
         getDescription: () => '',
-        getDisabled: (item) => item.disabled && !item.loading,
+        getDisabled: (item) => Boolean(item.disabled || item.blocked || item.loading),
+        getDisabledIndicator: (item) => item.loading || item.blocked ? '' : '×',
         wrapItems: false,
         maxItemLines: 1,
         theme,
@@ -124,7 +126,7 @@ function renderSettingsPage(state, view, width, height, theme, animationFrame) {
           index,
         }),
       }),
-      parameterDescription ? Text(color(theme, 'textMuted', parameterDescription), { wrap: true }) : null,
+      ContextDock({ text: parameterDescription, rows: 1, width: Math.max(20, width - 4), theme }),
     ].filter(Boolean),
   });
 }
@@ -155,7 +157,7 @@ function renderModelConfigPage(state, view, width, height, theme, animationFrame
         title: choices ? 'Options' : 'Load configuration',
         items,
         selectedIndex: choices ? view.choiceIndex : view.parameterIndex,
-        windowSize: Math.max(2, height - (description || view.error ? 8 : 5)),
+        windowSize: Math.max(2, height - (description || view.error ? 8 : 5) - 1),
         getLabel: (item) => {
           if (!choices && item.id === 'use-model' && view.loading) {
             return spinnerLabel(animationFrame, item.label);
@@ -165,7 +167,8 @@ function renderModelConfigPage(state, view, width, height, theme, animationFrame
             : `${item.label}${item.value ? `: ${item.value}` : ''}`;
         },
         getDescription: () => '',
-        getDisabled: (item) => item.disabled && !item.loading,
+        getDisabled: (item) => Boolean(item.disabled || item.blocked || item.loading),
+        getDisabledIndicator: (item) => item.loading || item.blocked ? '' : '×',
         wrapItems: false,
         maxItemLines: 1,
         theme,
@@ -175,7 +178,7 @@ function renderModelConfigPage(state, view, width, height, theme, animationFrame
           index,
         }),
       }),
-      parameterDescription ? Text(color(theme, 'textMuted', parameterDescription), { wrap: true }) : null,
+      ContextDock({ text: parameterDescription, rows: 1, width: Math.max(20, width - 4), theme }),
     ].filter(Boolean),
   });
 }
@@ -216,7 +219,7 @@ function renderSettingsModal({ content, modal, state, width, height, theme }) {
     ...instructions.map((line) => Text(color(theme, 'textMuted', line), { wrap: true })),
     modal.field.unitHint ? Text(color(theme, 'accent', modal.field.unitHint), { wrap: true }) : null,
     Text(''),
-    TextEditorView({
+    ZipflowTextEditorView({
       title: ` ${modal.field.label} `,
       value: state.editor.value,
       cursor: state.editor.cursor,
@@ -224,6 +227,7 @@ function renderSettingsModal({ content, modal, state, width, height, theme }) {
       height: 3,
       placeholder: modal.field.placeholder ?? '',
       lineNumbers: false,
+      theme,
     }),
     modal.error ? Text(color(theme, 'danger', modal.error), { wrap: true }) : null,
   ].filter(Boolean);

@@ -1,5 +1,6 @@
 import {
   Box,
+  Column,
   OverlayHost,
   PointerRegion,
   ScrollPane,
@@ -10,7 +11,9 @@ import {
   renderNode,
   truncateVisible,
   visibleLength,
+  wrapText,
 } from 'terlio.js';
+import { ContextDock } from './context-dock.js';
 
 export function renderModelReplayWorkspace({ content, state, width, height, theme, animationFrame = 0 }) {
   const workspace = state.settingsPanel.modelTestWorkspace;
@@ -53,7 +56,7 @@ function renderReplayPreview(state, workspace, width, height, theme) {
       Text(''),
       Text('The current model configuration, delivery strategy, review mode, and language settings will be used.', { wrap: true }),
       Text(color(theme, 'textMuted', 'No project files, Git state, backups, source archives, or run history will be changed.'), { wrap: true }),
-      Text(''),
+      Box({ grow: true, height: 'fill' }),
       SelectList({
         title: 'Choose', items, selectedIndex: workspace.previewIndex ?? 0,
         windowSize: 2, getLabel: (item) => item.label, getDescription: () => '',
@@ -61,7 +64,7 @@ function renderReplayPreview(state, workspace, width, height, theme) {
         pointerId: 'zipflow:model-replay-preview',
         onSelect: (_item, index) => state.dispatch?.({ type: 'model-replay-preview-select', index }),
       }),
-      Text(color(theme, 'textMuted', selected?.description ?? ''), { wrap: true }),
+      ContextDock({ text: selected?.description ?? '', rows: 1, width: Math.max(20, width - 4), theme }),
     ],
     footer: '↑/↓ choose · Enter open · Esc back',
   });
@@ -70,7 +73,7 @@ function renderReplayPreview(state, workspace, width, height, theme) {
 function renderReplayProgress(state, workspace, width, height, theme, animationFrame) {
   const innerWidth = Math.max(20, width - 4);
   const bodyHeight = Math.max(4, height - 7);
-  const lines = replayLines(workspace, theme);
+  const lines = replayLines(workspace, theme, innerWidth);
   workspace.maxScroll = Math.max(0, lines.length - bodyHeight);
   workspace.scroll = clamp(workspace.scroll ?? 0, 0, workspace.maxScroll);
   if (workspace.follow !== false) {
@@ -109,14 +112,14 @@ function renderReplayProgress(state, workspace, width, height, theme, animationF
   });
 }
 
-function replayFrame({ width, height, theme, children, footer }) {
+function replayFrame({ height, theme, children, footer }) {
   return Box({
     border: true,
     borderColor: theme?.borderActive ?? theme?.accent ?? theme?.border,
     padding: { left: 1, right: 1 },
     height,
     title: ' HISTORICAL MODEL REPLAY ',
-  }, ...children, Text(footer, { wrap: false }));
+  }, Column({ height: Math.max(1, height - 2) }, ...children, Text(footer, { wrap: false })));
 }
 
 function replayIdentity(workspace) {
@@ -157,12 +160,12 @@ function footerWithPosition(hints, workspace, width, theme) {
   return `${color(theme, 'textMuted', left)}${spacing}${color(theme, 'textMuted', position)}`;
 }
 
-function replayLines(workspace, theme) {
-  return workspace.blocks.flatMap((block) => blockLines(block, workspace, theme));
+function replayLines(workspace, theme, width) {
+  return workspace.blocks.flatMap((block) => blockLines(block, workspace, theme, width));
 }
 
-function blockLines(block, workspace, theme) {
-  if (block.id === 'parsed-result' && block.result) return parsedResultLines(block.result, theme);
+function blockLines(block, workspace, theme, width) {
+  if (block.id === 'parsed-result' && block.result) return parsedResultLines(block.result, theme, width);
   const token = block.status === 'error' ? 'danger'
     : block.status === 'active' || block.streaming ? 'accent'
       : block.status === 'done' ? 'success' : 'textMuted';
@@ -170,32 +173,38 @@ function blockLines(block, workspace, theme) {
   const compactCompletedOutput = Boolean(workspace.result && block.status === 'done' && (block.reasoning || block.content));
   return [
     color(theme, token, `${marker} ${String(block.title ?? '').toUpperCase()}`),
-    ...block.lines.map((line) => `  ${color(theme, 'textMuted', line)}`),
+    ...block.lines.flatMap((line) => wrapColoredLine(line, width, 2, theme, 'textMuted')),
     ...(compactCompletedOutput
       ? [`  ${color(theme, 'textMuted', 'Model output parsed successfully · press D for full diagnostics')}`]
-      : blockOutputLines(block, theme)),
+      : blockOutputLines(block, theme, width)),
     '',
   ];
 }
 
-function blockOutputLines(block, theme) {
+function blockOutputLines(block, theme, width) {
   return [
-    ...(block.reasoning ? [color(theme, 'textMuted', '  Analysis'), ...String(block.reasoning).split('\n').map((line) => `    ${color(theme, 'textMuted', line)}`)] : []),
-    ...(block.content ? [color(theme, 'title', '  Model response'), ...String(block.content).split('\n').map((line) => `    ${line}`)] : []),
+    ...(block.reasoning
+      ? [color(theme, 'textMuted', '  Analysis'), ...String(block.reasoning).split('\n').flatMap((line) => wrapColoredLine(line, width, 4, theme, 'textMuted'))]
+      : []),
+    ...(block.content
+      ? [color(theme, 'accent', '  Model response'), ...String(block.content).split('\n').flatMap((line) => wrapColoredLine(line, width, 4, theme, 'text'))]
+      : []),
   ];
 }
 
-function parsedResultLines(result, theme) {
+function parsedResultLines(result, theme, width) {
   const lines = [
     color(theme, 'success', '✓ PARSED RESULT'),
     '',
     color(theme, 'accent', 'SUMMARY'),
     ...(result.summary?.length
-      ? result.summary.map((line) => `  • ${line}`)
+      ? result.summary.flatMap((line) => wrapBullet(line, width, theme, 'text'))
       : [`  ${color(theme, 'textMuted', 'No summary returned.')}`]),
     '',
     color(theme, 'accent', 'COMMIT MESSAGE'),
-    `  ${result.commitMessage || color(theme, 'textMuted', '(none)')}`,
+    ...(result.commitMessage
+      ? wrapColoredLine(result.commitMessage, width, 2, theme, 'text')
+      : [`  ${color(theme, 'textMuted', '(none)')}`]),
   ];
   if (result.assessment) {
     lines.push(
@@ -208,11 +217,23 @@ function parsedResultLines(result, theme) {
     lines.push(
       '',
       color(theme, 'accent', 'REASONS'),
-      ...result.reasons.map((line) => `  • ${line}`),
+      ...result.reasons.flatMap((line) => wrapBullet(line, width, theme, 'text')),
     );
   }
   lines.push('');
   return lines;
+}
+
+function wrapColoredLine(value, width, indent, theme, token) {
+  const prefix = ' '.repeat(indent);
+  const available = Math.max(8, width - indent);
+  return wrapText(String(value ?? ''), available).map((line) => `${prefix}${color(theme, token, line)}`);
+}
+
+function wrapBullet(value, width, theme, token) {
+  const available = Math.max(8, width - 4);
+  const rows = wrapText(String(value ?? ''), available);
+  return rows.map((line, index) => `${index === 0 ? '  • ' : '    '}${color(theme, token, line)}`);
 }
 
 function assessmentToken(value) {
