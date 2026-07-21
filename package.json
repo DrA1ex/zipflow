@@ -26,8 +26,23 @@
   "files": [
     "bin",
     "src",
+    "docs",
     "README.md",
     "ARCHITECTURE.md",
     "LICENSE"
-  ]
+  ],
+  "keywords": [
+    "zip",
+    "archive",
+    "patch",
+    "diff",
+    "cli",
+    "terminal",
+    "developer-tools",
+    "workflow",
+    "rollback"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
 }
