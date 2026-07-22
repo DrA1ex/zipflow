@@ -9,12 +9,13 @@ import { pruneBackupStorage } from '../apply/backup-storage.js';
 import { markBackupsRemoved } from '../runs/backup-status.js';
 
 
-export async function completeNoChangeRun(controller) {
+export async function completeNoChangeRun(controller, { reason = 'archive-match' } = {}) {
   const { state } = controller;
   state.run.status = 'no_changes';
   state.run.noChanges = {
     unchanged: Number(state.plan?.counts?.unchanged ?? 0),
     repeatOf: state.run.repeatOf ?? null,
+    reason,
   };
   state.run.applied = {
     paths: [], changedPaths: [], backupPath: null, backupAvailable: false,
@@ -23,11 +24,14 @@ export async function completeNoChangeRun(controller) {
   state.run = await saveRunRecord(state.run);
   state.workflow.lastRunId = state.run.id;
   state.workflow = await saveWorkflow(state.workflow);
-  controller.message('Archive already matches the project', [
-    `${state.run.noChanges.unchanged} files unchanged · no update required`,
-    'LLM review, checks, commit, and deployment were skipped.',
+  const manuallyExcluded = reason === 'selection-empty';
+  controller.message(manuallyExcluded ? 'No changes selected' : 'Archive already matches the project', [
+    manuallyExcluded
+      ? 'Every added, changed, and removed path was set to Keep local.'
+      : `${state.run.noChanges.unchanged} files unchanged · no update required`,
+    'Checks, commit, and deployment were skipped because no project files changed.',
     ...(state.run.repeatOf ? [`Previously applied by run ${state.run.repeatOf}.`] : []),
-  ], 'success', { collapsible: false, collapsedSummary: 'No changes · archive already matches project' });
+  ], 'success', { collapsible: false, collapsedSummary: manuallyExcluded ? 'No changes · all paths kept local' : 'No changes · archive already matches project' });
   await finalizeSourceArchive(controller);
   await releaseRunResources(controller);
   clearRunSettings(state);
@@ -48,7 +52,7 @@ export async function completeRun(controller, status) {
   }
   await releaseRunResources(controller);
   controller.message('Final summary', finalSummaryLines(state), 'summary', {
-    collapsedSummary: `Run complete · ${compactPlanLine(state.plan)} · ${checkSummaryLine(state.run.checks)}`,
+    collapsedSummary: `Run complete · ${appliedPlanLine(state)} · ${checkSummaryLine(state.run.checks)}`, 
   });
   clearRunSettings(state);
   showCompleted(controller);
@@ -56,8 +60,11 @@ export async function completeRun(controller, status) {
 
 export function finalSummaryLines(state) {
   if (state.run.status === 'no_changes') {
+    const manuallyExcluded = state.run.noChanges?.reason === 'selection-empty';
     return [
-      `Archive already matched the project · ${Number(state.plan?.counts?.unchanged ?? 0)} files unchanged`,
+      manuallyExcluded
+        ? 'No project changes were selected · every archive change was kept local'
+        : `Archive already matched the project · ${Number(state.plan?.counts?.unchanged ?? 0)} files unchanged`,
       `Checks skipped · Commit skipped · Deployment skipped · Source archive ${archiveDispositionLine(state.run.archiveDisposition)}`,
       `Report ${displayPath(runReportPath(state.run.id))}`,
     ];
@@ -71,10 +78,18 @@ export function finalSummaryLines(state) {
     ? ` · Autopilot ${state.run.autonomy.mode}${state.run.autonomy.paused ? ' paused' : ''}`
     : '';
   lines.push(
-    `${compactPlanLine(state.plan)} · ${checkSummaryLine(state.run.checks)} · Deployment ${deploymentResultLine(state)} · Source archive ${archiveDispositionLine(state.run.archiveDisposition)}${autonomy}`,
+    `${appliedPlanLine(state)} · ${checkSummaryLine(state.run.checks)} · Deployment ${deploymentResultLine(state)} · Source archive ${archiveDispositionLine(state.run.archiveDisposition)}${autonomy}`, 
     `Commit ${state.run.commit ? `${state.run.commit.revision} ${firstLine(state.run.commit.message)}` : state.run.status === 'no_changes' ? 'skipped · no changes' : 'not created'} · Report ${displayPath(runReportPath(state.run.id))}`,
   );
   return lines;
+}
+
+
+function appliedPlanLine(state) {
+  const counts = state.run?.applied?.counts;
+  if (!counts) return compactPlanLine(state.plan);
+  const excluded = state.run.applied.excludedPaths?.length ?? 0;
+  return `${counts.created ?? 0} added · ${counts.updated ?? 0} changed · ${counts.deleted ?? 0} removed${excluded ? ` · ${excluded} kept local by review` : ''}`;
 }
 
 export function showCompleted(controller) {

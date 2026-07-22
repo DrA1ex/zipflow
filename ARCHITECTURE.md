@@ -16,6 +16,15 @@ The main constraints are:
 - active child processes and project locks are owned by the application lifecycle;
 - JavaScript files should remain below 500 lines and may never exceed 1,000 lines.
 
+
+## Patch 1.0.3 interaction contracts
+
+- Plan review owns an explicit decision for every added, changed, and removed path. Apply, backup, verification, managed-file history, commit context, and final counts consume the selected subset rather than the original plan totals.
+- Page navigation is focus-aware. `Page Up` and `Page Down` move the active file/history/check list on list screens and fall back to Activity scrolling elsewhere.
+- Context docks have fixed geometry, a visible accent marker, and an explicit full-help affordance when text is truncated. Long help and notices use a wrapping, scrollable overlay.
+- Real process `SIGINT` is routed through the same operation manager as keyboard `Ctrl+C`; the application exits only when no operation owns cancellation.
+- LM Studio catalog and loaded-instance identifiers are normalized through `model-identity.js` for compatibility state and performance analytics.
+
 ## Layers
 
 ### `src/app`
@@ -27,6 +36,7 @@ Owns the interactive state machine.
 - `setup-git-init.js` owns optional repository initialization, recommended ignore rules, and the first commit.
 - `setup-checks.js` owns check selection and the custom-check editor flow.
 - `run-flow.js` coordinates archive inspection, planning, conflict decisions, checkpointing, and application.
+- `plan-selection.js` owns per-path Apply/Keep decisions, selected counts, and durable selection records used by review, apply, and reporting.
 - `run-postcheck.js` owns checks, result commits, deployment, and successful completion.
 - `run-rollback.js` owns run details and exact rollback.
 - `run-lifecycle.js` owns cancellation, failure reporting, locks, and temporary cleanup.
@@ -37,7 +47,7 @@ Owns the interactive state machine.
 - `settings-model-check.js` owns connection and protocol compatibility tests.
 - `settings-model-replay.js` owns read-only historical patch replay and its streaming workspace.
 - `settings-storage.js` owns source-archive and backup statistics, cleanup, and retention actions.
-- `llm-progress.js` maps streaming model events into a transient Activity view.
+- `llm-progress.js` maps streaming model events into Activity and retains the completed raw reasoning/answer as a collapsed durable block.
 - `archive-policy.js` applies the global source-ZIP disposition after a run is kept.
 - `export-flow.js` owns the interactive Create ZIP workflow.
 - `state.js` contains UI state helpers.
@@ -52,7 +62,7 @@ Builds bounded per-file comparisons for review. Text files produce a shared line
 
 Builds declarative Terlio views from application state.
 
-Rendering does not perform project mutations. Global settings use a stable two-panel category/page layout. `Tab` changes pane focus without activating an item. Multi-parameter categories render compact value rows, non-focusable section/stat rows, and one fixed-height context dock below the list. The same context-dock contract is used by workflow, history, export, and recovery menus, so selected descriptions never participate in pane-height calculation. Nested selection replaces only the right pane and retains category, parameter, and current-value positions. Editors use a Zipflow wrapper around Terlio's editor-line renderer to apply a muted placeholder while preserving the visible cursor and native editing semantics. LM Studio model selection can enter a dedicated right-pane configuration state without replacing the category pane; the radio marker communicates selection while loaded state is muted secondary metadata. Load-time settings remain editable and are applied through an explicit unload/reload cycle when needed. Historical replay is a single accent-framed blocking overlay: its identity/status header and command/position footer are fixed, while only the borderless central output viewport scrolls. Preview actions are anchored to the modal bottom by a real growable layout node, and streaming output is wrapped and cached against the current viewport width. Parsed output is rendered from structured fields and completed raw model streams are compacted without removing them from copied diagnostics. Project discovery is stored as a framed Activity message rather than a permanent project panel. Activity uses Terlio's component-level text selection; `Ctrl+T` is the explicit escape hatch for native terminal selection elsewhere. Pointer callbacks dispatch the same actions used by keyboard input. The selected Terlio semantic theme is resolved from global settings on every render, so theme changes apply immediately. Zipflow targets Terlio 1.1.2: runtime `animationFrame` drives spinners only while a rendered component requests animation, dynamic blocking overlays keep replay layout responsive, and virtualized `ScrollPane` rendering is paired with Zipflow-side transcript caching so expanded 10k-line logs are not rewrapped on every scroll frame.
+Rendering does not perform project mutations. Global settings use a stable two-panel category/page layout. Settings writes are serialized partial updates: the latest persisted record takes precedence over a stale panel snapshot, then only the requested patch is applied. This prevents unrelated fields such as LLM credentials and archive policy from being reset by another settings action. `Tab` changes pane focus without activating an item. Multi-parameter categories render compact value rows, non-focusable section/stat rows, and one fixed-height context dock below the list. The same context-dock contract is used by workflow, history, export, and recovery menus, so selected descriptions never participate in pane-height calculation. Nested selection replaces only the right pane and retains category, parameter, and current-value positions. Editors use a Zipflow wrapper around Terlio's editor-line renderer to apply a muted placeholder while preserving the visible cursor and native editing semantics. LM Studio model selection can enter a dedicated right-pane configuration state without replacing the category pane; the radio marker communicates selection while loaded state is muted secondary metadata. Load-time settings remain editable and are applied through an explicit unload/reload cycle when needed. Historical replay is a single accent-framed blocking overlay: its identity/status header and command/position footer are fixed, while only the borderless central output viewport scrolls. Preview actions are anchored to the modal bottom by a real growable layout node, and streaming output is wrapped and cached against the current viewport width. Parsed output is rendered from structured fields and completed raw model streams are compacted without removing them from copied diagnostics. Project discovery is stored as a framed Activity message rather than a permanent project panel. Activity uses Terlio's component-level text selection; `Ctrl+T` is the explicit escape hatch for native terminal selection elsewhere. Pointer callbacks dispatch the same actions used by keyboard input. The selected Terlio semantic theme is resolved from global settings on every render, so theme changes apply immediately. Zipflow targets Terlio 1.1.2: runtime `animationFrame` drives spinners only while a rendered component requests animation, dynamic blocking overlays keep replay layout responsive, and virtualized `ScrollPane` rendering is paired with Zipflow-side transcript caching so expanded 10k-line logs are not rewrapped on every scroll frame.
 
 #### Terlio component ownership
 

@@ -1,6 +1,6 @@
 import { color, wrapText } from 'terlio.js';
 import { activeRunSettings } from './runtime-settings.js';
-export function beginLlmProgress(controller, { expectedMs = 0, presentation = 'review' } = {}) {
+export function beginLlmProgress(controller, { expectedMs = 0, presentation = 'review', preserveRaw = true } = {}) {
   const { state } = controller;
   const startedAt = Date.now();
   const settings = activeRunSettings(state);
@@ -39,7 +39,21 @@ export function beginLlmProgress(controller, { expectedMs = 0, presentation = 'r
     onEvent: (event) => updateLlmProgress(controller, event),
     stop: () => {
       clearInterval(timer);
+      const finished = state.llmRuntime;
       state.llmRuntime = null;
+      if (preserveRaw && finished && (String(finished.reasoning ?? '').trim() || String(finished.content ?? '').trim())) {
+        const lines = [];
+        if (String(finished.reasoning ?? '').trim()) lines.push('Analysis', ...String(finished.reasoning).replace(/\r\n/g, '\n').split('\n'));
+        if (String(finished.content ?? '').trim()) {
+          if (lines.length) lines.push('');
+          lines.push('Model response', ...String(finished.content).replace(/\r\n/g, '\n').split('\n'));
+        }
+        controller.message('Raw LLM response', lines, 'info', {
+          collapsible: true,
+          collapsed: true,
+          collapsedSummary: `Raw LLM response · ${finished.chunks || 0} chunks`,
+        });
+      }
       controller.invalidate();
     },
   };

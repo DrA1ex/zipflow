@@ -1,3 +1,4 @@
+import { modelAnalyticsLabel } from '../llm/model-identity.js';
 export function buildRunAnalytics(runs) {
   const completed = runs.filter((run) => run.checks || run.llm);
   return {
@@ -39,7 +40,7 @@ function llmAnalytics(runs) {
   }] : []);
   const groups = new Map();
   for (const item of values) {
-    const key = `${item.provider ?? 'unknown'} · ${item.model ?? 'unknown'}`;
+    const key = modelAnalyticsLabel(item.provider, item.model);
     const group = groups.get(key) ?? [];
     group.push(item);
     groups.set(key, group);

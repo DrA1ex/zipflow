@@ -36,6 +36,7 @@ import {
   acceptPathSuggestion, clearPathSuggestions, isPathEditorScreen, movePathSuggestion,
   refreshPathSuggestions, resetPathSuggestionInput, selectPathSuggestion, showRecentArchiveSuggestions,
 } from './path-suggestions.js';
+import { isEditorScreen, isPagedMenuScreen, isSearchableScreen, shouldRecordChoice } from './controller-screen-rules.js';
 
 export class ZipflowController {
   constructor(state) {
@@ -120,6 +121,10 @@ export class ZipflowController {
     }
     if (this.state.busy || ['checks-running', 'deploy-running', 'manual-checks-running', 'manual-deploy-running'].includes(this.state.screen)) return;
     if (normalized.printable && normalized.text === '?') return showContextHelp(this);
+    if ((normalized.name === 'page-up' || normalized.name === 'page-down') && isPagedMenuScreen(this.state.screen)) {
+      this.pageSelection(normalized.name === 'page-up' ? -1 : 1);
+      return this.invalidate();
+    }
     if (normalized.name === 'page-up' || normalized.name === 'page-down') {
       const delta = normalized.name === 'page-up' ? -8 : 8;
       const maxScroll = this.state.activityLayout?.maxScroll ?? Number.MAX_SAFE_INTEGER;
@@ -312,7 +317,15 @@ export class ZipflowController {
   }
 
   toast(message, level = 'info', ttl = 3, detail = '') {
-    this.state.overlays?.toast?.(message, level, ttl, detail);
+    const body = String(detail ?? '');
+    if (body.includes('\n') || `${message} ${body}`.length > 110) {
+      this.state.helpToast = {
+        title: String(message ?? 'Notice'),
+        lines: body ? body.split(/\r?\n/) : [String(message ?? '')],
+        level,
+        expiresAt: Date.now() + Math.max(4, ttl) * 1000,
+      };
+    } else this.state.overlays?.toast?.(message, level, ttl, detail);
     this.invalidate();
   }
 
@@ -460,25 +473,14 @@ export class ZipflowController {
     }
     this.state.selectedIndex = next;
   }
-}
-function isEditorScreen(screen) {
-  return [
-    'project-path-input', 'archive-input', 'custom-check-command', 'custom-check-name',
-    'commit-message', 'commit-template', 'deploy-command', 'export-path', 'initial-commit-message',
-  ].includes(screen);
-}
 
-function shouldRecordChoice(screen, itemId) {
-  if (['exit', 'back-home', 'history-back', 'back-to-plan', 'back-plan-categories', 'back-conflict-summary'].includes(itemId)) return false;
-  return [
-    'archive-safety', 'plan-review', 'conflict-summary', 'conflict-file', 'conflict-checkpoint', 'check-failed',
-    'commit', 'deploy-prompt', 'deploy-failed', 'rollback-confirm', 'archive-duplicate',
-  ].includes(screen);
-}
-
-
-function isSearchableScreen(screen) {
-  return new Set([
-    'plan-files', 'export-select', 'export-files', 'run-history', 'setup-checks', 'run-file-list',
-  ]).has(screen);
+  pageSelection(direction) {
+    const items = this.state.menuItems;
+    if (!items.length) return;
+    const page = Math.max(5, Math.min(12, Number(this.state.menuPageSize) || 8));
+    let next = Math.max(0, Math.min(items.length - 1, this.state.selectedIndex + direction * page));
+    const step = direction < 0 ? -1 : 1;
+    while (items[next]?.disabled && next >= 0 && next < items.length - 1) next += step;
+    if (!items[next]?.disabled) this.state.selectedIndex = next;
+  }
 }

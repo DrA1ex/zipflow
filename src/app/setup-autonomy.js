@@ -1,3 +1,4 @@
+import { canonicalModelId } from '../llm/model-identity.js';
 import { AUTONOMY_MODES, autonomyForMode, autonomyProfile } from '../autonomy/policies.js';
 
 export function showAutonomyStep(controller) {
@@ -76,11 +77,13 @@ export function autonomyReviewLines(workflow) {
 export function autonomyConfigurationAvailable(state) {
   const settings = state.settings ?? {};
   const compatibility = settings.llmDecisionCompatibility;
+  const configuredModel = canonicalModelId(settings.llmProvider, settings.llmModel);
+  const testedModel = canonicalModelId(compatibility?.provider, compatibility?.model);
   return ['ollama', 'lmstudio'].includes(settings.llmProvider)
-    && Boolean(settings.llmModel)
+    && Boolean(configuredModel)
     && compatibility?.supported === true
     && compatibility.provider === settings.llmProvider
-    && compatibility.model === settings.llmModel;
+    && testedModel === configuredModel;
 }
 
 function choice(id, selected, label, context, disabled = false) {

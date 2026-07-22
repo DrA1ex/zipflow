@@ -4,6 +4,9 @@ import { rememberDiffMode } from '../settings/recent.js';
 import { compactPlanLine, compactPlanMeta } from '../ui/format.js';
 import { setScreen } from './state.js';
 import { autopilotPaused, resumeAutopilot } from './autonomy-flow.js';
+import {
+  isPlanItemSelected, planItemDecision, planSelectionSummary, setPlanGroupDecision, setPlanItemDecision,
+} from './plan-selection.js';
 
 const PLAN_GROUPS = [
   ['created', 'Added', 'Files that do not exist locally and will be created'],
@@ -16,7 +19,7 @@ const PLAN_GROUPS = [
 
 export function handlesReviewScreen(screen) {
   return [
-    'archive-safety', 'plan-review', 'plan-details', 'plan-files', 'conflict-summary', 'conflict-file',
+    'archive-safety', 'plan-review', 'plan-details', 'plan-files', 'plan-file-choice', 'conflict-summary', 'conflict-file',
     'conflict-checkpoint', 'diff-view',
   ].includes(screen);
 }
@@ -53,10 +56,13 @@ export async function activateReview(controller, itemId, actions) {
     if (itemId === 'back-to-plan') return showPlanReview(controller);
   }
   if (state.screen === 'plan-files') {
-    if (itemId.startsWith('plan-file:')) return activatePlanFile(controller, itemId);
+    if (itemId.startsWith('plan-file:')) return showPlanFileChoice(controller, itemId);
+    if (itemId === 'plan-group-select-all') { setPlanGroupDecision(state, state.planReview?.category, 'archive'); return showPlanFiles(controller, state.planReview?.category, state.selectedIndex); }
+    if (itemId === 'plan-group-clear') { setPlanGroupDecision(state, state.planReview?.category, 'keep'); return showPlanFiles(controller, state.planReview?.category, state.selectedIndex); }
     if (itemId === 'back-plan-categories') return showPlanCategories(controller);
     if (itemId === 'apply-plan') return actions.startApply(controller);
   }
+  if (state.screen === 'plan-file-choice') return activatePlanFileChoice(controller, itemId);
   if (state.screen === 'conflict-summary') return activateConflictSummary(controller, itemId, actions);
   if (state.screen === 'conflict-file') return activateConflictFile(controller, itemId, actions);
   if (state.screen === 'conflict-checkpoint') return activateCheckpoint(controller, itemId, actions);
@@ -68,6 +74,7 @@ export function backReview(controller) {
   if (state.screen === 'archive-safety') return false;
   if (state.screen === 'plan-details') return showPlanReview(controller);
   if (state.screen === 'plan-files') return showPlanCategories(controller);
+  if (state.screen === 'plan-file-choice') return showPlanFiles(controller, state.planReview?.category, state.planReview?.returnIndex ?? 0);
   if (state.screen === 'conflict-file') return showConflictSummary(controller);
   if (state.screen === 'conflict-checkpoint') return showPlanReview(controller);
   if (state.screen === 'diff-view') return closeDiff(controller);
@@ -108,6 +115,18 @@ export function handleReviewKey(controller, key) {
       return true;
     }
   }
+  if (state.screen === 'plan-files' && key.name === 'space') {
+    const item = state.menuItems[state.selectedIndex];
+    if (item?.id?.startsWith('plan-file:')) {
+      const category = state.planReview?.category;
+      const planItem = planItemFromId(state, item.id);
+      if (planItem && ['created', 'updated', 'deleted', 'conflicts'].includes(category)) {
+        setPlanItemDecision(state, planItem, isPlanItemSelected(state, planItem) ? 'keep' : 'archive');
+        showPlanFiles(controller, category, state.selectedIndex);
+        return true;
+      }
+    }
+  }
   if (state.screen === 'conflict-file' && key.printable) {
     const name = String(key.text ?? key.name ?? '').toLowerCase();
     if (name === 'a') return runShortcut(controller, 'conflict-use-archive'), true;
@@ -115,6 +134,11 @@ export function handleReviewKey(controller, key) {
     if (name === 'd') return runShortcut(controller, 'conflict-view-diff'), true;
   }
   return false;
+}
+
+function planItemFromId(state, itemId) {
+  const [, category, rawIndex] = String(itemId ?? '').split(':');
+  return state.plan?.[category]?.[Number(rawIndex)] ?? null;
 }
 
 export function showArchiveSafetyReview(controller) {
@@ -139,7 +163,8 @@ export function showPlanReview(controller) {
   if (gated) items.push({ id: 'skip-llm-review', label: 'Continue without LLM verdict', description: 'Cancel the advisory LLM step; deterministic protections remain active' });
   if (autopilotPaused(controller.state)) items.push({ id: 'resume-autopilot', label: 'Resume autopilot', description: 'Ask the local model to decide this plan checkpoint again.' });
   items.push({ id: 'cancel-run', label: 'Cancel update', description: 'Return without changing the project' });
-  const intro = [compactPlanLine(plan), compactPlanMeta(plan), ...planWarnings(plan, controller.state.archiveSafety)];
+  const selection = planSelectionSummary(plan, controller.state.decisions);
+  const intro = [compactPlanLine(plan), compactPlanMeta(plan), ...(selection.excluded ? [`Selection: ${selection.selected} apply · ${selection.excluded} keep local`] : []), ...planWarnings(plan, controller.state.archiveSafety)];
   if (llmReviewPending) intro.push(gated ? 'LLM review is running. Files and diffs remain available while Apply waits for the verdict.' : 'LLM summary is running in the background and does not block Apply.');
   controller.showMenu('plan-review', items, 'Review update plan', 0, intro);
 }
@@ -170,8 +195,12 @@ export function archiveConflictPaths(state) {
 function showPlanCategories(controller) {
   const { plan } = controller.state;
   const items = PLAN_GROUPS.flatMap(([id, label, description]) => {
-    const count = plan[id]?.length ?? 0;
-    return count ? [{ id: `plan-category:${id}`, label: `${label} · ${count}`, description }] : [];
+    const entries = plan[id] ?? [];
+    const count = entries.length;
+    if (!count) return [];
+    const selectable = ['created', 'updated', 'deleted', 'conflicts'].includes(id);
+    const selected = selectable ? entries.filter((item) => isPlanItemSelected(controller.state, item)).length : count;
+    return [{ id: `plan-category:${id}`, label: `${label} · ${selectable ? `${selected}/${count}` : count} ›`, description }];
   });
   items.push(
     { id: 'apply-plan', label: controller.state.llmReviewPending && controller.state.runSettings?.llmArchiveReview !== 'disabled' ? 'Apply update · waiting for LLM review' : 'Apply update', disabled: controller.state.llmReviewPending && controller.state.runSettings?.llmArchiveReview !== 'disabled' },
@@ -184,26 +213,80 @@ function showPlanFiles(controller, category, selectedIndex = null) {
   const { plan } = controller.state;
   const group = PLAN_GROUPS.find(([id]) => id === category);
   if (!group) return showPlanCategories(controller);
-  controller.state.planReview = { category };
-  const items = (plan[category] ?? []).map((item, index) => ({
+  controller.state.planReview = { ...(controller.state.planReview ?? {}), category };
+  const selectable = isDiffable(category);
+  const entries = plan[category] ?? [];
+  const items = entries.map((item, index) => ({
     id: `plan-file:${category}:${index}`,
-    label: item.path,
-    description: item.reason ?? (isDiffable(category) ? 'Enter to view diff' : group[2]),
+    label: selectable
+      ? `${isPlanItemSelected(controller.state, item) ? '[x]' : '[ ]'} ${item.path} ›`
+      : item.path,
+    path: item.path,
+    context: item.reason ?? (selectable ? `${decisionLabel(item, planItemDecision(controller.state, item))} · Enter choices · Space toggle` : group[2]),
+    help: item.reason ?? (selectable ? 'Enter opens Apply/Keep and diff actions. Space toggles this file without opening the action page.' : group[2]),
   }));
+  if (selectable && entries.length) items.push(
+    { id: 'plan-group-select-all', label: 'Select all in this group', context: 'Apply every change shown in this group.' },
+    { id: 'plan-group-clear', label: 'Keep all local in this group', context: 'Exclude every change shown in this group from this update.' },
+  );
   items.push(
     { id: 'back-plan-categories', label: 'Back to groups' },
-    { id: 'apply-plan', label: controller.state.llmReviewPending && controller.state.runSettings?.llmArchiveReview !== 'disabled' ? 'Apply update · waiting for LLM review' : 'Apply update', disabled: controller.state.llmReviewPending && controller.state.runSettings?.llmArchiveReview !== 'disabled' },
+    { id: 'apply-plan', label: controller.state.llmReviewPending && controller.state.runSettings?.llmArchiveReview !== 'disabled' ? 'Apply update · waiting for LLM review' : 'Apply selected changes', disabled: controller.state.llmReviewPending && controller.state.runSettings?.llmArchiveReview !== 'disabled' },
   );
-  controller.showMenu('plan-files', items, `${group[1]} files`, selectedIndex, [`${group[1]} · ${plan[category].length}`, group[2]]);
+  const selectedCount = selectable ? entries.filter((item) => isPlanItemSelected(controller.state, item)).length : entries.length;
+  controller.showMenu('plan-files', items, `${group[1]} files`, selectedIndex, [`${group[1]} · ${selectedCount} of ${entries.length} selected`, group[2]]);
 }
 
-async function activatePlanFile(controller, itemId) {
+function showPlanFileChoice(controller, itemId) {
   const [, category, rawIndex] = itemId.split(':');
   const item = controller.state.plan[category]?.[Number(rawIndex)];
-  if (!item) return;
-  if (isDiffable(category)) return openDiff(controller, item);
-  controller.message('File detail', [item.path, item.reason ?? 'No additional detail']);
-  return showPlanFiles(controller, category, controller.state.selectedIndex);
+  if (!item) return showPlanFiles(controller, category);
+  controller.state.planReview = { category, item, returnIndex: controller.state.selectedIndex };
+  const selected = isPlanItemSelected(controller.state, item);
+  const action = planActionLabels(item);
+  controller.showMenu('plan-file-choice', [
+    { id: 'plan-file-archive', label: `${selected ? '●' : '○'} ${action.archive}`, context: action.archiveContext },
+    { id: 'plan-file-keep', label: `${selected ? '○' : '●'} ${action.keep}`, context: action.keepContext },
+    { id: 'plan-file-diff', label: 'View diff', context: 'Open a read-only unified or side-by-side comparison.' },
+    { id: 'plan-file-back', label: 'Back to files' },
+  ], item.path, selected ? 0 : 1, [`${item.kind.toUpperCase()} · ${item.path}`, `Current choice: ${decisionLabel(item, selected ? 'archive' : 'keep')}`]);
+}
+
+async function activatePlanFileChoice(controller, itemId) {
+  const review = controller.state.planReview;
+  const item = review?.item;
+  if (!item) return showPlanCategories(controller);
+  if (itemId === 'plan-file-archive') {
+    setPlanItemDecision(controller.state, item, 'archive');
+    return showPlanFileChoice(controller, `plan-file:${review.category}:${controller.state.plan[review.category].indexOf(item)}`);
+  }
+  if (itemId === 'plan-file-keep') {
+    setPlanItemDecision(controller.state, item, 'keep');
+    return showPlanFileChoice(controller, `plan-file:${review.category}:${controller.state.plan[review.category].indexOf(item)}`);
+  }
+  if (itemId === 'plan-file-diff') return openDiff(controller, item);
+  if (itemId === 'plan-file-back') return showPlanFiles(controller, review.category, review.returnIndex ?? 0);
+}
+
+function planActionLabels(item) {
+  if (item.kind === 'created') return {
+    archive: 'Create file from archive', keep: 'Do not create this file',
+    archiveContext: 'Include this added file in the update.', keepContext: 'Exclude this added file from the update.',
+  };
+  if (item.kind === 'deleted') return {
+    archive: 'Delete local file', keep: 'Keep local file',
+    archiveContext: 'Apply the snapshot deletion after backup.', keepContext: 'Preserve this local file even though it is absent from the archive.',
+  };
+  return {
+    archive: 'Use archive version', keep: 'Keep local version',
+    archiveContext: 'Replace the local file with the archive version after backup.', keepContext: 'Exclude this file from the update and keep its current content.',
+  };
+}
+
+function decisionLabel(item, decision) {
+  if (decision === 'archive') return item.kind === 'deleted' ? 'delete local' : item.kind === 'created' ? 'create from archive' : 'use archive';
+  if (decision === 'keep') return item.kind === 'created' ? 'skip file' : 'keep local';
+  return 'decision required';
 }
 
 function activateConflictSummary(controller, itemId, actions) {
@@ -342,7 +425,7 @@ async function moveDiffFile(controller, delta) {
 }
 
 function diffFilesForCurrentScreen(state, item) {
-  if (state.screen === 'plan-files') {
+  if (state.screen === 'plan-files' || state.screen === 'plan-file-choice') {
     return (state.plan[state.planReview?.category] ?? []).filter((candidate) => candidate.kind !== 'preserved' && candidate.kind !== 'skipped');
   }
   if (state.screen === 'conflict-file') return state.plan.conflicts ?? [item];

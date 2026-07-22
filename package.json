@@ -1,6 +1,6 @@
 {
   "name": "zipflow",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Interactive terminal workflow for safely applying source archives",
   "type": "module",
   "bin": {
@@ -26,24 +26,8 @@
   "files": [
     "bin",
     "src",
-    "docs",
     "README.md",
     "ARCHITECTURE.md",
     "LICENSE"
-  ],
-  "keywords": [
-    "zip",
-    "archive",
-    "patch",
-    "diff",
-    "cli",
-    "terminal",
-    "developer-tools",
-    "workflow",
-    "rollback",
-    "autopilot"
-  ],
-  "publishConfig": {
-    "access": "public"
-  }
+  ]
 }

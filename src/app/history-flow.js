@@ -71,18 +71,18 @@ function showStatusFilter(controller) {
 
 export async function activateHistory(controller, itemId) {
   if (itemId === 'history-back') return controller.showHome();
-  if (itemId === 'history-type-filter') return showTypeFilter(controller);
-  if (itemId === 'history-status-filter') return showStatusFilter(controller);
+  if (itemId === 'history-type-filter') { controller.state.historyReturnIndex = controller.state.selectedIndex; return showTypeFilter(controller); }
+  if (itemId === 'history-status-filter') { controller.state.historyReturnIndex = controller.state.selectedIndex; return showStatusFilter(controller); }
   if (itemId.startsWith('history-type:')) {
     controller.state.historyTypeFilter = itemId.slice(13);
-    return showRunHistory(controller);
+    return showRunHistory(controller, controller.state.historyReturnIndex ?? 0);
   }
   if (itemId.startsWith('history-status:')) {
     controller.state.historyStatusFilter = itemId.slice(15);
-    return showRunHistory(controller);
+    return showRunHistory(controller, controller.state.historyReturnIndex ?? 1);
   }
-  if (itemId === 'history-analytics') return showRunAnalytics(controller);
-  if (itemId === 'analytics-back') return showRunHistory(controller);
+  if (itemId === 'history-analytics') { controller.state.historyReturnIndex = controller.state.selectedIndex; return showRunAnalytics(controller); }
+  if (itemId === 'analytics-back') return showRunHistory(controller, controller.state.historyReturnIndex ?? 2);
   if (itemId.startsWith('analytics:')) return;
   if (!itemId.startsWith('history:')) return;
   const run = await loadRunRecord(itemId.slice(8));

@@ -2,7 +2,8 @@ import { createLocalCompletion } from '../llm/client.js';
 import { isLocalLlmEnabled, parseResponse } from '../llm/generate.js';
 import { resolveLocalLlmSession } from '../llm/session.js';
 import { requestAutonomyDecision } from '../autonomy/decision-engine.js';
-import { saveSettings } from '../settings/store.js';
+import { updateSettings } from '../settings/store.js';
+import { canonicalModelId, modelIdentityKey } from '../llm/model-identity.js';
 
 export async function testSelectedModel(controller) {
   const { state } = controller;
@@ -65,16 +66,20 @@ export async function testSelectedModel(controller) {
       onEvent: (event) => { if (event.type === 'stream-open' || event.type === 'chunk') streamSupported = true; },
     });
     if (autonomousDecision.action !== 'continue') throw new Error('Autonomous decision protocol returned an unexpected action.');
-    state.settings = await saveSettings({
-      ...state.settings,
-      llmDecisionCompatibility: {
-        provider: settings.llmProvider,
-        model: settings.llmModel,
-        supported: true,
-        testedAt: new Date().toISOString(),
-        error: null,
+    const canonicalModel = canonicalModelId(settings.llmProvider, settings.llmModel);
+    const compatibility = {
+      provider: settings.llmProvider,
+      model: canonicalModel,
+      supported: true,
+      testedAt: new Date().toISOString(),
+      error: null,
+    };
+    state.settings = await updateSettings({
+      llmDecisionCompatibilityByModel: {
+        ...(state.settings.llmDecisionCompatibilityByModel ?? {}),
+        [modelIdentityKey(settings.llmProvider, canonicalModel)]: compatibility,
       },
-    });
+    }, { baseSettings: state.settings });
     const durationMs = Date.now() - startedAt;
     panel.modelTest = {
       status: 'passed', running: false, durationMs, streamSupported,
@@ -94,16 +99,20 @@ export async function testSelectedModel(controller) {
       error: cancelled ? 'Compatibility test cancelled.' : error.message, code: error.code ?? null,
     };
     if (!cancelled) {
-      state.settings = await saveSettings({
-        ...state.settings,
-        llmDecisionCompatibility: {
-          provider: settings.llmProvider,
-          model: settings.llmModel,
-          supported: false,
-          testedAt: new Date().toISOString(),
-          error: error.message,
+      const canonicalModel = canonicalModelId(settings.llmProvider, settings.llmModel);
+      const compatibility = {
+        provider: settings.llmProvider,
+        model: canonicalModel,
+        supported: false,
+        testedAt: new Date().toISOString(),
+        error: error.message,
+      };
+      state.settings = await updateSettings({
+        llmDecisionCompatibilityByModel: {
+          ...(state.settings.llmDecisionCompatibilityByModel ?? {}),
+          [modelIdentityKey(settings.llmProvider, canonicalModel)]: compatibility,
         },
-      });
+      }, { baseSettings: state.settings });
     }
     state.status = cancelled ? 'Model test cancelled' : 'Model test failed';
     controller.toast(cancelled ? 'Model test cancelled' : 'Model test failed', cancelled ? 'info' : 'error', 3, panel.modelTest.error);

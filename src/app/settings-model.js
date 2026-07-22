@@ -1,5 +1,5 @@
 import { loadLmStudioModel, unloadLmStudioModel } from '../llm/client.js';
-import { saveSettings } from '../settings/store.js';
+import { updateSettings } from '../settings/store.js';
 
 export function openModelConfiguration(controller, model) {
   const { state } = controller;
@@ -163,16 +163,14 @@ async function useConfiguredModel(controller) {
       ? await reconcileLmStudioModel(controller, model, config, operation.signal)
       : { instanceId: null, config: config.values };
     const configKey = modelConfigKey(state.settings.llmProvider, model.key);
-    state.settings = await saveSettings({
-      ...state.settings,
+    state.settings = await updateSettings({
       llmModel: model.key,
-      llmDecisionCompatibility: null,
       llmSelectedInstanceId: result.instanceId,
       llmModelLoadConfigs: {
         ...(state.settings.llmModelLoadConfigs ?? {}),
         [configKey]: result.config,
       },
-    });
+    }, { baseSettings: state.settings });
     applyLoadedModelState(state, model, result);
     state.settingsPanel.modelsProvider = state.settings.llmProvider;
     delete state.settingsPanel.choiceIndices.llmModel;

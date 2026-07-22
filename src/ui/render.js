@@ -193,7 +193,7 @@ function renderCurrent(state, width, height, theme) {
         items: state.menuItems,
         selectedIndex: state.selectedIndex,
         windowSize: Math.max(2, height - 5 - Math.min(6, intro.length) - contextRows),
-        getLabel: (item) => item.label,
+        getLabel: (item) => menuItemLabel(item),
         getDescription: (item) => inlineDescriptions ? item.description ?? '' : '',
         getDisabled: (item) => item.disabled,
         wrapItems: inlineDescriptions,
@@ -211,6 +211,25 @@ function renderCurrent(state, width, height, theme) {
       ContextDock({ text: selectedContext, rows: contextRows, width: Math.max(20, width - 6), theme }),
     ].filter(Boolean),
   });
+}
+
+function menuItemLabel(item) {
+  const label = String(item?.label ?? '');
+  if (!label || /›\s*$/.test(label)) return label;
+  if (item?.navigate || opensSubscreen(item?.id)) return `${label}  ›`;
+  return label;
+}
+
+function opensSubscreen(id) {
+  const value = String(id ?? '');
+  return [
+    'start-update', 'setup-project', 'choose-directory', 'create-zip', 'run-history', 'change-workflow',
+    'view-plan', 'safety-review-plan', 'choose-conflicts', 'history-type-filter', 'history-status-filter',
+    'history-analytics', 'view-report', 'view-run-files', 'rollback', 'edit-message', 'export-review-files',
+    'export-sensitive-review', 'export-change-mode', 'export-choose-path', 'open-llm-settings', 'review-settings',
+    'test-selected-model', 'model-test-connection', 'model-test-replay', 'recent-archives',
+  ].includes(value)
+    || /^(?:plan-category:|plan-file:|history:|run-group:|run-file:|section-|edit-)/.test(value);
 }
 
 function renderEditor(state, width, height, theme) {
@@ -251,10 +270,11 @@ function renderChecksRunning(state, height, theme) {
   const runtime = state.checkRuntime ?? { checks: [], activeIndex: 0 };
   const lines = runtime.checks.map((check, index) => {
     const result = runtime.results?.find((item) => item.id === check.id);
-    const status = result ? (result.ok ? 'PASS' : 'FAIL') : index === runtime.activeIndex ? 'RUN ' : 'WAIT';
+    const status = result ? (result.ok ? 'PASS' : 'FAIL') : index === runtime.activeIndex ? 'RUN' : 'WAIT';
+    const token = status === 'PASS' ? 'success' : status === 'FAIL' ? 'danger' : status === 'RUN' ? 'accent' : 'textMuted';
     const estimate = runtime.estimates?.[check.name];
     const duration = result ? ` ${formatDuration(result.durationMs)}` : estimate ? ` ~${formatDuration(estimate)}` : '';
-    return `${status.padEnd(5)} ${check.name}${duration}`;
+    return `${color(theme, token, status.padEnd(5))} ${check.name}${duration}`;
   });
   if (state.settings.checkOutput === 'last-line' && runtime.lastLine) lines.push('', runtime.lastLine);
   return runtimePane(' Running checks ', lines, height, theme);
@@ -263,7 +283,7 @@ function renderChecksRunning(state, height, theme) {
 function renderDeployRunning(state, height, theme) {
   const runtime = state.deployRuntime ?? {};
   const lines = [
-    'RUN   Deploy command',
+    `${color(theme, 'accent', 'RUN  ')} Deploy command`,
     runtime.commandText ? `      ${runtime.commandText}` : '',
   ].filter(Boolean);
   if (state.settings.checkOutput === 'last-line' && runtime.lastLine) lines.push('', runtime.lastLine);
@@ -276,7 +296,7 @@ function runtimePane(title, lines, height, theme) {
     active: true,
     height,
     theme,
-    children: lines.map((line) => Text(line, { wrap: true })),
+    children: lines.map((line) => Text(line, { wrap: !String(line).includes('\x1b[') })),
   });
 }
 
@@ -344,7 +364,7 @@ function screenTitle(state) {
     'setup-deletion-scope': 'Snapshot deletion', 'setup-git-checkpoint': 'Git checkpoint',
     'setup-git-result': 'Result commit', 'setup-git-message': 'Commit message source', 'commit-template': 'Commit template',
     'setup-deploy': 'Deployment', 'setup-deploy-command': 'Deploy command', 'deploy-command': 'Deploy command', 'setup-review': 'Review',
-    'archive-input': 'Archive', 'archive-duplicate': 'Archive already used', 'archive-root-choice': 'Archive root', 'archive-safety': 'Archive safety', 'plan-review': 'Update plan', 'plan-details': 'Change groups', 'plan-files': 'Changed files', 'diff-view': 'Diff',
+    'archive-input': 'Archive', 'archive-duplicate': 'Archive already used', 'archive-root-choice': 'Archive root', 'archive-safety': 'Archive safety', 'plan-review': 'Update plan', 'plan-details': 'Change groups', 'plan-files': 'Changed files', 'plan-file-choice': 'File decision', 'diff-view': 'Diff',
     'conflict-summary': 'Conflict choices', 'conflict-checkpoint': 'Conflict checkpoint', 'conflict-file': 'Resolve conflict', conflicts: 'Choose files',
     applying: 'Applying update', 'autopilot-decision': 'Autopilot decision', 'checks-running': 'Checks', 'check-failed': 'Checks failed', commit: 'Commit',
     'commit-message': 'Commit message', 'deploy-prompt': 'Deployment', 'deploy-running': 'Deployment',
@@ -395,20 +415,12 @@ function preferredPromptHeight(state, width = 80, mainHeight = 20) {
   const maximum = Math.max(7, Math.floor(mainHeight * 0.6));
   if (state.busy) return Math.min(maximum, 8);
   if (state.screen === 'setup-review') return Math.min(maximum, 8);
-  if (isWorkflowSetupScreen(state.screen)) return Math.min(maximum, Math.max(13, Math.floor(mainHeight * 0.48)));
   if (['checks-running', 'manual-checks-running'].includes(state.screen)) {
-    return Math.min(maximum, Math.max(8, (state.checkRuntime?.checks?.length ?? 0) + 5));
+    return Math.min(maximum, Math.max(9, Math.min(12, (state.checkRuntime?.checks?.length ?? 0) + 5)));
   }
-  if (['deploy-running', 'manual-deploy-running'].includes(state.screen)) return Math.min(maximum, 8);
-  if (isEditorScreen(state.screen)) {
-    return Math.min(maximum, state.editorContext?.multiline ? 13 : 9);
-  }
-  const introRows = (state.panelIntro ?? []).reduce((total, line) => total + wrapText(String(line), Math.max(20, width - 8)).length, 0);
-  const itemRows = showsInlineDescriptions(state.screen)
-    ? state.menuItems.slice(0, 7).reduce((total, item) => total + 1 + Math.min(2, wrapText(String(item.description ?? ''), Math.max(20, width - 10)).length), 0)
-    : Math.min(8, Math.max(2, state.menuItems.length));
-  const contextRows = showsInlineDescriptions(state.screen) ? 0 : contextRowsForScreen(state.screen);
-  return Math.min(maximum, Math.max(7, introRows + itemRows + contextRows + 5));
+  if (['deploy-running', 'manual-deploy-running'].includes(state.screen)) return Math.min(maximum, 9);
+  if (isEditorScreen(state.screen)) return Math.min(maximum, state.editorContext?.multiline ? 13 : 9);
+  return Math.min(maximum, 11);
 }
 
 function isEditorScreen(screen) {
@@ -436,14 +448,13 @@ function renderMenuSearchOverlay(state, content, width, height, promptHeight, th
   );
   return BottomOverlay({ content, overlay, height, bottom: Math.max(1, promptHeight - 1), left: 2, right: 2, width: overlayWidth, align: 'center', opaque: true });
 }
-
 function renderHelpToastOverlay(state, content, width, height, theme) {
   const toast = state.helpToast;
   if (!toast) return content;
   const toastWidth = Math.max(34, Math.min(width - 4, Math.min(82, Math.floor(width * 0.72))));
-  const toastHeight = Math.max(6, Math.min(18, Math.floor(height * 0.48)));
   const contentWidth = Math.max(20, toastWidth - 4);
   const wrapped = (toast.lines ?? []).flatMap((line) => wrapText(String(line ?? ''), contentWidth));
+  const toastHeight = Math.max(5, Math.min(18, Math.min(Math.floor(height * 0.55), wrapped.length + 3)));
   const visibleRows = Math.max(1, toastHeight - 3);
   const maxScroll = Math.max(0, wrapped.length - visibleRows);
   toast.maxScroll = maxScroll;
@@ -470,24 +481,18 @@ function renderHelpToastOverlay(state, content, width, height, theme) {
   });
   return BottomOverlay({ content, overlay: node, height, bottom: 2, left: 2, right: 2, width: toastWidth, align: 'right', opaque: true });
 }
-
-function showsInlineDescriptions(screen) {
-  return screen === 'archive-safety';
+function showsInlineDescriptions(_screen) {
+  return false;
 }
-
-function contextRowsForScreen(screen) {
-  if (screen === 'archive-safety') return 0;
+function contextRowsForScreen(_screen) {
   return 1;
 }
-
 function isWorkflowSetupScreen(screen) {
   return String(screen ?? '').startsWith('setup-') || String(screen ?? '').startsWith('custom-check');
 }
-
 function isSearchableScreen(screen) {
   return new Set(['plan-files', 'export-select', 'export-files', 'run-history', 'setup-checks', 'run-file-list']).has(screen);
 }
-
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }

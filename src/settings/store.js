@@ -2,8 +2,9 @@ import path from 'node:path';
 import { themes } from 'terlio.js';
 import { readJson, writeJsonAtomic } from '../utils/fs.js';
 import { ensureZipflowHome, getZipflowHome } from '../workflow/store.js';
+import { canonicalModelId, modelIdentityKey } from '../llm/model-identity.js';
 
-export const SETTINGS_VERSION = 12;
+export const SETTINGS_VERSION = 13;
 export const THEME_NAMES = Object.keys(themes);
 export const LLM_PROVIDERS = ['disabled', 'ollama', 'lmstudio'];
 export const LLM_LANGUAGES = ['English', 'Russian', 'German', 'French', 'Spanish', 'Chinese', 'Japanese'];
@@ -30,6 +31,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   llmChangeDelivery: 'adaptive',
   llmFailureAnalysis: 'disabled',
   llmDecisionCompatibility: null,
+  llmDecisionCompatibilityByModel: {},
   llmModelLoadConfigs: {},
   archivePolicy: 'keep',
   archiveDirectory: '~/zipflow-archive',
@@ -45,6 +47,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   lastDiffMode: 'unified',
 });
 
+let settingsWriteQueue = Promise.resolve();
+
 export async function loadSettings() {
   await ensureZipflowHome();
   const primary = await readSettingsFile(settingsPath());
@@ -58,9 +62,28 @@ export async function loadSettings() {
   return normalizeSettings(null);
 }
 
-export async function saveSettings(settings) {
+export function saveSettings(settings) {
+  return enqueueSettingsWrite(async () => writeSettingsValue(normalizeSettings(settings)));
+}
+
+export function updateSettings(patch, { allowClearToken = false, baseSettings = null } = {}) {
+  return enqueueSettingsWrite(async () => {
+    const stored = await readSettingsFile(settingsPath()) ?? await readSettingsFile(settingsBackupPath());
+    const current = normalizeSettings({ ...(baseSettings ?? {}), ...(stored ?? {}) });
+    const nextPatch = { ...(patch ?? {}) };
+    if (!allowClearToken && nextPatch.llmApiToken === '' && current.llmApiToken) delete nextPatch.llmApiToken;
+    return writeSettingsValue(normalizeSettings({ ...current, ...nextPatch }));
+  });
+}
+
+function enqueueSettingsWrite(task) {
+  const result = settingsWriteQueue.then(task, task);
+  settingsWriteQueue = result.then(() => undefined, () => undefined);
+  return result;
+}
+
+async function writeSettingsValue(value) {
   await ensureZipflowHome();
-  const value = normalizeSettings(settings);
   const current = await readSettingsFile(settingsPath());
   if (current) await writeJsonAtomic(settingsBackupPath(), normalizeSettings(current));
   await writeJsonAtomic(settingsPath(), value);
@@ -68,12 +91,14 @@ export async function saveSettings(settings) {
 }
 
 export function normalizeSettings(settings) {
-  const source = settings && typeof settings === 'object' ? settings : {};
+  const raw = settings && typeof settings === 'object' ? settings : {};
+  const source = migrateLegacySettingAliases(raw);
   const value = { ...DEFAULT_SETTINGS, ...source, version: SETTINGS_VERSION };
   if (!THEME_NAMES.includes(value.theme)) value.theme = DEFAULT_SETTINGS.theme;
   if (!['compact', 'last-line'].includes(value.checkOutput)) value.checkOutput = DEFAULT_SETTINGS.checkOutput;
   if (!LLM_PROVIDERS.includes(value.llmProvider)) value.llmProvider = DEFAULT_SETTINGS.llmProvider;
   if (typeof value.llmModel !== 'string') value.llmModel = '';
+  value.llmModel = canonicalModelId(value.llmProvider, value.llmModel);
   const legacyLanguage = normalizeLanguage(value.llmLanguage, DEFAULT_SETTINGS.llmLanguage);
   const hasSplitLanguages = ['llmPromptLanguage', 'llmSummaryLanguage', 'llmCommitLanguage']
     .some((key) => Object.prototype.hasOwnProperty.call(source, key));
@@ -96,7 +121,10 @@ export function normalizeSettings(settings) {
   if (!LLM_ARCHIVE_REVIEW_MODES.includes(value.llmArchiveReview)) value.llmArchiveReview = DEFAULT_SETTINGS.llmArchiveReview;
   if (!LLM_CHANGE_DELIVERY_MODES.includes(value.llmChangeDelivery)) value.llmChangeDelivery = DEFAULT_SETTINGS.llmChangeDelivery;
   if (!LLM_FAILURE_ANALYSIS_MODES.includes(value.llmFailureAnalysis)) value.llmFailureAnalysis = DEFAULT_SETTINGS.llmFailureAnalysis;
-  value.llmDecisionCompatibility = normalizeDecisionCompatibility(value.llmDecisionCompatibility, value);
+  value.llmDecisionCompatibilityByModel = normalizeCompatibilityMap(value.llmDecisionCompatibilityByModel);
+  const legacyCompatibility = normalizeDecisionCompatibility(value.llmDecisionCompatibility, value);
+  if (legacyCompatibility) value.llmDecisionCompatibilityByModel[modelIdentityKey(value.llmProvider, value.llmModel)] = legacyCompatibility;
+  value.llmDecisionCompatibility = value.llmDecisionCompatibilityByModel[modelIdentityKey(value.llmProvider, value.llmModel)] ?? null;
   value.llmModelLoadConfigs = normalizeModelLoadConfigs(value.llmModelLoadConfigs);
   if (value.llmProvider === 'disabled') value.llmModel = '';
   if (!ARCHIVE_POLICIES.includes(value.archivePolicy)) value.archivePolicy = DEFAULT_SETTINGS.archivePolicy;
@@ -115,11 +143,48 @@ export function normalizeSettings(settings) {
 }
 
 
+
+function migrateLegacySettingAliases(source) {
+  const value = { ...source };
+  const aliases = {
+    llmApiToken: ['apiToken', 'localLlmApiToken', 'llmToken'],
+    llmProvider: ['localLlmProvider'],
+    llmModel: ['localLlmModel', 'selectedModel'],
+    archivePolicy: ['sourceArchivePolicy', 'archiveDispositionPolicy'],
+    archiveDirectory: ['sourceArchiveDirectory'],
+    archiveRetentionDays: ['sourceArchiveRetentionDays'],
+    archiveMaxBytes: ['sourceArchiveMaxBytes'],
+    backupMaxBytes: ['backupStorageMaxBytes'],
+  };
+  for (const [target, names] of Object.entries(aliases)) {
+    if (Object.prototype.hasOwnProperty.call(value, target)) continue;
+    const found = names.find((name) => Object.prototype.hasOwnProperty.call(value, name));
+    if (found) value[target] = value[found];
+  }
+  return value;
+}
+
+function normalizeCompatibilityMap(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const result = {};
+  for (const [key, record] of Object.entries(value)) {
+    if (!record || typeof record !== 'object' || Array.isArray(record)) continue;
+    result[key] = {
+      provider: typeof record.provider === 'string' ? record.provider : '',
+      model: typeof record.model === 'string' ? record.model : '',
+      supported: Boolean(record.supported),
+      testedAt: typeof record.testedAt === 'string' ? record.testedAt : null,
+      error: typeof record.error === 'string' ? record.error : null,
+    };
+  }
+  return result;
+}
+
 function normalizeDecisionCompatibility(value, settings) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const provider = typeof value.provider === 'string' ? value.provider : '';
-  const model = typeof value.model === 'string' ? value.model : '';
-  if (!provider || !model || provider !== settings.llmProvider || model !== settings.llmModel) return null;
+  const model = canonicalModelId(provider, typeof value.model === 'string' ? value.model : '');
+  if (!provider || !model || provider !== settings.llmProvider || model !== canonicalModelId(settings.llmProvider, settings.llmModel)) return null;
   return {
     provider,
     model,

@@ -6,6 +6,7 @@ import { renderZipflow } from './ui/render.js';
 export async function startZipflow({ input = process.stdin, output = process.stdout } = {}) {
   const state = createInitialState();
   const controller = new ZipflowController(state);
+  const detachSigint = input === process.stdin ? registerSigintHandler(controller) : () => {};
   const app = createWorkspaceApp({
     title: 'Zipflow',
     state,
@@ -28,6 +29,7 @@ export async function startZipflow({ input = process.stdin, output = process.std
     }),
     onKey: ({ key }) => { void controller.handleKey(key).catch((error) => controller.handleUnexpected(error)); },
     onExit: (code) => {
+      detachSigint();
       void controller.cleanup().finally(() => {
         process.exitCode = code;
         setImmediate(() => process.exit(code));
@@ -38,6 +40,13 @@ export async function startZipflow({ input = process.stdin, output = process.std
   await controller.boot();
   app.start();
   return app;
+}
+
+
+export function registerSigintHandler(controller, processObject = process) {
+  const handler = () => { void controller.handleInterrupt().catch((error) => controller.handleUnexpected(error)); };
+  processObject.on('SIGINT', handler);
+  return () => processObject.off('SIGINT', handler);
 }
 
 export { discoverProject } from './project/detect.js';

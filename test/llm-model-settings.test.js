@@ -57,7 +57,8 @@ test('LM Studio model list uses radio selection and muted loaded state metadata'
 
   assert.match(output, /○ Gemma 12B[\s\S]*12B · Q4_K_M[\s\S]*· Not loaded/);
   assert.match(output, /● Qwen 27B · 27B · Q5_K_M[\s\S]*· Loaded/);
-  assert.match(output, /Context 24,000 · batch 512 · flash enabled · KV gpu memory/);
+  assert.match(output, /Loaded configuration: Context 24,000 · batch 512 · flash enab…/);
+  assert.match(output, /\[\? full help\]/);
   assert.doesNotMatch(output, /just-in-time/i);
   assert.doesNotMatch(output, /Read the models currently exposed/i);
 });

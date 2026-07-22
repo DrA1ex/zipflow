@@ -270,12 +270,12 @@ function showSensitiveReview(controller) {
   const counts = draft.sensitive.reduce((map, item) => map.set(item.category, (map.get(item.category) ?? 0) + 1), new Map());
   controller.showMenu('export-sensitive', [
     { id: 'export-sensitive-exclude', label: 'Exclude recommended files and continue', description: `Remove ${draft.sensitive.length} flagged files from this ZIP` },
-    { id: 'export-sensitive-review', label: 'Review flagged files', description: 'Inspect reasons and include or exclude individual files' },
+    { id: 'export-sensitive-review', label: 'Review files not recommended for this ZIP  ›', context: 'These files are currently included but Zipflow recommends excluding them.', help: 'Inspect each flagged file and decide whether it should remain included in the ZIP.', navigate: true },
     { id: 'export-sensitive-include', label: 'Include anyway', description: 'Advanced: keep all flagged files in the archive' },
     { id: 'export-cancel', label: 'Cancel' },
-  ], 'Potentially sensitive files found', 0, [
-    `${draft.sensitive.length} flagged files · ${[...counts].map(([kind, count]) => `${count} ${kind}`).join(' · ')}`,
-    'This is a conservative filename and path check, not a guarantee that every secret was found.',
+  ], 'Files not recommended for this ZIP', 0, [
+    `${draft.sensitive.length} currently included flagged files · ${[...counts].map(([kind, count]) => `${count} ${kind}`).join(' · ')}`,
+    'These files are currently included. Apply recommended exclusions, review them individually, or explicitly keep them.',
   ]);
 }
 
@@ -303,8 +303,13 @@ function activateTreeItem(controller, itemId) {
     requestTreeToggle(controller, decodeURIComponent(itemId.slice('export-tree-file:'.length)), controller.state.selectedIndex);
     return;
   }
-  if (itemId === 'export-files-all') {
+  if (itemId === 'export-files-safe-defaults') {
     selectRecommendedTreePaths(draft);
+    updateSelectedSize(draft);
+    return showExportFiles(controller);
+  }
+  if (itemId === 'export-files-select-all') {
+    selectAllTreePaths(draft, true);
     updateSelectedSize(draft);
     return showExportFiles(controller);
   }
@@ -367,8 +372,9 @@ function showExportFiles(controller, selectedIndex = null, { origin = null, sens
   }
   const items = exportTreeItems(draft);
   items.push(
-    { id: 'export-files-all', label: 'Select recommended files', description: 'Select visible safe, non-ignored files and leave flagged paths excluded' },
-    { id: 'export-files-none', label: 'Clear selection', description: 'Exclude all files shown by this tree' },
+    { id: 'export-files-safe-defaults', label: 'Restore safe default selection', context: 'Include normal project files and exclude ignored, generated, protected, and flagged paths.', help: 'Resets the current tree to Zipflow’s recommended export selection. This is an action, not another screen.' },
+    { id: 'export-files-select-all', label: 'Include every file shown', context: 'Include every path visible in this tree, including flagged paths.' },
+    { id: 'export-files-none', label: 'Clear selection', context: 'Exclude all files shown by this tree.' },
     {
       id: 'export-files-continue',
       label: draft.treeOrigin === 'sensitive' ? 'Back to safety review' : 'Continue',
@@ -377,9 +383,11 @@ function showExportFiles(controller, selectedIndex = null, { origin = null, sens
     },
     { id: 'export-files-back', label: 'Back' },
   );
-  controller.showMenu('export-files', items, draft.treeSensitiveOnly ? 'Review flagged files' : 'Choose included files', selectedIndex, [
+  controller.showMenu('export-files', items, draft.treeSensitiveOnly ? 'Files not recommended for this ZIP' : 'Choose included files', selectedIndex, [
     `${treeLocationLabel(draft)} · ${draft.selectedPaths.size} of ${draft.paths.length} files · ${formatBytes(draft.totalSize)}`,
-    'Space toggles selection · Enter opens a folder · Shift+Tab or Left goes to the parent · Tab jumps to the next folder',
+    draft.treeSensitiveOnly
+      ? 'This tree contains only currently included files Zipflow recommends excluding. Space toggles a path; Enter opens folders.'
+      : 'Space toggles selection · Enter opens a folder marked › · PgUp/PgDn scroll the list · Shift+Tab or Left goes to the parent',
   ]);
 }
 
@@ -396,7 +404,7 @@ function showExportPreview(controller) {
   const draft = controller.state.exportDraft;
   controller.showMenu('export-preview', [
     { id: 'export-choose-path', label: 'Choose output path and create ZIP', description: draft.outputPath },
-    { id: 'export-review-files', label: 'Review included files', description: `${draft.selectedPaths.size} of ${draft.paths.length} files selected` },
+    { id: 'export-review-files', label: 'Review included files  ›', context: `${draft.selectedPaths.size} of ${draft.paths.length} files selected. Open the file tree to adjust the selection.`, navigate: true },
     { id: 'export-change-mode', label: 'Change export mode', description: modeLabel(draft.mode) },
     { id: 'export-cancel', label: 'Cancel' },
   ], 'Review ZIP contents', 0, [
@@ -409,7 +417,6 @@ function showExportPreview(controller) {
 function updateSelectedSize(draft) {
   draft.totalSize = [...draft.selectedPaths].reduce((total, filePath) => total + (draft.pathSizes.get(filePath) ?? 0), 0);
 }
-
 async function openArchiveLocation(controller) {
   const target = controller.state.exportDraft.result.outputPath;
   try {
@@ -421,7 +428,6 @@ async function openArchiveLocation(controller) {
     controller.message('Could not open archive location', [error.message], 'warning');
   }
 }
-
 function showExportPath(controller) {
   const draft = controller.state.exportDraft;
   controller.showEditor('export-path', {
@@ -431,7 +437,6 @@ function showExportPath(controller) {
     context: 'Tab completes paths. Choose a directory to generate the archive filename automatically.',
   }, '');
 }
-
 async function createArchive(controller) {
   const { state } = controller;
   const operation = controller.beginOperation({ kind: 'export-create', label: 'Creating ZIP archive' });
@@ -480,14 +485,12 @@ async function createArchive(controller) {
     operation.finish();
   }
 }
-
 function modeLabel(mode) {
   if (mode === 'tracked') return 'Git-tracked files';
   if (mode === 'nonignored') return 'Non-ignored files';
   if (mode === 'interactive') return 'Custom selection';
   return 'Everything, including ignored files';
 }
-
 function formatBytes(bytes) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;

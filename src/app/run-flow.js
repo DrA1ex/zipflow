@@ -42,6 +42,7 @@ import {
 } from './run-plan-autonomy.js';
 
 import { completeNoChangeRun } from './run-completion.js';
+import { effectiveChangedCount, excludedPlanItems, initializePlanSelections, selectedPlanCounts } from './plan-selection.js';
 
 export { showLastRun };
 
@@ -219,10 +220,10 @@ async function continueArchiveInspection(controller, { archivePath, archiveHash,
     state.archive = extracted;
     state.archiveMetadata = metadata;
     state.plan = resolvedPlan;
-    state.decisions = new Map(resolvedPlan.conflicts.map((item) => [
-      item.path,
-      state.workflow.autonomy?.mode === 'manual' && state.workflow.policy.conflictPolicy === 'overwrite' ? 'archive' : null,
-    ]));
+    initializePlanSelections(state, resolvedPlan);
+    if (state.workflow.autonomy?.mode === 'manual' && state.workflow.policy.conflictPolicy === 'overwrite') {
+      for (const conflict of resolvedPlan.conflicts) state.decisions.set(conflict.path, 'archive');
+    }
     state.run.plan = serializePlanForDecision(resolvedPlan);
     state.run.patch = patch.path ? { path: patch.path, omitted: patch.omitted } : null;
     state.run.archiveInfo = { ...archiveInfo, fileCount: extracted.fileCount, totalSize: extracted.totalSize, rootPrefix: extracted.rootPrefix };
@@ -303,14 +304,10 @@ export async function startApply(controller, { checkpointCreated = false } = {})
     if (requiresSafetyReview(state.archiveSafety) && !state.archiveSafety.acknowledged) return showArchiveSafetyReview(controller);
     if (!checkpointCreated && state.workflow.git.checkpoint === 'ask' && archiveConflictPaths(state).length) return showConflictCheckpoint(controller);
     if (!checkpointCreated && state.workflow.git.checkpoint === 'auto' && archiveConflictPaths(state).length) await createCheckpoint(controller, { operation });
-    if (changedCount(state.plan) === 0) {
-      state.run.applied = { paths: [], changedPaths: [], backupPath: null, skippedConflicts: [] };
-      state.run.status = 'applied';
-      state.run = await saveRunRecord(state.run);
-      controller.message('Nothing to apply', [`${state.plan.counts.unchanged} files already match the archive.`], 'success');
-      return operation.handoff(() => startChecks(controller));
+    if (effectiveChangedCount(state.plan, state.decisions) === 0) {
+      return operation.handoff(() => completeNoChangeRun(controller, { reason: 'selection-empty' }));
     }
-    setBusy(controller, 'Applying update', 0, Math.max(1, changedCount(state.plan)), 'Creating backup');
+    setBusy(controller, 'Applying update', 0, Math.max(1, effectiveChangedCount(state.plan, state.decisions)), 'Creating backup');
     const applied = await applyUpdatePlan({
       runId: state.run.id, projectPath: state.project.root, plan: state.plan, decisions: state.decisions,
       signal: operation.signal,
@@ -323,9 +320,12 @@ export async function startApply(controller, { checkpointCreated = false } = {})
     const managedHistory = await updateManagedHistory(state.project.root, applied.applied, {
       enabled: activeRunSettings(state).managedHistoryPolicy !== 'disabled',
     });
+    const excluded = excludedPlanItems(state.plan, state.decisions);
     state.run.applied = {
       paths: applied.applied.map((item) => item.path),
       changedPaths: applied.applied.filter((item) => item.kind !== 'deleted').map((item) => item.path),
+      counts: selectedPlanCounts(state.plan, state.decisions),
+      excludedPaths: excluded.map((item) => item.path),
       backupPath: applied.backup.root,
       backupAvailable: true,
       skippedConflicts: applied.skippedConflicts.map((item) => item.path),
@@ -335,7 +335,7 @@ export async function startApply(controller, { checkpointCreated = false } = {})
     state.run.status = 'applied';
     state.run = await saveRunRecord(state.run);
     controller.message('Update applied', [
-      `${applied.applied.length} paths changed · ${applied.skippedConflicts.length} conflicts kept locally`,
+      `${applied.applied.length} paths changed · ${excluded.length} kept local by review · ${applied.skippedConflicts.length} conflicts kept locally`,
       `${state.plan.preserved.length} snapshot paths preserved · Backup: ${displayPath(applied.backup.root)}`,
     ], 'success');
     state.busy = false;

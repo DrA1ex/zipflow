@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { handleInputEditorKey } from 'terlio.js';
 import { loadManagedHistory, resetManagedHistory } from '../history/managed.js';
-import { saveSettings } from '../settings/store.js';
+import { updateSettings } from '../settings/store.js';
 import { ensureDir } from '../utils/fs.js';
 import { expandHome } from '../utils/paths.js';
 import { setScreen } from './state.js';
@@ -104,7 +104,7 @@ export async function submitSettingsEditor(controller) {
   const entered = state.editor.value.trim();
   try {
     const value = await validateSettingValue(modal.field, entered);
-    state.settings = await saveSettings({ ...state.settings, [modal.field.id]: value });
+    state.settings = await updateSettings({ [modal.field.id]: value }, { allowClearToken: modal.field.id === 'llmApiToken', baseSettings: state.settings });
     if (modal.field.id === 'llmApiToken') resetModelCache(state.settingsPanel);
     state.settingsPanel.modal = null;
     resetPathSuggestionInput(state);
@@ -132,6 +132,8 @@ export async function handleSettingsKey(controller, key) {
   }
   if (panel.modal) return handleModalKey(controller, key);
   if (panel.choiceSearch?.active) return handleSettingsChoiceSearchKey(controller, key, (delta) => moveChoice(controller.state, delta));
+  if (key.printable && key.text === '?') return showSettingsHelp(controller);
+  if (key.name === 'page-up' || key.name === 'page-down') return pageSettingsSelection(controller, key.name === 'page-up' ? -1 : 1);
   if (key.name === 'tab') return toggleSettingsPane(controller);
   if (panel.focus?.startsWith('model-config')) return handleModelSettingsKey(controller, key);
   if (key.printable && key.text === '/' && canSearchSettingsChoices(controller.state)) {
@@ -155,6 +157,59 @@ export async function handleSettingsKey(controller, key) {
     if (panel.focus === 'parameters') return activateParameter(controller);
     return activateChoice(controller);
   }
+  return true;
+}
+
+async function pageSettingsSelection(controller, direction) {
+  const { state } = controller;
+  const panel = state.settingsPanel;
+  const amount = 6;
+  if (panel.focus === 'categories') {
+    const definitions = settingsDefinitions(state);
+    panel.categoryIndex = clamp(panel.categoryIndex + direction * amount, 0, Math.max(0, definitions.length - 1));
+    panel.modelConfig = null;
+    panel.subpage = null;
+    await ensureDefinitionData(controller, currentDefinition(state));
+  } else if (panel.focus === 'parameters') {
+    const parameters = settingsParameters(state, currentDefinition(state));
+    setParameterIndex(state, currentParameterIndex(state, parameters) + direction * amount);
+    if (panelParameter(state, parameters)?.disabled) moveParameter(state, direction);
+  } else {
+    const parameter = panelParameter(state);
+    const choices = currentChoices(state);
+    if (parameter && choices.length) {
+      const current = currentChoiceIndex(state, choices, parameter);
+      panel.choiceIndices[parameter.id] = clamp(current + direction * amount, 0, choices.length - 1);
+      if (choices[panel.choiceIndices[parameter.id]]?.disabled) moveChoice(state, direction);
+    }
+  }
+  controller.invalidate();
+  return true;
+}
+
+function showSettingsHelp(controller) {
+  const { state } = controller;
+  const panel = state.settingsPanel;
+  const definition = currentDefinition(state);
+  let title = definition.label;
+  let item = definition;
+  if (panel.focus === 'parameters') item = panelParameter(state) ?? definition;
+  else if (panel.focus === 'choices') {
+    const parameter = panelParameter(state);
+    const choices = currentChoices(state);
+    item = choices[currentChoiceIndex(state, choices, parameter)] ?? parameter ?? definition;
+    title = parameter?.label ?? definition.label;
+  } else if (panel.focus?.startsWith('model-config')) {
+    item = settingsModelView(state)?.activeParameter ?? definition;
+  }
+  const summary = item?.disabledReason || item?.description || definition.description || 'No additional help is available.';
+  state.helpToast = {
+    title: `Help · ${title}`,
+    lines: [summary, ...(item?.help && item.help !== summary ? ['', item.help] : [])],
+    level: 'info',
+    expiresAt: Date.now() + 12_000,
+  };
+  controller.invalidate();
   return true;
 }
 
@@ -184,15 +239,12 @@ export async function selectChoice(controller, index) {
   panel.choiceIndices[panel.activeParameterId] = clamp(index, 0, currentChoices(controller.state).length - 1);
   await activateChoice(controller);
 }
-
 export async function selectModelSettingParameter(controller, index) {
   return selectModelParameter(controller, index);
 }
-
 export async function selectModelSettingChoice(controller, index) {
   return selectModelChoice(controller, index);
 }
-
 export function settingsViewModel(state) {
   const definitions = settingsDefinitions(state);
   const selectedSetting = currentDefinition(state);
@@ -219,7 +271,6 @@ export function settingsViewModel(state) {
     choiceSearch: state.settingsPanel?.choiceSearch ?? null,
   };
 }
-
 function toggleSettingsPane(controller) {
   const { state } = controller;
   const panel = state.settingsPanel;
@@ -234,7 +285,6 @@ function toggleSettingsPane(controller) {
   controller.invalidate();
   return true;
 }
-
 async function handleBack(controller) {
   const panel = controller.state.settingsPanel;
   if (panel.focus === 'choices') {
@@ -267,7 +317,6 @@ async function handleBack(controller) {
   closeSettings(controller);
   return true;
 }
-
 async function moveCategory(controller, delta) {
   const { state } = controller;
   const definitions = settingsDefinitions(state);
@@ -278,7 +327,6 @@ async function moveCategory(controller, delta) {
   restoreParameter(state);
   state.status = currentDefinition(state).label;
 }
-
 async function enterCategory(controller) {
   const { state } = controller;
   state.settingsPanel.modelConfig = null;
@@ -288,7 +336,6 @@ async function enterCategory(controller) {
   controller.invalidate();
   return true;
 }
-
 async function activateParameter(controller) {
   const { state } = controller;
   const parameter = panelParameter(state);
@@ -344,7 +391,6 @@ async function activateParameter(controller) {
   controller.invalidate();
   return true;
 }
-
 async function activateChoice(controller) {
   const { state } = controller;
   const parameter = panelParameter(state);
@@ -379,11 +425,7 @@ async function activateChoice(controller) {
     return returnAfterChoice(controller, parameter.id, `${result.removed} managed path${result.removed === 1 ? '' : 's'} cleared`);
   }
   if (option.settingId) {
-    state.settings = await saveSettings({
-      ...state.settings,
-      [option.settingId]: option.value,
-      ...(['llmProvider', 'llmModel'].includes(option.settingId) ? { llmDecisionCompatibility: null } : {}),
-    });
+    state.settings = await updateSettings({ [option.settingId]: option.value }, { baseSettings: state.settings });
     if (option.settingId === 'archivePolicy' && option.value === 'move') {
       await ensureDir(path.resolve(expandHome(state.settings.archiveDirectory)));
     }
@@ -395,7 +437,6 @@ async function activateChoice(controller) {
   }
   return true;
 }
-
 function returnAfterChoice(controller, parameterId, status) {
   const { state } = controller;
   if (isDirectDefinition(currentDefinition(state))) {
@@ -414,7 +455,6 @@ function returnAfterChoice(controller, parameterId, status) {
   controller.invalidate();
   return true;
 }
-
 async function handleModalKey(controller, key) {
   const { state } = controller;
   const modal = state.settingsPanel.modal;
@@ -446,7 +486,6 @@ async function handleModalKey(controller, key) {
   controller.invalidate();
   return true;
 }
-
 function openSettingModal(controller, fieldId, returnParameterId) {
   const field = settingsFieldDefinition(fieldId);
   if (!field) return;

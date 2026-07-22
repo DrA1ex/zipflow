@@ -7,9 +7,10 @@ import { assertSafeProjectPath } from '../security/project-path.js';
 import { throwIfCancelled } from '../operations/manager.js';
 import { copyRegularFileNoFollow } from '../security/safe-file.js';
 import { shortToken } from '../utils/hash.js';
+import { selectedPlanItems } from '../app/plan-selection.js';
 
 export async function applyUpdatePlan({ runId, projectPath, plan, decisions = new Map(), onProgress = null, signal = null, shouldCancel = () => false }) {
-  const items = selectedItems(plan, decisions);
+  const items = selectedPlanItems(plan, decisions);
   throwIfCancelled(signal);
   await verifyPlanStillCurrent(projectPath, items, signal);
   onProgress?.({ stage: 'backup', current: 0, total: items.length });
@@ -62,13 +63,6 @@ export async function applyUpdatePlan({ runId, projectPath, plan, decisions = ne
   };
 }
 
-function selectedItems(plan, decisions) {
-  const conflictPaths = new Set(plan.conflicts.map((item) => item.path));
-  return [...plan.created, ...plan.updated, ...plan.deleted].filter((item) => {
-    if (!conflictPaths.has(item.path)) return true;
-    return decisions.get(item.path) === 'archive';
-  });
-}
 
 async function verifyPlanStillCurrent(projectPath, items, signal) {
   const changed = [];

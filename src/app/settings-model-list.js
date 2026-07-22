@@ -1,5 +1,6 @@
 import { listLocalModelChoices, providerDefinition } from '../llm/client.js';
-import { saveSettings } from '../settings/store.js';
+import { updateSettings } from '../settings/store.js';
+import { canonicalModelId } from '../llm/model-identity.js';
 
 export async function refreshModels(controller, { quiet = false } = {}) {
   const { state } = controller;
@@ -21,10 +22,11 @@ export async function refreshModels(controller, { quiet = false } = {}) {
     panel.models = await listLocalModelChoices(provider, { apiToken: state.settings.llmApiToken });
     panel.modelsProvider = provider;
     const current = findConfiguredModel(panel.models, state.settings.llmModel);
-    if (current && current.id !== state.settings.llmModel) {
-      state.settings = await saveSettings({ ...state.settings, llmModel: current.id, llmDecisionCompatibility: null });
-    } else if (!current && state.settings.llmModel) {
-      state.settings = await saveSettings({ ...state.settings, llmModel: '', llmDecisionCompatibility: null });
+    if (current) {
+      const canonical = canonicalModelId(provider, current.key || current.id, { records: panel.models });
+      if (canonical !== state.settings.llmModel) state.settings = await updateSettings({ llmModel: canonical }, { baseSettings: state.settings });
+    } else if (state.settings.llmModel) {
+      state.settings = await updateSettings({ llmModel: '' }, { baseSettings: state.settings });
     }
     if (!quiet) {
       state.status = 'Local LLM';
