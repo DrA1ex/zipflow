@@ -12,7 +12,7 @@ import {
   activateSetup, backSetup, beginSetup, handleSetupShortcut, handlesSetupScreen, submitSetupEditor,
 } from './setup-flow.js';
 import {
-  activateRun, backRun, beginArchiveInput, handleRunShortcut, handlesRunScreen, inspectArchivePath, showLastRun, submitRunEditor,
+  activateRun, backRun, beginArchiveInput, handleEmptyArchiveEnter, handleRunShortcut, handlesRunScreen, inspectArchivePath, showLastRun, submitRunEditor,
 } from './run-flow.js';
 import {
   closeSettings, handleSettingsKey, isSettingsScreen, openSettings, selectChoice, selectModelSettingChoice,
@@ -39,19 +39,20 @@ import {
   refreshPathSuggestions, resetPathSuggestionInput, selectPathSuggestion, showRecentArchiveSuggestions,
 } from './path-suggestions.js';
 import { isEditorScreen, isPagedMenuScreen, isSearchableScreen, shouldRecordChoice } from './controller-screen-rules.js';
-
+import { InputActionGate } from './input-action-gate.js';
+import { insertPastedText, pastedTextFromKey } from '../ui/editor-paste.js';
 export class ZipflowController {
   constructor(state) {
     this.state = state;
     this.runtime = null;
     this.activeLock = null;
+    this.inputActions = new InputActionGate();
     this.operations = new OperationManager({
       onChange: (operation) => { state.activeOperation = operation; this.invalidate(); },
       forceStop: () => terminateActiveProcesses({ graceMs: 0 }),
     });
     state.dispatch = (action) => { void this.dispatch(action).catch((error) => this.handleUnexpected(error)); };
   }
-
   attachRuntime(runtime) {
     this.runtime = runtime;
     this.state.overlays = runtime?.overlays ?? null;
@@ -154,7 +155,7 @@ export class ZipflowController {
       this.moveSelection(normalized.name === 'up' ? -1 : 1);
       return this.invalidate();
     }
-    if (normalized.name === 'enter' || normalized.name === 'space') return this.activateSelected();
+    if (normalized.name === 'enter' || normalized.name === 'space') return this.inputActions.run(() => this.activateSelected());
     if (normalized.name === 'escape') return this.back();
   }
 
@@ -204,12 +205,12 @@ export class ZipflowController {
       selectPathSuggestion(this.state, action.index);
       if (this.state.pathSuggestions?.owner === 'settings-modal') {
         await handleSettingsKey(this, { name: 'enter' });
-      } else await acceptPathSuggestion(this, { submit: () => this.submitCurrentEditor(), submitSelected: false });
+      } else await acceptPathSuggestion(this, { submit: () => this.inputActions.run(() => this.submitCurrentEditor()), submitSelected: false });
       return;
     }
     if (action.type === 'activate-index') {
       this.state.selectedIndex = action.index;
-      await this.activateSelected();
+      await this.inputActions.run(() => this.activateSelected());
       this.invalidate();
     }
   }
@@ -406,12 +407,25 @@ export class ZipflowController {
     if (this.state.screen === 'archive-input' && key.name === 'tab' && !String(this.state.editor.value ?? '').trim()) {
       if (await showRecentArchiveSuggestions(this)) return this.invalidate();
     }
+    const pastedText = pastedTextFromKey(key);
+    if (pastedText !== null) {
+      const previousValue = this.state.editor.value;
+      insertPastedText(this.state.editor, pastedText, { multiline: Boolean(this.state.editorContext?.multiline) });
+      if (pathEditor && this.state.editor.value !== previousValue) {
+        this.state.pathSuggestionActive = Boolean(String(this.state.editor.value ?? '').trim());
+        await refreshPathSuggestions(this);
+      }
+      return this.invalidate();
+    }
+    if (this.state.screen === 'archive-input' && key.name === 'enter' && !key.ctrl && !String(this.state.editor.value ?? '').trim() && !this.state.pathSuggestions?.items?.length) {
+      if (await handleEmptyArchiveEnter(this)) return this.invalidate();
+    }
     if (pathEditor && (key.name === 'up' || key.name === 'down') && this.state.pathSuggestions?.items?.length) {
       movePathSuggestion(this.state, key.name === 'up' ? -1 : 1);
       return this.invalidate();
     }
     if (pathEditor && (key.name === 'tab' || key.name === 'enter') && this.state.pathSuggestions?.items?.length) {
-      await acceptPathSuggestion(this, { submit: () => this.submitCurrentEditor(), submitSelected: false });
+      await acceptPathSuggestion(this, { submit: () => this.inputActions.run(() => this.submitCurrentEditor()), submitSelected: false });
       return this.invalidate();
     }
     if (key.name === 'enter' && key.ctrl && this.state.editorContext?.multiline) {
@@ -419,7 +433,7 @@ export class ZipflowController {
       return this.invalidate();
     }
     if (key.name === 'enter') {
-      await this.submitCurrentEditor();
+      await this.inputActions.run(() => this.submitCurrentEditor());
       return this.invalidate();
     }
     const previousValue = this.state.editor.value;
@@ -430,7 +444,6 @@ export class ZipflowController {
     }
     this.invalidate();
   }
-
   async submitCurrentEditor() {
     if (handlesSetupScreen(this.state.screen)) return submitSetupEditor(this);
     if (handlesRunScreen(this.state.screen)) return submitRunEditor(this);

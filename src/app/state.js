@@ -58,6 +58,8 @@ export function createInitialState() {
     historyStatusFilter: 'all',
     runDetailsOrigin: null,
     pendingArchive: null,
+    archiveDiscoveryTap: null,
+    archiveDiscoveryCandidates: [],
     recoveryContext: null,
     status: 'Starting',
     statusDetail: '',

@@ -7,9 +7,18 @@ export function ContextDock({ text = '', rows = 1, width = 80, theme = null, tok
   const source = String(text ?? '').trim();
   const prefix = source ? '› ' : '';
   const available = Math.max(8, safeWidth - visibleLength(prefix));
-  const wrapped = source ? wrapText(source, available) : [];
+  const explicitLines = source ? source.split(/\r?\n/).map((line) => line.trim()) : [];
+  const preserveExplicitRows = explicitLines.length > 1;
+  let truncated = false;
+  const wrapped = preserveExplicitRows
+    ? explicitLines.map((line) => {
+      const lines = wrapText(line, available);
+      if (lines.length > 1) truncated = true;
+      return lines[0] ?? '';
+    })
+    : source ? wrapText(source, available) : [];
   const clipped = wrapped.slice(0, safeRows);
-  const truncated = wrapped.length > safeRows;
+  truncated ||= wrapped.length > safeRows;
   if (truncated && clipped.length) {
     const hint = '  [? full help]';
     clipped[clipped.length - 1] = `${truncateVisible(clipped.at(-1), Math.max(1, available - visibleLength(hint) - 1), '…')}${hint}`;

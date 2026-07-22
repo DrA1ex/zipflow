@@ -12,6 +12,12 @@ const EXACT_SENSITIVE = new Map([
 ]);
 const SAFE_ENV_SUFFIXES = ['.example', '.sample', '.template', '.dist', '.defaults'];
 const GENERATED_DIRECTORIES = new Set(['node_modules', '.cache', 'coverage', '.next', '.nuxt', '.turbo', 'dist', 'build', 'target']);
+const SOURCE_CODE_EXTENSIONS = new Set([
+  '.bash', '.c', '.cc', '.cjs', '.clj', '.cljs', '.cpp', '.cs', '.cxx', '.dart', '.erl', '.ex', '.exs',
+  '.fish', '.go', '.h', '.hpp', '.hrl', '.java', '.js', '.jsx', '.kt', '.kts', '.lua', '.mjs', '.php',
+  '.pl', '.pm', '.ps1', '.py', '.pyw', '.r', '.rb', '.rs', '.scala', '.sh', '.svelte', '.swift', '.ts',
+  '.tsx', '.vue', '.zsh',
+]);
 
 export function inspectPotentiallySensitivePaths(paths, { pathSizes = new Map() } = {}) {
   return paths.map((relative) => inspectPotentiallySensitivePath(relative, { size: pathSizes.get(relative) ?? 0 })).filter(Boolean);
@@ -28,16 +34,20 @@ export function sensitivePathMap(records) {
 function inspectPath(relative, size) {
   const normalized = String(relative).replaceAll('\\', '/');
   const basename = path.posix.basename(normalized).toLowerCase();
+  const extension = path.posix.extname(basename).toLowerCase();
   const segments = normalized.toLowerCase().split('/');
   const exact = EXACT_SENSITIVE.get(basename);
   if (exact) return record(normalized, exact, 'sensitive', size);
-  if (basename.startsWith('.env') && !SAFE_ENV_SUFFIXES.some((suffix) => basename.endsWith(suffix))) {
+  if (!SOURCE_CODE_EXTENSIONS.has(extension)
+    && basename.startsWith('.env')
+    && !SAFE_ENV_SUFFIXES.some((suffix) => basename.endsWith(suffix))) {
     return record(normalized, 'Environment file may contain credentials', 'sensitive', size);
   }
   if (/\.(pem|key|p12|pfx|jks|keystore)$/i.test(basename)) {
     return record(normalized, 'Private key or certificate container', 'sensitive', size);
   }
-  if (/(credential|secret|private[-_.]?key|access[-_.]?token|auth[-_.]?token)/i.test(basename)
+  if (!SOURCE_CODE_EXTENSIONS.has(extension)
+    && /(credential|secret|private[-_.]?key|access[-_.]?token|auth[-_.]?token)/i.test(basename)
     && !/(example|sample|template|schema|test|spec)/i.test(basename)) {
     return record(normalized, 'Filename suggests credentials or secrets', 'sensitive', size);
   }

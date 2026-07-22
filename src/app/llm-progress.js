@@ -1,5 +1,6 @@
 import { color, wrapText } from 'terlio.js';
 import { activeRunSettings } from './runtime-settings.js';
+import { inferLanguage, standaloneCode } from '../ui/rich-text.js';
 export function beginLlmProgress(controller, { expectedMs = 0, presentation = 'review', preserveRaw = true } = {}) {
   const { state } = controller;
   const startedAt = Date.now();
@@ -46,7 +47,11 @@ export function beginLlmProgress(controller, { expectedMs = 0, presentation = 'r
         if (String(finished.reasoning ?? '').trim()) lines.push('Analysis', ...String(finished.reasoning).replace(/\r\n/g, '\n').split('\n'));
         if (String(finished.content ?? '').trim()) {
           if (lines.length) lines.push('');
-          lines.push('Model response', ...String(finished.content).replace(/\r\n/g, '\n').split('\n'));
+          const rawContent = String(finished.content).replace(/\r\n?/g, '\n');
+          const code = standaloneCode(rawContent);
+          lines.push('Model response', ...(code
+            ? [`\`\`\`${code.language}`, ...code.code.split('\n'), '```']
+            : rawContent.split('\n')));
         }
         controller.message('Raw LLM response', lines, 'info', {
           collapsible: true,
@@ -166,7 +171,7 @@ export function updateLlmProgress(controller, event) {
   controller.invalidate();
 }
 
-export function llmActivityLines(runtime, width = 100, theme = null) {
+export function llmActivityLines(runtime, width = 100, theme = null, { renderCode = null } = {}) {
   if (!runtime) return [];
   if (runtime.presentation === 'decision') return decisionActivityLines(runtime, width, theme);
   const lines = [
@@ -193,9 +198,14 @@ export function llmActivityLines(runtime, width = 100, theme = null) {
   }
   const textWidth = Math.max(28, width - 10);
   const reasoning = preview(runtime.reasoning, 5, textWidth);
-  const content = preview(runtime.content, 8, textWidth);
+  const contentText = String(runtime.content ?? '').replace(/\r\n?/g, '\n');
+  const contentLanguage = inferLanguage(contentText);
+  const highlightedContent = renderCode && contentLanguage !== 'text'
+    ? renderCode(previewSource(contentText, 8), contentLanguage, { width: textWidth + 4, indent: 4 })
+    : null;
+  const content = highlightedContent ?? preview(contentText, 8, textWidth).map((line) => `    ${line}`);
   if (reasoning.length) lines.push(paint(theme, 'textMuted', '  Analysis:'), ...reasoning.map((line) => `    ${paint(theme, 'textMuted', line)}`));
-  if (content.length) lines.push(paint(theme, 'accent', '  Model response:'), ...content.map((line) => `    ${line}`));
+  if (content.length) lines.push(paint(theme, 'accent', '  Model response:'), ...content);
   lines.push('');
   return lines;
 }
@@ -311,6 +321,11 @@ function stringValue(value) {
 
 function actionLabel(value) {
   return String(value ?? '').split('-').map((part) => part ? `${part[0].toUpperCase()}${part.slice(1)}` : '').join(' ');
+}
+
+function previewSource(value, maxLines) {
+  const lines = String(value ?? '').replace(/\r\n?/g, '\n').trimEnd().split('\n');
+  return lines.slice(-maxLines).join('\n');
 }
 
 function preview(value, maxLines, width) {

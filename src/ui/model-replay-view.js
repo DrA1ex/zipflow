@@ -14,6 +14,8 @@ import {
   wrapText,
 } from 'terlio.js';
 import { ContextDock } from './context-dock.js';
+import { parseRichTextBlocks } from './rich-text.js';
+import { renderSyntaxLines } from './syntax-render.js';
 
 export function renderModelReplayWorkspace({ content, state, width, height, theme, animationFrame = 0 }) {
   const workspace = state.settingsPanel.modelTestWorkspace;
@@ -187,9 +189,15 @@ function blockOutputLines(block, theme, width) {
       ? [color(theme, 'textMuted', '  Analysis'), ...String(block.reasoning).split('\n').flatMap((line) => wrapColoredLine(line, width, 4, theme, 'textMuted'))]
       : []),
     ...(block.content
-      ? [color(theme, 'accent', '  Model response'), ...String(block.content).split('\n').flatMap((line) => wrapColoredLine(line, width, 4, theme, 'text'))]
+      ? [color(theme, 'accent', '  Model response'), ...richReplayLines(block.content, theme, width)]
       : []),
   ];
+}
+
+function richReplayLines(value, theme, width) {
+  return parseRichTextBlocks(value).flatMap((block) => block.type === 'code'
+    ? renderSyntaxLines(block.code, block.language, { width, theme, indent: 4 })
+    : block.lines.flatMap((line) => wrapColoredLine(line, width, 4, theme, 'text')));
 }
 
 function parsedResultLines(result, theme, width) {

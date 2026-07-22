@@ -1,5 +1,7 @@
 import path from 'node:path';
 
+const FLAT_SENSITIVE_FILE_LIMIT = 5;
+
 export function initializeExportTree(draft, { directory = '', origin = 'preview', sensitiveOnly = false } = {}) {
   draft.treeDirectory = normalizeDirectory(directory);
   draft.treeOrigin = origin;
@@ -9,7 +11,9 @@ export function initializeExportTree(draft, { directory = '', origin = 'preview'
 export function exportTreeItems(draft) {
   const directory = normalizeDirectory(draft.treeDirectory);
   const sourcePaths = filteredPaths(draft);
-  const entries = immediateEntries(sourcePaths, directory);
+  const entries = draft.treeSensitiveOnly
+    ? sensitiveEntries(sourcePaths, directory)
+    : immediateEntries(sourcePaths, directory);
   return entries.map((entry) => treeItem(draft, entry));
 }
 
@@ -100,6 +104,32 @@ function immediateEntries(paths, directory) {
   return [...map.values()].sort((left, right) => (
     left.kind === right.kind ? left.name.localeCompare(right.name) : left.kind === 'directory' ? -1 : 1
   ));
+}
+
+function sensitiveEntries(paths, directory) {
+  if (!directory && paths.length <= FLAT_SENSITIVE_FILE_LIMIT) {
+    return [...paths].sort((left, right) => left.localeCompare(right)).map((relative) => ({
+      path: relative,
+      name: relative,
+      kind: 'file',
+    }));
+  }
+  const prefix = directory ? `${directory}/` : '';
+  return immediateEntries(paths, directory).map((entry) => {
+    if (entry.kind !== 'directory') return entry;
+    const descendants = descendantsFor(paths, entry.path);
+    if (descendants.length !== 1) return entry;
+    const onlyPath = descendants[0];
+    return {
+      path: onlyPath,
+      name: onlyPath.slice(prefix.length),
+      kind: 'file',
+    };
+  }).sort(compareEntries);
+}
+
+function compareEntries(left, right) {
+  return left.kind === right.kind ? left.name.localeCompare(right.name) : left.kind === 'directory' ? -1 : 1;
 }
 
 function descendantsFor(paths, entryPath) {

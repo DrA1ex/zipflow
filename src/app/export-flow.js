@@ -13,7 +13,6 @@ import {
   enterTreeDirectory, exportTreeItems, initializeExportTree, leaveTreeDirectory,
   nextDirectoryItemIndex, selectAllTreePaths, toggleTreeEntry, treeLocationLabel,
 } from './export-tree.js';
-
 export function handlesExportScreen(screen) {
   return ['export-mode', 'export-sensitive', 'export-protected', 'export-preview', 'export-files', 'export-path', 'export-overwrite', 'export-running', 'export-complete'].includes(screen);
 }
@@ -268,14 +267,15 @@ function activateSensitiveReview(controller, itemId) {
 function showSensitiveReview(controller) {
   const draft = controller.state.exportDraft;
   const counts = draft.sensitive.reduce((map, item) => map.set(item.category, (map.get(item.category) ?? 0) + 1), new Map());
+  const includedCount = draft.sensitive.filter((item) => draft.selectedPaths.has(item.path)).length;
   controller.showMenu('export-sensitive', [
     { id: 'export-sensitive-exclude', label: 'Exclude recommended files and continue', description: `Remove ${draft.sensitive.length} flagged files from this ZIP` },
-    { id: 'export-sensitive-review', label: 'Review files not recommended for this ZIP ›', context: 'These files are currently included but Zipflow recommends excluding them.', help: 'Inspect each flagged file and decide whether it should remain included in the ZIP.', navigate: true },
+    { id: 'export-sensitive-review', label: 'Review files not recommended for this ZIP ›', context: `${includedCount} of ${draft.sensitive.length} flagged files are currently included.`, help: 'Inspect every flagged file and decide whether it should remain included in the ZIP.', navigate: true },
     { id: 'export-sensitive-include', label: 'Include anyway', description: 'Advanced: keep all flagged files in the archive' },
     { id: 'export-cancel', label: 'Cancel' },
   ], 'Files not recommended for this ZIP', 0, [
-    `${draft.sensitive.length} currently included flagged files · ${[...counts].map(([kind, count]) => `${count} ${kind}`).join(' · ')}`,
-    'These files are currently included. Apply recommended exclusions, review them individually, or explicitly keep them.',
+    `${includedCount} of ${draft.sensitive.length} flagged files currently included · ${[...counts].map(([kind, count]) => `${count} ${kind}`).join(' · ')}`,
+    'Apply recommended exclusions, review each file, or explicitly keep the flagged files.',
   ]);
 }
 
@@ -365,11 +365,10 @@ function selectRecommendedTreePaths(draft) {
 function showExportFiles(controller, selectedIndex = null, { origin = null, sensitiveOnly = null } = {}) {
   const draft = controller.state.exportDraft;
   if (origin !== null || sensitiveOnly !== null || draft.treeDirectory === undefined) {
-    initializeExportTree(draft, {
-      origin: origin ?? draft.treeOrigin ?? 'preview',
-      sensitiveOnly: sensitiveOnly ?? false,
-    });
+    initializeExportTree(draft, { origin: origin ?? draft.treeOrigin ?? 'preview', sensitiveOnly: sensitiveOnly ?? false });
   }
+  const flaggedPaths = draft.treeSensitiveOnly ? draft.sensitive.map((record) => record.path) : [];
+  const flaggedSelected = flaggedPaths.filter((relative) => draft.selectedPaths.has(relative)).length;
   const items = exportTreeItems(draft);
   items.push(
     { id: 'export-files-safe-defaults', label: 'Restore safe default selection', context: 'Include normal project files and exclude ignored, generated, protected, and flagged paths.', help: 'Resets the current tree to Zipflow’s recommended export selection. This is an action, not another screen.' },
@@ -384,9 +383,11 @@ function showExportFiles(controller, selectedIndex = null, { origin = null, sens
     { id: 'export-files-back', label: 'Back' },
   );
   controller.showMenu('export-files', items, draft.treeSensitiveOnly ? 'Files not recommended for this ZIP' : 'Choose included files', selectedIndex, [
-    `${treeLocationLabel(draft)} · ${draft.selectedPaths.size} of ${draft.paths.length} files · ${formatBytes(draft.totalSize)}`,
     draft.treeSensitiveOnly
-      ? 'This tree contains only currently included files Zipflow recommends excluding. Space toggles a path; Enter opens folders.'
+      ? `${flaggedSelected} of ${flaggedPaths.length} flagged files included · ${draft.selectedPaths.size} total files · ${formatBytes(draft.totalSize)}`
+      : `${treeLocationLabel(draft)} · ${draft.selectedPaths.size} of ${draft.paths.length} files · ${formatBytes(draft.totalSize)}`,
+    draft.treeSensitiveOnly
+      ? 'Only flagged files are shown. Space includes or excludes a file; folders appear only when they contain several choices.'
       : 'Space toggles selection · Enter opens a folder marked › · PgUp/PgDn scroll the list · Shift+Tab or Left goes to the parent',
   ]);
 }

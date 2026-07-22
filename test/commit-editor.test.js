@@ -48,3 +48,40 @@ function fixtureState() {
   state.archiveMetadata = null;
   return state;
 }
+
+test('multiline paste is inserted atomically and does not submit the commit editor', async () => {
+  const state = fixtureState();
+  const controller = new ZipflowController(state);
+  controller.invalidate = () => {};
+  controller.showEditor('commit-message', {
+    label: 'Commit message', purpose: 'commit-message', multiline: true,
+  }, 'Subject');
+  let submissions = 0;
+  controller.submitCurrentEditor = async () => { submissions += 1; };
+
+  await controller.handleKey({ name: 'paste', text: '\n\nBody line one\nBody line two' });
+
+  assert.equal(state.editor.value, 'Subject\n\nBody line one\nBody line two');
+  assert.equal(submissions, 0);
+});
+
+test('concurrent Enter events create only one commit submission', async () => {
+  const state = fixtureState();
+  const controller = new ZipflowController(state);
+  controller.invalidate = () => {};
+  controller.showEditor('commit-message', {
+    label: 'Commit message', purpose: 'commit-message', multiline: true,
+  }, 'Subject');
+  let submissions = 0;
+  let release;
+  const blocker = new Promise((resolve) => { release = resolve; });
+  controller.submitCurrentEditor = async () => { submissions += 1; await blocker; };
+
+  const first = controller.handleKey({ name: 'enter' });
+  const second = controller.handleKey({ name: 'enter' });
+  await Promise.resolve();
+  assert.equal(submissions, 1);
+  release();
+  await Promise.all([first, second]);
+  assert.equal(submissions, 1);
+});

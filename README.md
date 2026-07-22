@@ -93,7 +93,7 @@ On the first launch, Zipflow detects the project, discovers suitable checks and 
 
 For later runs, Zipflow opens directly in archive-waiting mode:
 
-1. Drag a ZIP file into the terminal or enter its path.
+1. Drag a ZIP file into the terminal or enter its path. On an empty archive field, press `Enter` twice to scan the last-used archive folder for ZIPs from the previous 24 hours whose internal paths match the current project.
 2. Review the detected archive root, changed paths, warnings, conflicts, and diffs.
 3. Resolve decisions manually or let an enabled bounded autopilot handle supported checkpoints.
 4. Apply the update as a recoverable transaction.
@@ -164,7 +164,7 @@ Zipflow can use a local Ollama or LM Studio model to:
 - explain failed checks or deployment output;
 - resolve explicitly supported autopilot checkpoints.
 
-Model output never replaces deterministic archive validation, path confinement, Git conflict detection, backups, tests, or transactional restoration. Ordinary local-model failures do not block manual archive application.
+Model output never replaces deterministic archive validation, path confinement, Git conflict detection, backups, tests, or transactional restoration. Ordinary local-model failures do not block manual archive application. Fenced code and standalone JSON from local-model streams, saved raw responses, and historical replay are rendered through Terlio syntax highlighting.
 
 See [Local LLM integration](docs/local-llm.md) for providers, model loading, delivery modes, prompt budgeting, replay, diagnostics, and autonomy compatibility.
 
@@ -182,12 +182,15 @@ Press `Esc` from the archive prompt to open the project menu. Depending on the c
 
 Global settings are available with `Ctrl+B`.
 
+Create ZIP safety review keeps small flagged sets readable: up to five files are shown as full project-relative paths, and larger trees collapse directory chains that contain only one flagged file. Credential-like source filenames such as `credential-store.js` are not treated as secret files by name alone; JSON-like and extensionless credential files remain review candidates.
+
 ## Essential controls
 
 ```text
 ↑ / ↓       move through choices
 Space       toggle or select the current option
-Enter       open, continue, or submit
+Enter       open, continue, or submit; twice on an empty archive field scans the remembered folder
+Ctrl+Enter  insert a newline in commit text; multiline paste never submits
 Esc         go back or open the project menu
 Tab         complete paths or switch Settings panes
 Page Up     move or scroll one page upward
@@ -200,7 +203,7 @@ G           reveal the current run report where available
 Ctrl+C      cancel an active operation; exit while idle
 ```
 
-Context-sensitive help is available with `?`. Diff review and text editors expose additional shortcuts when active.
+Context-sensitive help is available with `?`. Diff review and text editors expose additional shortcuts when active. Paste is delivered as one editor action, and submit/activation is serialized so duplicate input cannot start overlapping Git commands.
 
 See [Interface and controls](docs/controls.md) for operation-aware cancellation and the complete reference.
 

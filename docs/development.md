@@ -58,7 +58,7 @@ npm run check
 npm test
 ```
 
-Regression fixes should include targeted automated tests so unit or integration checks catch the same class of problem before E2E or manual use. Node test workers automatically use a process-specific temporary Zipflow home unless `ZIPFLOW_HOME` is explicitly set, so the test suite cannot overwrite the developer's real settings or credentials.
+Regression fixes should include targeted automated tests so unit or integration checks catch the same class of problem before E2E or manual use. Node test workers automatically use a process-specific temporary Zipflow home unless `ZIPFLOW_HOME` is explicitly set, so the test suite cannot overwrite the developer's real settings or credentials. Input regressions must cover structured paste and overlapping submit events. Archive-discovery tests create real ZIP fixtures and verify age filtering, path matching, wrapper normalization, and the deliberate double-`Enter` interaction. The Terlio compatibility test must find and exercise the 1.1.3 syntax-highlighting export so a dependency API change cannot silently disable highlighting.
 
 ## Package inspection
 

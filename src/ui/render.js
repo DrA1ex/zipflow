@@ -37,7 +37,7 @@ export function renderZipflow({ state, width, height, animationFrame = 0 }) {
   const subtitle = state.project ? displayPath(state.project.root) : 'Safe source archive updates';
   state.statusDetail = state.screen === 'settings' ? runSettingsStatus(state) : '';
   const footerRight = state.statusDetail ? [state.statusDetail] : [state.status].filter(Boolean);
-  const footer = WorkspaceFooter({ left: footerHints(state), right: footerRight, theme });
+  const footer = WorkspaceFooter({ title: '', left: footerHints(state), right: footerRight, theme });
   const { mainHeight } = resolveWorkspaceShellLayout({
     width,
     height,

@@ -1,5 +1,7 @@
 import { PropertyRows, color, renderNode, wrapText } from 'terlio.js';
 import { llmActivityLines } from '../app/llm-progress.js';
+import { parseRichTextBlocks } from './rich-text.js';
+import { renderSyntaxLines } from './syntax-render.js';
 
 const transcriptCache = new WeakMap();
 const messageLineCache = new WeakMap();
@@ -24,7 +26,9 @@ export function buildTranscript(state, theme, width) {
     ranges.push({ messageId: message.id, start, end, collapsible: message.collapsible, collapsed: message.collapsed });
     lines.push('');
   }
-  if (state.llmRuntime) lines.push(...llmActivityLines(state.llmRuntime, width, theme));
+  if (state.llmRuntime) lines.push(...llmActivityLines(state.llmRuntime, width, theme, {
+    renderCode: (code, language, options = {}) => renderSyntaxLines(code, language, { ...options, theme }),
+  }));
   const result = { lines, ranges };
   if (!state.llmRuntime) transcriptCache.set(state, { theme, width, signature, result });
   return result;
@@ -91,8 +95,14 @@ function standardActivityMessage(message, theme, width) {
   const bodyWidth = Math.max(20, width - 7);
   return [
     color(theme, token, `${marker}${activityTag(message.tone)} ${message.title}`),
-    ...body.flatMap((line) => formatActivityBodyLine(message, line, theme, bodyWidth)),
+    ...formatRichActivityBody(message, body, theme, bodyWidth),
   ];
+}
+
+function formatRichActivityBody(message, body, theme, width) {
+  return parseRichTextBlocks(body).flatMap((block) => block.type === 'code'
+    ? renderSyntaxLines(block.code, block.language, { width: width + 2, theme, indent: 2 })
+    : block.lines.flatMap((line) => formatActivityBodyLine(message, line, theme, width)));
 }
 
 function formatActivityBodyLine(message, line, theme, width) {

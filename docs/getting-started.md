@@ -75,7 +75,7 @@ An existing `.gitignore` is preserved byte-for-byte. Continuing without Git rema
 
 For a configured project, Zipflow starts in archive-waiting mode:
 
-1. drag a ZIP into the terminal or enter its path;
+1. drag a ZIP into the terminal or enter its path; alternatively, press `Enter` twice on the empty field to scan the last-used archive folder for matching ZIPs from the previous 24 hours;
 2. review root interpretation, plan counts, warnings, conflicts, and diffs;
 3. make decisions manually or allow the configured decision mode to handle supported gates;
 4. apply the selected changes;
@@ -89,7 +89,7 @@ The header shows:
 Archive -> Review -> Apply -> Checks -> Finish
 ```
 
-When a path suggestion is selected, it only completes the field. Press `Enter` again to submit the archive, preventing completion from starting an update unexpectedly.
+When a path suggestion is selected, it only completes the field. Press `Enter` again to submit the archive, preventing completion from starting an update unexpectedly. On a completely empty field, the first `Enter` only arms recent-archive discovery and displays the folder; the second press within 1.5 seconds performs the scan.
 
 In autopilot mode, reusing an archive whose content already matches the current project creates a `duplicate_skipped` run and returns to archive waiting without unnecessary checks, commits, deployment, or LLM decisions.
 
@@ -121,6 +121,10 @@ When a manual command fails and local failure analysis is configured, Zipflow of
 - non-ignored tracked and untracked files;
 - custom hierarchical selection;
 - everything, including ignored files, followed by a sensitive-file review.
+
+The sensitive-file review is optimized for decisions rather than directory browsing. Five or fewer flagged files are shown as one flat list with full project-relative paths. Larger reviews keep folders only when a folder contains several flagged choices; a directory chain that leads to one flagged file is collapsed into that file path. Space immediately switches the marker between included and excluded.
+
+Filename-only safety detection applies to credential-like data files such as JSON files and extensionless secret files. Source files such as JavaScript, TypeScript, or Python modules are not classified as credentials merely because their filename contains words such as `credential`, `secret`, or `token`.
 
 The output-path editor uses the same non-displacing completion overlay as archive input. Choosing **Use this directory** generates a timestamped project ZIP name in that directory. Missing `.zip` extensions are added automatically, and an existing destination requires separate overwrite confirmation.
 

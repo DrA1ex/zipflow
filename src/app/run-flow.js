@@ -43,23 +43,30 @@ import {
 
 import { completeNoChangeRun } from './run-completion.js';
 import { effectiveChangedCount, excludedPlanItems, initializePlanSelections, selectedPlanCounts } from './plan-selection.js';
+import { handleEmptyArchiveEnter as handleArchiveDoubleEnter, selectedDiscoveredArchive } from './run-archive-discovery.js';
 
 export { showLastRun };
 
 export function handlesRunScreen(screen) {
-  return ['archive-input', 'archive-duplicate', 'archive-root-choice', 'interrupted-run', 'applying', 'run-details', 'run-decisions', 'run-file-groups', 'run-file-list', 'rollback-confirm', 'rolling-back'].includes(screen)
+  return ['archive-input', 'archive-discovery', 'archive-duplicate', 'archive-root-choice', 'interrupted-run', 'applying', 'run-details', 'run-decisions', 'run-file-groups', 'run-file-list', 'rollback-confirm', 'rolling-back'].includes(screen)
     || handlesReviewScreen(screen) || isPostCheckScreen(screen);
 }
 
 export function beginArchiveInput(controller) {
   controller.state.pendingArchive = null;
+  controller.state.archiveDiscoveryTap = null;
+  controller.state.archiveDiscoveryCandidates = [];
   controller.showEditor('archive-input', {
     label: 'ZIP archive path',
     placeholder: '~/Downloads/project-update.zip',
     purpose: 'archive-path',
-    instructions: ['Drop a ZIP file into the terminal or enter its path.'],
+    instructions: ['Drop or enter a ZIP path. Tab shows recent files; press Enter twice on an empty field to scan the last archive folder.'],
   }, '');
   controller.setStatus('Step 1 of 5 · Choose archive');
+}
+
+export function handleEmptyArchiveEnter(controller, options = {}) {
+  return handleArchiveDoubleEnter(controller, { ...options, returnToInput: () => beginArchiveInput(controller) });
 }
 
 export async function submitRunEditor(controller) {
@@ -69,6 +76,10 @@ export async function submitRunEditor(controller) {
 
 export async function activateRun(controller, itemId) {
   const { state } = controller;
+  if (state.screen === 'archive-discovery') {
+    const candidate = selectedDiscoveredArchive(state, itemId);
+    return candidate ? inspectArchivePath(controller, candidate.path) : beginArchiveInput(controller);
+  }
   if (state.screen === 'archive-duplicate') return activateDuplicate(controller, itemId, { beginArchiveInput, inspectArchivePath });
   if (state.screen === 'archive-root-choice') return activateArchiveRootChoice(controller, itemId);
   if (state.screen === 'interrupted-run') return activateInterruptedRun(controller, itemId);
@@ -97,6 +108,7 @@ export function handleRunShortcut(controller, key) {
 export function backRun(controller) {
   const screen = controller.state.screen;
   if (screen === 'archive-input' || screen === 'archive-duplicate') return controller.showHome();
+  if (screen === 'archive-discovery') return beginArchiveInput(controller);
   if (screen === 'archive-root-choice') return cancelRun(controller);
   if (screen === 'interrupted-run') return showInterruptedRun(controller);
   if (screen === 'archive-safety' || screen === 'plan-review' || screen === 'conflict-summary') return cancelRun(controller);

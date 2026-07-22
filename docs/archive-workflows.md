@@ -87,7 +87,7 @@ COMMIT_MESSAGE.txt
 
 Metadata files are not copied into the project. The entire `.zipflow/` tree is protected from archive application.
 
-Multi-line commit messages are supported. When archive metadata is selected but no supported file exists, the deterministic fallback is:
+Multi-line commit messages are supported. Pasting a multiline message is one atomic editor action: pasted newlines remain part of the message and do not submit it. Commit creation and other activation paths are guarded by one shared single-flight boundary, so duplicate `Enter` events cannot dispatch concurrent Git commands. When archive metadata is selected but no supported file exists, the deterministic fallback is:
 
 ```text
 zipflow: apply <run-id>
@@ -104,6 +104,14 @@ Before application, Zipflow compares the incoming archive with recent successful
 - the snapshot contains far fewer files than the previous applied archive.
 
 Warnings include measured counts and ratios. Manual mode requires review. Guarded autopilot pauses when the evidence or risk is not suitable for automatic continuation. A local LLM `suspicious` or `unsuitable` verdict appears on the same safety-review screen but remains advisory.
+
+## Recent matching archive discovery
+
+Archive waiting provides a double-`Enter` shortcut on the empty path field. The first press identifies the last directory from which Zipflow successfully accepted an archive; the second press within 1.5 seconds scans that directory non-recursively. Only ZIPs modified in the previous 24 hours are considered.
+
+Discovery is read-only. It reads ZIP central-directory entries under the same path, entry-count, expansion-size, and duplicate-path limits used by normal archive handling, but it does not extract or execute anything. Candidate paths are compared with Git-tracked project paths when available, otherwise with a bounded project filesystem scan. A single outer wrapper directory is normalized before matching. Project markers and several exact source-path matches receive the strongest score; generic one-file archives such as a lone `README.md` are not proposed.
+
+Choosing a candidate does not bypass any safety stage: Zipflow still performs the ordinary archive inspection, hashing, extraction into isolation, root review, duplicate detection, and update planning.
 
 ## Duplicate archives and repeat
 

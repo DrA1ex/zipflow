@@ -6,6 +6,7 @@
 ↑ / ↓       move through choices
 Space       toggle or select the current option
 Enter       select, toggle, continue, or submit an editor
+            press twice on an empty archive field to scan the last-used folder
 Ctrl+Enter  insert a new line in the commit-message editor
 Esc         go back
 Tab         complete paths or switch Settings pane focus
@@ -22,7 +23,7 @@ Ctrl+C      cancel the active operation; exit while idle
 ?           show context-sensitive help
 ```
 
-Controls are context-sensitive. The active screen can expose additional actions in its footer or help overlay.
+Controls are context-sensitive. The active screen can expose additional actions in its footer or help overlay. Multiline clipboard paste is delivered to editors as one edit operation: embedded line breaks are preserved in the commit-message editor and never interpreted as separate submit keys. Editor submission and menu activation are single-flight, so repeated input cannot start overlapping Git operations.
 
 ## Operation-aware cancellation
 
@@ -42,7 +43,9 @@ Cancelling an autonomous decision pauses autopilot for the current run and retur
 
 ## Context dock and help
 
-Every action list reserves a stable one-line context dock below its choices. Moving between short and long descriptions does not change panel height. Long descriptions are clipped in the dock, while `?` opens the complete context-sensitive explanation.
+Workflow action lists reserve a stable one-line context dock below their choices. Settings value pages use a compact two-line dock: the first line explains the parameter and the second explains the selected value. Moving between short and long descriptions does not change panel height. Long descriptions are clipped in the dock, while `?` opens the complete context-sensitive explanation.
+
+The global footer is an untitled key-hint bar. It may include a short contextual value on the right, but it is not presented as a separate status panel.
 
 Context help opens as a native blocking Terlio overlay with the active accent, background dimming, and shadow. It wraps to the available terminal size, becomes scrollable when necessary, and closes with a click or `Esc`. Short transient notifications use Terlio's native toast overlay.
 
@@ -76,6 +79,12 @@ Scroll to a block and press `E` to expand or collapse it. Large logs use viewpor
 When new entries arrive while older content is being read, Zipflow displays a prominent indicator. Click it or press `End` to return to the latest entry.
 
 In-app drag selection remains available while pointer controls are active. Click an existing highlight to copy it. `Ctrl+T` temporarily restores the terminal emulator's native selection mode for other UI regions.
+
+## Recent archive discovery
+
+While the archive-path field is empty, the first `Enter` arms discovery and shows the exact remembered folder. Press `Enter` again within 1.5 seconds to scan that folder. Zipflow considers only `.zip` files modified during the previous 24 hours, reads their central directories without extraction, and offers only candidates whose internal project paths substantially overlap the current project. Selecting a candidate starts the normal archive security inspection. `Tab` continues to show the explicit recent-path list.
+
+If no archive folder has been remembered yet, the shortcut explains that one normal ZIP selection is required first.
 
 ## Path completion
 

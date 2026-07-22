@@ -18,6 +18,8 @@ import { renderModelReplayWorkspace } from './model-replay-view.js';
 import { ZipflowTextEditorView } from './editor-view.js';
 import { ContextDock } from './context-dock.js';
 
+const SETTINGS_CONTEXT_ROWS = 2;
+
 export function renderSettings(state, width, height, theme, animationFrame = 0) {
   const view = settingsViewModel(state);
   const leftWidth = Math.max(24, Math.min(34, Math.floor(width * 0.3)));
@@ -97,19 +99,22 @@ function renderSettingsPage(state, view, width, height, theme, animationFrame) {
   const parameterDescription = showingChoices
     ? selectedChoice?.disabled ? selectedChoice.disabledReason ?? '' : selectedChoice?.description ?? ''
     : selectedParameter?.disabled ? selectedParameter.disabledReason ?? '' : selectedParameter?.description ?? '';
+  const context = nestedChoice
+    ? joinContextLines(pageContext, parameterDescription)
+    : parameterDescription || pageContext;
   return WorkspacePane({
     title,
     active: view.focus !== 'categories' && !view.modal,
     height,
     theme,
-    footerNode: ContextDock({ text: parameterDescription || pageContext, rows: 1, width: Math.max(20, width - 4), theme }),
-    footerMinHeight: 1,
+    footerNode: ContextDock({ text: context, rows: SETTINGS_CONTEXT_ROWS, width: Math.max(20, width - 4), theme }),
+    footerMinHeight: SETTINGS_CONTEXT_ROWS,
     children: [
       SelectList({
         title: showingChoices ? 'Options' : 'Parameters',
         items,
         selectedIndex: showingChoices ? view.choiceIndex : view.parameterIndex,
-        windowSize: Math.max(2, height - 8),
+        windowSize: Math.max(2, height - 7),
         getLabel: (item) => showingChoices
           ? choiceLabel(state, item, theme, animationFrame)
           : parameterLabel(state, item, theme, animationFrame),
@@ -141,20 +146,26 @@ function renderModelConfigPage(state, view, width, height, theme, animationFrame
   ].filter(Boolean).join(' · ');
   const selectedParameter = !choices ? items[view.parameterIndex] : null;
   const pageContext = choices ? view.activeParameter?.description ?? '' : [info, view.error].filter(Boolean).join(' · ');
-  const parameterDescription = choices ? '' : selectedParameter?.description ?? '';
+  const selectedChoice = choices ? items[view.choiceIndex] : null;
+  const parameterDescription = choices
+    ? selectedChoice?.disabled ? selectedChoice.disabledReason ?? '' : selectedChoice?.description ?? ''
+    : selectedParameter?.description ?? '';
+  const context = choices
+    ? joinContextLines(pageContext, parameterDescription)
+    : parameterDescription || pageContext;
   return WorkspacePane({
     title: ` ${model.label.toUpperCase()} `,
     active: !state.settingsPanel?.modal,
     height,
     theme,
-    footerNode: ContextDock({ text: parameterDescription || pageContext, rows: 1, width: Math.max(20, width - 4), theme, token: view.error ? 'danger' : 'text' }),
-    footerMinHeight: 1,
+    footerNode: ContextDock({ text: context, rows: SETTINGS_CONTEXT_ROWS, width: Math.max(20, width - 4), theme, token: view.error ? 'danger' : 'text' }),
+    footerMinHeight: SETTINGS_CONTEXT_ROWS,
     children: [
       SelectList({
         title: choices ? 'Options' : 'Load configuration',
         items,
         selectedIndex: choices ? view.choiceIndex : view.parameterIndex,
-        windowSize: Math.max(2, height - 8),
+        windowSize: Math.max(2, height - 7),
         getLabel: (item) => {
           if (!choices && item.id === 'use-model' && view.loading) return spinnerLabel(animationFrame, item.label);
           return choices
@@ -175,6 +186,10 @@ function renderModelConfigPage(state, view, width, height, theme, animationFrame
       }),
     ].filter(Boolean),
   });
+}
+
+function joinContextLines(...lines) {
+  return lines.map((line) => String(line ?? '').trim()).filter(Boolean).filter((line, index, values) => values.indexOf(line) === index).join('\n');
 }
 
 function spinnerLabel(animationFrame, label) {
