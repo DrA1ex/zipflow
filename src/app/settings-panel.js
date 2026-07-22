@@ -5,6 +5,7 @@ import { updateSettings } from '../settings/store.js';
 import { ensureDir } from '../utils/fs.js';
 import { expandHome } from '../utils/paths.js';
 import { setScreen } from './state.js';
+import { configureI18n } from '../i18n/index.js';
 import { openHelpOverlay } from '../ui/help-overlay.js';
 import {
   handleModelSettingsKey, openModelConfiguration, selectModelChoice, selectModelParameter, settingsModelView,
@@ -18,6 +19,9 @@ import { testSelectedModel } from './settings-model-check.js';
 import {
   handleModelReplayWorkspaceKey, loadModelReplayRuns, startHistoricalModelReplay,
 } from './settings-model-replay.js';
+import {
+  loadAutopilotReplayRuns, startHistoricalAutopilotSimulation,
+} from './settings-autopilot-replay.js';
 import { clearArchiveStorage, clearBackups, refreshSettingsStorage } from './settings-storage.js';
 import {
   canSearchSettingsChoices, filterSettingsChoices, handleSettingsChoiceSearchKey,
@@ -292,9 +296,10 @@ async function handleBack(controller) {
   }
   if (panel.focus === 'parameters') {
     if (panel.subpage) {
-      if (panel.subpage === 'llmModelReplay') {
+      if (panel.subpage === 'llmModelReplay' || panel.subpage === 'llmAutopilotReplay') {
+        const previousIndex = panel.subpage === 'llmAutopilotReplay' ? 2 : 1;
         panel.subpage = 'llmModelTests';
-        panel.parameterIndices[currentDefinition(controller.state).id] = 1;
+        panel.parameterIndices[currentDefinition(controller.state).id] = previousIndex;
         controller.state.status = 'Model tests';
       } else {
         const previousId = panel.subpage === 'llmLanguages' ? 'llmLanguages' : 'llmModelTests';
@@ -348,9 +353,23 @@ async function activateParameter(controller) {
       controller.invalidate();
     } else if (parameter.action === 'model-replay-run') {
       await startHistoricalModelReplay(controller, parameter.runId);
+    } else if (parameter.action === 'model-test-autopilot') {
+      state.status = 'Loading historical updates';
+      await loadAutopilotReplayRuns(controller);
+      state.settingsPanel.subpage = 'llmAutopilotReplay';
+      state.settingsPanel.parameterIndices[currentDefinition(state).id] = 0;
+      state.status = 'Historical autopilot simulation';
+      controller.invalidate();
+    } else if (parameter.action === 'autopilot-replay-run') {
+      await startHistoricalAutopilotSimulation(controller, parameter.runId);
     } else if (parameter.action === 'model-replay-back') {
       state.settingsPanel.subpage = 'llmModelTests';
       state.settingsPanel.parameterIndices[currentDefinition(state).id] = 1;
+      state.status = 'Model tests';
+      controller.invalidate();
+    } else if (parameter.action === 'autopilot-replay-back') {
+      state.settingsPanel.subpage = 'llmModelTests';
+      state.settingsPanel.parameterIndices[currentDefinition(state).id] = 2;
       state.status = 'Model tests';
       controller.invalidate();
     } else if (parameter.action === 'subpage-back') {
@@ -404,6 +423,10 @@ async function activateChoice(controller) {
     controller.invalidate();
     return true;
   }
+  if (option.action === 'refresh-languages') {
+    state.i18n = await configureI18n(state.settings.interfaceLanguage);
+    return returnAfterChoice(controller, parameter.id, 'Language packs refreshed');
+  }
   if (option.action === 'clear-cancel') return returnAfterChoice(controller, parameter.id, 'Nothing was deleted');
   if (option.action === 'archive-storage-clear-confirm') {
     await clearArchiveStorage(controller);
@@ -423,6 +446,9 @@ async function activateChoice(controller) {
     state.settings = await updateSettings({ [option.settingId]: option.value }, { baseSettings: state.settings });
     if (option.settingId === 'archivePolicy' && option.value === 'move') {
       await ensureDir(path.resolve(expandHome(state.settings.archiveDirectory)));
+    }
+    if (option.settingId === 'interfaceLanguage') {
+      state.i18n = await configureI18n(option.value);
     }
     if (option.settingId === 'llmProvider') {
       resetModelCache(state.settingsPanel);

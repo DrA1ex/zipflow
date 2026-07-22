@@ -1,0 +1,105 @@
+{
+  "$schema": "../language.schema.json",
+  "version": 1,
+  "id": "es",
+  "locale": "es-ES",
+  "name": "Spanish",
+  "nativeName": "Español",
+  "messages": {
+    "Starting": "Iniciando",
+    "Project": "Proyecto",
+    "Workflow sections": "Secciones del flujo",
+    "Checks": "Comprobaciones",
+    "Update policy": "Política de actualización",
+    "Error": "Error",
+    "Settings": "Configuración",
+    "Language": "Idioma",
+    "System language": "Idioma del sistema",
+    "Theme": "Tema",
+    "Running checks": "Comprobaciones en ejecución",
+    "Local LLM": "LLM local",
+    "Source archives": "Archivos fuente",
+    "Backups": "Copias de seguridad",
+    "Managed-file history": "Historial de archivos gestionados",
+    "Connection and compatibility test": "Prueba de conexión y compatibilidad",
+    "Replay a historical update": "Repetir una actualización histórica",
+    "Simulate autopilot from history": "Simular el piloto automático desde el historial",
+    "Historical autopilot simulation": "Simulación histórica del piloto automático",
+    "Model tests": "Pruebas del modelo",
+    "Start simulation": "Iniciar simulación",
+    "Back": "Atrás",
+    "Guarded autopilot": "Piloto automático protegido",
+    "Full autopilot · Dangerous": "Piloto automático completo · Peligroso",
+    "Decision mode": "Modo de decisión",
+    "Continue": "Continuar",
+    "Enter select": "Intro seleccionar",
+    "Esc back": "Esc atrás",
+    "Ctrl+B settings": "Ctrl+B configuración",
+    "? help": "? ayuda",
+    "↑/↓ choose": "↑/↓ elegir",
+    "Drop a ZIP file into the terminal or enter its path.": "Arrastra un archivo ZIP al terminal o introduce su ruta.",
+    "Changes remain in a draft until Review and save succeeds.": "Los cambios permanecen en un borrador hasta que la revisión y el guardado finalicen correctamente.",
+    "No project files, Git state, backups, source archives, or run history will be changed.": "No se modificarán archivos del proyecto, estado de Git, copias, archivos fuente ni historial.",
+    "No historical runs available": "No hay ejecuciones históricas disponibles",
+    "State": "Estado",
+    "Policy": "Política",
+    "Stage": "Etapa",
+    "Not configured": "Sin configurar",
+    "Ready": "Listo",
+    "Exit": "Salir",
+    "Interface language": "Idioma de la interfaz",
+    "Choose the language used by Zipflow itself. Custom JSON language packs are loaded from ~/.zipflow/languages.": "Elige el idioma de la interfaz de Zipflow. Los paquetes JSON personalizados se cargan desde ~/.zipflow/languages.",
+    "Use the operating-system language when a matching pack is installed; otherwise use English.": "Usa el idioma del sistema operativo si hay un paquete compatible; de lo contrario, usa inglés.",
+    "English": "Inglés",
+    "Русский": "Ruso",
+    "Deutsch": "Alemán",
+    "Français": "Francés",
+    "Italiano": "Italiano",
+    "Español": "Español",
+    "Language pack directory": "Directorio de paquetes de idioma",
+    "Custom language packs": "Paquetes de idioma personalizados",
+    "Refresh languages": "Actualizar idiomas"
+  },
+  "patterns": [
+    {
+      "source": "{count} checks selected",
+      "target": "{count} comprobaciones seleccionadas"
+    },
+    {
+      "source": "Choose {current}/{total}",
+      "target": "Selección {current}/{total}"
+    },
+    {
+      "source": "{count} matching paths",
+      "target": "{count} rutas coincidentes"
+    },
+    {
+      "source": "{count} matching path",
+      "target": "{count} ruta coincidente"
+    },
+    {
+      "source": "Press Enter again to scan recent ZIP files in {directory}",
+      "target": "Pulsa Intro de nuevo para buscar ZIP recientes en {directory}"
+    },
+    {
+      "source": "{count} added · {updated} changed · {deleted} removed",
+      "target": "{count} añadidos · {updated} modificados · {deleted} eliminados"
+    },
+    {
+      "source": "{name} selected",
+      "target": "{name} seleccionado"
+    },
+    {
+      "source": "Help · {title}",
+      "target": "Ayuda · {title}"
+    },
+    {
+      "source": "{count} files",
+      "target": "{count} archivos"
+    },
+    {
+      "source": "{count} file",
+      "target": "{count} archivo"
+    }
+  ]
+}

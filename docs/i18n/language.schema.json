@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zipflow.dev/schemas/language.schema.json",
+  "title": "Zipflow language pack",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "id", "locale", "name", "nativeName", "messages"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": { "const": 1 },
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$" },
+    "locale": { "type": "string", "minLength": 2, "maxLength": 64 },
+    "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "nativeName": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "messages": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "patterns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source", "target"],
+        "properties": {
+          "source": { "type": "string", "minLength": 1 },
+          "target": { "type": "string" }
+        }
+      }
+    }
+  }
+}

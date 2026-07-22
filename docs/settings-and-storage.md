@@ -144,3 +144,13 @@ ZIPFLOW_HOME=/tmp/zipflow-test zipflow
 ```
 
 Temporary and lock directories are managed by Zipflow. Active operations own their child processes and cancellation state so an interrupt can cleanly return to the interactive application.
+
+
+## Interface language packs
+
+`interfaceLanguage` is stored in ordinary settings because it is not sensitive. It defaults to `en`. The optional `system` value resolves the operating-system locale to an installed pack and falls back to English. Built-in packs are shipped with Zipflow; user packs are loaded from `~/.zipflow/languages/*.json` during startup or with **Refresh languages** in the picker.
+
+Each pack is validated against [`docs/i18n/language.schema.json`](i18n/language.schema.json). Invalid files are ignored and never partially registered. Message lookup uses the active pack first and English second, so a small custom pack can override selected strings without copying the complete catalog.
+
+Language files do not contain executable code. Zipflow reads JSON only, validates metadata, strings, and placeholder patterns, and does not evaluate expressions from a pack.
+

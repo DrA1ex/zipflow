@@ -1,12 +1,14 @@
 import { Box, ScrollPane, Text, color, themes, wrapText } from 'terlio.js';
+import { translateForState as t } from '../i18n/index.js';
 
 export function openHelpOverlay(controller, { title = 'Help', lines = [] } = {}) {
   const manager = controller.state.overlays;
   if (!manager?.help) return false;
   const view = { scroll: 0, maxScroll: 0 };
-  const source = (Array.isArray(lines) ? lines : [lines]).map((line) => String(line ?? ''));
+  const localizedTitle = t(controller.state, title);
+  const source = (Array.isArray(lines) ? lines : [lines]).map((line) => t(controller.state, String(line ?? '')));
   manager.help({
-    title: ` ${title} `,
+    title: ` ${localizedTitle} `,
     width: 78,
     opaqueRows: true,
     render: ({ width = 76, height = 20 } = {}) => {
@@ -20,7 +22,7 @@ export function openHelpOverlay(controller, { title = 'Help', lines = [] } = {})
         border: true,
         borderColor: theme?.borderActive ?? theme?.accent ?? theme?.border,
         padding: { left: 1, right: 1 },
-        title: ` ${title} `,
+        title: ` ${localizedTitle} `,
         height: bodyHeight + 2,
       }, ScrollPane({
         lines: wrapped.map((line) => color(theme, 'text', line)),

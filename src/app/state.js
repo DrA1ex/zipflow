@@ -64,6 +64,7 @@ export function createInitialState() {
     status: 'Starting',
     statusDetail: '',
     settings: { ...DEFAULT_SETTINGS },
+    i18n: null,
     settingsPanel: null,
     overlays: null,
     dispatch: null,

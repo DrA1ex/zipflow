@@ -4,6 +4,7 @@ import { loadStoredPatch } from '../diff/stored-patch.js';
 import { generateChangeDescription } from '../llm/generate.js';
 import { listProjectRuns } from '../runs/store.js';
 import { exists } from '../utils/fs.js';
+import { beginHistoricalAutopilotSimulation } from './settings-autopilot-replay.js';
 
 
 export function handleReplayDispatch(controller, action) {
@@ -144,7 +145,7 @@ export async function handleModelReplayWorkspaceKey(controller, key) {
     return true;
   }
   if (key.printable && key.text?.toLowerCase() === 'c' && workspace.result) {
-    const copied = await copyTextToClipboard(replayResultText(workspace), { output: controller.runtime?.output });
+    const copied = await copyTextToClipboard(workspace.kind === 'autopilot' ? autopilotResultText(workspace) : replayResultText(workspace), { output: controller.runtime?.output });
     controller.toast(copied ? 'Replay result copied' : 'Clipboard transfer unavailable', copied ? 'success' : 'warning');
     return true;
   }
@@ -173,17 +174,23 @@ async function handlePreviewKey(controller, workspace, key) {
       controller.invalidate();
       return true;
     }
-    void beginHistoricalModelReplay(controller);
+    void beginWorkspaceReplay(controller, workspace);
     return true;
   }
   return true;
+}
+
+async function beginWorkspaceReplay(controller, workspace) {
+  return workspace?.kind === 'autopilot'
+    ? beginHistoricalAutopilotSimulation(controller)
+    : beginHistoricalModelReplay(controller);
 }
 
 export function selectReplayPreview(controller, index) {
   const workspace = controller.state.settingsPanel?.modelTestWorkspace;
   if (!workspace || workspace.mode !== 'preview') return;
   workspace.previewIndex = clamp(Number(index) || 0, 0, 1);
-  if (workspace.previewIndex === 0) void beginHistoricalModelReplay(controller);
+  if (workspace.previewIndex === 0) void beginWorkspaceReplay(controller, workspace);
   else {
     controller.state.settingsPanel.modelTestWorkspace = null;
     controller.invalidate();
@@ -349,6 +356,21 @@ function replayResultText(workspace) {
     '', 'SUMMARY:', ...(result.summary ?? []).map((line) => `- ${line}`),
     '', 'COMMIT MESSAGE:', result.commitMessage || '',
     ...(result.assessment ? ['', 'ASSESSMENT:', result.assessment, 'CONFIDENCE:', result.confidence || '', 'REASONS:', ...(result.reasons ?? []).map((line) => `- ${line}`)] : []),
+  ].join('\n');
+}
+
+function autopilotResultText(workspace) {
+  const result = workspace.result;
+  if (!result?.modes) return `Historical autopilot simulation: ${workspace.runId}`;
+  return [
+    `Historical autopilot simulation: ${workspace.runId}`,
+    ...['guarded', 'full'].flatMap((mode) => [
+      '', `${mode.toUpperCase()}:`,
+      ...(result.modes[mode]?.decisions ?? []).flatMap((decision) => [
+        `- ${decision.label}: ${decision.action}${decision.proposedAction && decision.proposedAction !== decision.action ? ` (proposed ${decision.proposedAction})` : ''}`,
+        `  ${decision.summary}`,
+      ]),
+    ]),
   ].join('\n');
 }
 

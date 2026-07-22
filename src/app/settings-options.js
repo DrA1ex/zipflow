@@ -7,6 +7,7 @@ import { modelTestDescription, modelTestValue } from './settings-model-check.js'
 
 export function settingsDefinitions(state) {
   const definitions = [
+    { id: 'language', label: 'Language', description: 'Choose the language used by Zipflow itself. Custom JSON language packs are loaded from ~/.zipflow/languages.', directParameterId: 'interfaceLanguage' },
     { id: 'theme', label: 'Theme', description: '', directParameterId: 'theme' },
     { id: 'checkOutput', label: 'Running checks', description: '', directParameterId: 'checkOutput' },
     { id: 'localLlm', label: 'Local LLM', description: 'Provider, model, languages, review behavior, and authentication.' },
@@ -22,6 +23,7 @@ export function settingsDefinitions(state) {
 }
 
 export function settingsParameters(state, definition) {
+  if (definition.id === 'language') return [choiceParameter('interfaceLanguage', 'Interface language', interfaceLanguageLabel(state), 'Choose the language used by Zipflow itself. Custom JSON language packs are loaded from ~/.zipflow/languages.')];
   if (definition.id === 'theme') return [choiceParameter('theme', 'Theme', titleCase(state.settings.theme), '')];
   if (definition.id === 'checkOutput') return [choiceParameter(
     'checkOutput', 'Output while running', outputLabel(state.settings.checkOutput),
@@ -31,6 +33,7 @@ export function settingsParameters(state, definition) {
     if (state.settingsPanel?.subpage === 'llmLanguages') return llmLanguageParameters(state);
     if (state.settingsPanel?.subpage === 'llmModelTests') return llmModelTestParameters(state);
     if (state.settingsPanel?.subpage === 'llmModelReplay') return llmModelReplayParameters(state);
+    if (state.settingsPanel?.subpage === 'llmAutopilotReplay') return llmAutopilotReplayParameters(state);
     return localLlmParameters(state);
   }
   if (definition.id === 'sourceArchive') return sourceArchiveParameters(state);
@@ -40,6 +43,17 @@ export function settingsParameters(state, definition) {
 }
 
 export function settingsChoices(state, parameter) {
+  if (parameter.settingId === 'interfaceLanguage') {
+    const languages = state.i18n?.available ?? [];
+    return [
+      option(parameter, 'system', 'System language', 'Use the operating-system language when a matching pack is installed; otherwise use English.'),
+      ...languages.map((language) => option(parameter, language.id, language.nativeName, `${language.name} · ${language.locale}${language.builtin ? '' : ' · custom'}`)),
+      {
+        id: 'refresh-languages', action: 'refresh-languages', label: 'Refresh languages',
+        description: `Reload custom JSON language packs from ${state.i18n?.directory ?? '~/.zipflow/languages'}.`,
+      },
+    ];
+  }
   if (parameter.settingId === 'theme') return THEME_NAMES.map((value) => option(parameter, value, titleCase(value)));
   if (parameter.settingId === 'checkOutput') return [
     option(parameter, 'compact', 'Compact', 'Show check state and duration only.'),
@@ -104,6 +118,9 @@ export function settingsPageTitle(state, definition) {
   if (definition.id === 'localLlm' && state.settingsPanel?.subpage === 'llmModelTests') return 'Model tests';
   if (definition.id === 'localLlm' && state.settingsPanel?.subpage === 'llmModelReplay') {
     return state.settingsPanel?.modelTestWorkspace ? 'Model tests' : 'Historical model replay';
+  }
+  if (definition.id === 'localLlm' && state.settingsPanel?.subpage === 'llmAutopilotReplay') {
+    return state.settingsPanel?.modelTestWorkspace ? 'Model tests' : 'Historical autopilot simulation';
   }
   return definition.label;
 }
@@ -196,6 +213,9 @@ function llmModelTestParameters(state) {
     { id: 'modelTestReplay', type: 'action', action: 'model-test-replay',
       label: 'Replay a historical update', value: '',
       description: 'Run the current LLM rules against a stored historical patch without changing project files.', blocked: running },
+    { id: 'modelTestAutopilot', type: 'action', action: 'model-test-autopilot',
+      label: 'Simulate autopilot from history', value: '',
+      description: 'Compare Guarded and Full autopilot decisions on a stored run without changing the project.', blocked: running },
     { id: 'llmModelTestsBack', type: 'action', action: 'subpage-back', label: 'Back to Local LLM', value: '',
       description: 'Return to the Local LLM settings page.', blocked: running },
   ];
@@ -217,6 +237,27 @@ function llmModelReplayParameters(state) {
     description: 'Complete an archive update with a stored patch before using historical replay.', disabled: true,
   });
   items.push({ id: 'modelReplayBack', type: 'action', action: 'model-replay-back', label: 'Back to model tests', value: '',
+    description: 'Return to test options.' });
+  return items;
+}
+
+
+function llmAutopilotReplayParameters(state) {
+  const runs = state.settingsPanel?.autopilotReplayRuns ?? [];
+  const items = runs.map((run) => ({
+    id: `autopilotReplay:${run.id}`, type: 'action', action: 'autopilot-replay-run', runId: run.id,
+    label: `${archiveName(run.archivePath)} · ${shortDate(run.createdAt)}`,
+    value: run.plan?.counts ? `${run.plan.counts.created} added · ${run.plan.counts.updated} changed · ${run.plan.counts.deleted} removed` : '',
+    description: run.autopilotReplayAvailable
+      ? `Compare Guarded and Full autopilot on decision points reconstructed from run ${run.id}.`
+      : 'This run does not contain enough workflow state to reconstruct an autopilot decision.',
+    disabled: !run.autopilotReplayAvailable,
+  }));
+  if (!items.length) items.push({
+    id: 'autopilotReplayEmpty', type: 'action', label: 'No historical updates can be simulated', value: '',
+    description: 'Complete an archive update before using historical autopilot simulation.', disabled: true,
+  });
+  items.push({ id: 'autopilotReplayBack', type: 'action', action: 'autopilot-replay-back', label: 'Back to model tests', value: '',
     description: 'Return to test options.' });
   return items;
 }
@@ -408,6 +449,16 @@ function inputParameter(fieldId, label, value, description) {
 
 function option(parameter, value, label, description = '') {
   return { id: `${parameter.settingId}:${value}`, settingId: parameter.settingId, value, label, description };
+}
+
+
+function interfaceLanguageLabel(state) {
+  const configured = state.settings.interfaceLanguage ?? 'en';
+  if (configured === 'system') {
+    const active = state.i18n?.available?.find((item) => item.id === state.i18n?.languageId);
+    return active ? `System · ${active.nativeName}` : 'System language';
+  }
+  return state.i18n?.available?.find((item) => item.id === configured)?.nativeName ?? configured;
 }
 
 function providerLabel(value) {

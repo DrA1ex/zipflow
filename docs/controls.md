@@ -43,7 +43,7 @@ Cancelling an autonomous decision pauses autopilot for the current run and retur
 
 ## Context dock and help
 
-Workflow action lists reserve a stable one-line context dock below their choices. Settings value pages use a compact two-line dock: the first line explains the parameter and the second explains the selected value. Moving between short and long descriptions does not change panel height. Long descriptions are clipped in the dock, while `?` opens the complete context-sensitive explanation.
+Workflow action lists render every choice as exactly one row. Descriptions are kept out of the list and shown in a stable context dock below it; workflow setup uses two context rows so longer explanations do not expand individual choices. Settings value pages use a compact two-line dock: the first line explains the parameter and the second explains the selected value. Moving between short and long descriptions does not change panel height. Long descriptions are clipped in the dock, while `?` opens the complete context-sensitive explanation.
 
 The global footer is an untitled key-hint bar. It may include a short contextual value on the right, but it is not presented as a separate status panel.
 
@@ -54,7 +54,7 @@ Editors use muted placeholders with a visible cursor so examples cannot be mista
 
 ## Active-list navigation
 
-When a file list, run history, run details, analytics, checks list, or another paged choice list has focus, `Page Up`, `Page Down`, `Home`, and `End` navigate that list instead of Activity. Run-history panels expand according to their content: small menus remain compact, while larger history screens expose up to sixteen rows when terminal height permits.
+When Change Workflow, workflow setup, a checks list, policy list, file list, run history, run details, analytics, or another paged choice list has focus, `Page Up`, `Page Down`, `Home`, and `End` navigate that list instead of Activity. Run-history panels expand according to their content: small menus remain compact, while larger history screens expose up to sixteen rows when terminal height permits.
 
 When a run report exists, press `G` to reveal it in the platform file manager. On macOS the report itself is selected; on Linux Zipflow opens its containing directory.
 

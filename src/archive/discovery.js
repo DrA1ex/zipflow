@@ -20,8 +20,8 @@ export async function discoverRecentArchives({
     const archivePath = path.join(directory, entry.name);
     try {
       const info = await inspectDiscoveredArchive(archivePath);
-      const modifiedAt = info.modifiedAt;
-      const ageMs = Math.max(0, now - modifiedAt.getTime());
+      const modifiedAt = normalizeModifiedAt(info.modifiedAt);
+      const ageMs = Math.max(0, Number(now) - modifiedAt.getTime());
       if (!Number.isFinite(ageMs) || ageMs > maxAgeMs) continue;
       inspected.push({ archivePath, info, modifiedAt, ageMs });
     } catch {
@@ -52,6 +52,13 @@ export async function discoverRecentArchives({
   return candidates.sort((a, b) => b.score - a.score || a.ageMs - b.ageMs).slice(0, limit);
 }
 
+
+
+function normalizeModifiedAt(value) {
+  const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  if (Number.isNaN(date.getTime())) throw new Error('Archive candidate has an invalid modification time.');
+  return date;
+}
 
 async function inspectDiscoveredArchive(archivePath) {
   const info = await lstat(archivePath);

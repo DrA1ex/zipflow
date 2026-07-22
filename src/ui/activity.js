@@ -2,6 +2,7 @@ import { PropertyRows, color, renderNode, wrapText } from 'terlio.js';
 import { llmActivityLines } from '../app/llm-progress.js';
 import { parseRichTextBlocks } from './rich-text.js';
 import { renderSyntaxLines } from './syntax-render.js';
+import { translateForState as t } from '../i18n/index.js';
 
 const transcriptCache = new WeakMap();
 const messageLineCache = new WeakMap();
@@ -18,10 +19,10 @@ export function buildTranscript(state, theme, width) {
   }
   const lines = [];
   const ranges = [];
-  if (!state.messages.length && !state.llmRuntime) return { lines: ['Starting Zipflow…'], ranges };
+  if (!state.messages.length && !state.llmRuntime) return { lines: [t(state, 'Starting Zipflow…')], ranges };
   for (const message of state.messages) {
     const start = lines.length;
-    lines.push(...activityMessageLines(message, theme, width));
+    lines.push(...activityMessageLines(message, theme, width, state));
     const end = Math.max(start, lines.length - 1);
     ranges.push({ messageId: message.id, start, end, collapsible: message.collapsible, collapsed: message.collapsed });
     lines.push('');
@@ -34,17 +35,18 @@ export function buildTranscript(state, theme, width) {
   return result;
 }
 
-function activityMessageLines(message, theme, width) {
+function activityMessageLines(message, theme, width, state) {
   const cached = messageLineCache.get(message);
-  if (cached?.theme === theme && cached.width === width && cached.at === message.at
+  const language = state?.i18n?.languageId ?? state?.settings?.interfaceLanguage ?? 'en';
+  if (cached?.theme === theme && cached.width === width && cached.language === language && cached.at === message.at
     && cached.collapsed === message.collapsed && cached.linesRef === message.lines
     && cached.title === message.title && cached.tone === message.tone
     && cached.collapsedSummary === message.collapsedSummary && cached.collapsible === message.collapsible) return cached.result;
   const result = message.tone === 'project'
-    ? projectActivityBlock(message, theme, width)
-    : standardActivityMessage(message, theme, width);
+    ? projectActivityBlock(message, theme, width, state)
+    : standardActivityMessage(message, theme, width, state);
   messageLineCache.set(message, {
-    theme, width, at: message.at, collapsed: message.collapsed, linesRef: message.lines,
+    theme, width, language, at: message.at, collapsed: message.collapsed, linesRef: message.lines,
     title: message.title, tone: message.tone, collapsedSummary: message.collapsedSummary,
     collapsible: message.collapsible, result,
   });
@@ -83,18 +85,18 @@ function toggleRange(state, range) {
   return true;
 }
 
-function standardActivityMessage(message, theme, width) {
+function standardActivityMessage(message, theme, width, state) {
   const token = message.tone === 'error' ? 'danger'
     : message.tone === 'success' ? 'success'
       : message.tone === 'warning' ? 'warning'
         : ['choice', 'autopilot', 'run'].includes(message.tone) ? 'accent' : 'title';
   const marker = message.collapsible ? (message.collapsed ? '▸ ' : '▾ ') : '';
   const body = message.collapsible && message.collapsed
-    ? collapsedLines(message)
-    : message.lines ?? [];
+    ? collapsedLines(message, state)
+    : (message.lines ?? []).map((line) => t(state, line));
   const bodyWidth = Math.max(20, width - 7);
   return [
-    color(theme, token, `${marker}${activityTag(message.tone)} ${message.title}`),
+    color(theme, token, `${marker}${activityTag(message.tone)} ${t(state, message.title)}`),
     ...formatRichActivityBody(message, body, theme, bodyWidth),
   ];
 }
@@ -135,21 +137,22 @@ function diffToken(line) {
   return null;
 }
 
-function collapsedLines(message) {
+function collapsedLines(message, state) {
   const lines = message.lines ?? [];
-  if (message.collapsedSummary) return [message.collapsedSummary, `… ${lines.length} detail lines · click or press E to expand`];
+  if (message.collapsedSummary) return [t(state, message.collapsedSummary), t(state, `… ${lines.length} detail lines · click or press E to expand`)];
   const visible = lines.slice(0, 2);
   const hidden = Math.max(0, lines.length - visible.length);
-  return hidden ? [...visible, `… ${hidden} more lines · click or press E to expand`] : visible;
+  const localized = visible.map((line) => t(state, line));
+  return hidden ? [...localized, t(state, `… ${hidden} more lines · click or press E to expand`)] : localized;
 }
 
-function projectActivityBlock(message, theme, width) {
-  const rows = (message.lines ?? []).map((line) => splitProjectProperty(line));
+function projectActivityBlock(message, theme, width, state) {
+  const rows = (message.lines ?? []).map((line) => splitProjectProperty(t(state, line)));
   const highlightedTheme = {
     ...theme,
     borderMuted: theme?.borderActive ?? theme?.textAccent ?? theme?.border,
   };
-  return renderNode(PropertyRows({ title: ` ${message.title} `, rows, theme: highlightedTheme }), Math.max(24, width - 4));
+  return renderNode(PropertyRows({ title: ` ${t(state, message.title)} `, rows, theme: highlightedTheme }), Math.max(24, width - 4));
 }
 
 function splitProjectProperty(line) {

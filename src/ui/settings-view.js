@@ -17,6 +17,7 @@ import { PathCompletionPopup } from './path-completion.js';
 import { renderModelReplayWorkspace } from './model-replay-view.js';
 import { ZipflowTextEditorView } from './editor-view.js';
 import { ContextDock } from './context-dock.js';
+import { localizeUiItem, translateForState as t } from '../i18n/index.js';
 
 const SETTINGS_CONTEXT_ROWS = 2;
 
@@ -25,17 +26,16 @@ export function renderSettings(state, width, height, theme, animationFrame = 0) 
   const leftWidth = Math.max(24, Math.min(34, Math.floor(width * 0.3)));
   const rightWidth = Math.max(26, width - leftWidth - 2);
   const categories = WorkspacePane({
-    title: ' CATEGORIES ',
+    title: ` ${t(state, 'Categories').toUpperCase()} `,
     active: view.focus === 'categories' && !view.modal,
     height,
     theme,
     children: [SelectList({
-      title: 'Settings',
-      items: view.definitions,
+      title: t(state, 'Settings'),
+      items: view.definitions.map((item) => localizeUiItem(state, item)),
       selectedIndex: view.categoryIndex,
       windowSize: Math.max(2, height - 6),
-      getLabel: (item) => item.label,
-      getDescription: () => '',
+      getLabel: (item) => oneLineLabel(item.label),
       wrapItems: false,
       maxItemLines: 1,
       theme,
@@ -69,11 +69,11 @@ export function renderSettings(state, width, height, theme, animationFrame = 0) 
 function renderChoiceSearch({ content, state, width, height, theme }) {
   const overlayWidth = Math.max(34, Math.min(72, width - 6));
   const overlay = WorkspacePane({
-    title: ' SEARCH MODELS ', active: true, height: 5, theme,
+    title: ` ${t(state, 'Search models').toUpperCase()} `, active: true, height: 5, theme,
     children: [
       ZipflowTextEditorView({
-        title: ' Filter ', value: state.searchEditor.value, cursor: state.searchEditor.cursor,
-        width: overlayWidth - 4, height: 3, placeholder: 'model name, author, parameters…', lineNumbers: false, theme,
+        title: ` ${t(state, 'Filter')} `, value: state.searchEditor.value, cursor: state.searchEditor.cursor,
+        width: overlayWidth - 4, height: 3, placeholder: t(state, 'model name, author, parameters…'), lineNumbers: false, theme,
       }),
     ],
   });
@@ -85,16 +85,19 @@ function renderChoiceSearch({ content, state, width, height, theme }) {
 
 function renderSettingsPage(state, view, width, height, theme, animationFrame) {
   const showingChoices = view.direct || view.focus === 'choices';
-  const items = showingChoices ? view.choices : view.parameters;
+  const rawItems = showingChoices ? view.choices : view.parameters;
+  const items = rawItems.map((item) => localizeUiItem(state, item));
   const nestedChoice = showingChoices && !view.direct;
+  const activeParameter = localizeUiItem(state, view.activeParameter);
+  const selectedSetting = localizeUiItem(state, view.selectedSetting);
   const title = nestedChoice
-    ? ` ${view.activeParameter?.label?.toUpperCase() ?? 'SELECT'} `
-    : ` ${(view.pageTitle ?? view.selectedSetting.label).toUpperCase()} `;
+    ? ` ${(activeParameter?.label ?? t(state, 'Choose')).toUpperCase()} `
+    : ` ${t(state, view.pageTitle ?? selectedSetting.label).toUpperCase()} `;
   const selectedParameter = !showingChoices ? items[view.parameterIndex] : null;
-  const summary = nestedChoice ? [] : settingsPageSummary(state, view.selectedSetting);
+  const summary = nestedChoice ? [] : settingsPageSummary(state, view.selectedSetting).map((line) => t(state, line));
   const pageContext = nestedChoice
-    ? view.activeParameter?.description ?? ''
-    : summary.length ? summary.join(' · ') : view.selectedSetting.description;
+    ? activeParameter?.description ?? ''
+    : summary.length ? summary.join(' · ') : selectedSetting.description;
   const selectedChoice = showingChoices ? items[view.choiceIndex] : null;
   const parameterDescription = showingChoices
     ? selectedChoice?.disabled ? selectedChoice.disabledReason ?? '' : selectedChoice?.description ?? ''
@@ -111,14 +114,13 @@ function renderSettingsPage(state, view, width, height, theme, animationFrame) {
     footerMinHeight: SETTINGS_CONTEXT_ROWS,
     children: [
       SelectList({
-        title: showingChoices ? 'Options' : 'Parameters',
+        title: t(state, showingChoices ? 'Options' : 'Parameters'),
         items,
         selectedIndex: showingChoices ? view.choiceIndex : view.parameterIndex,
         windowSize: Math.max(2, height - 7),
-        getLabel: (item) => showingChoices
+        getLabel: (item) => oneLineLabel(showingChoices
           ? choiceLabel(state, item, theme, animationFrame)
-          : parameterLabel(state, item, theme, animationFrame),
-        getDescription: () => '',
+          : parameterLabel(state, item, theme, animationFrame)),
         getDisabled: (item) => Boolean(item.disabled || item.blocked || item.loading),
         getDisabledIndicator: (item) => item.loading || item.blocked ? '' : '×',
         wrapItems: false,
@@ -136,16 +138,16 @@ function renderSettingsPage(state, view, width, height, theme, animationFrame) {
 
 function renderModelConfigPage(state, view, width, height, theme, animationFrame) {
   const choices = view.focus === 'choices';
-  const items = choices ? view.choices : view.parameters;
+  const items = (choices ? view.choices : view.parameters).map((item) => localizeUiItem(state, item));
   const model = view.model;
   const info = [
     model.paramsString ? `${model.paramsString} parameters` : null,
     model.quantization,
-    model.loaded ? 'Loaded instance' : 'Not loaded',
-    model.maxContextLength ? `maximum context ${model.maxContextLength.toLocaleString('en-US')}` : null,
+    model.loaded ? t(state, 'Loaded instance') : t(state, 'Not loaded'),
+    model.maxContextLength ? t(state, `maximum context ${model.maxContextLength.toLocaleString('en-US')}`) : null,
   ].filter(Boolean).join(' · ');
   const selectedParameter = !choices ? items[view.parameterIndex] : null;
-  const pageContext = choices ? view.activeParameter?.description ?? '' : [info, view.error].filter(Boolean).join(' · ');
+  const pageContext = choices ? localizeUiItem(state, view.activeParameter)?.description ?? '' : [info, t(state, view.error)].filter(Boolean).join(' · ');
   const selectedChoice = choices ? items[view.choiceIndex] : null;
   const parameterDescription = choices
     ? selectedChoice?.disabled ? selectedChoice.disabledReason ?? '' : selectedChoice?.description ?? ''
@@ -154,7 +156,7 @@ function renderModelConfigPage(state, view, width, height, theme, animationFrame
     ? joinContextLines(pageContext, parameterDescription)
     : parameterDescription || pageContext;
   return WorkspacePane({
-    title: ` ${model.label.toUpperCase()} `,
+    title: ` ${t(state, model.label).toUpperCase()} `,
     active: !state.settingsPanel?.modal,
     height,
     theme,
@@ -162,17 +164,16 @@ function renderModelConfigPage(state, view, width, height, theme, animationFrame
     footerMinHeight: SETTINGS_CONTEXT_ROWS,
     children: [
       SelectList({
-        title: choices ? 'Options' : 'Load configuration',
+        title: t(state, choices ? 'Options' : 'Load configuration'),
         items,
         selectedIndex: choices ? view.choiceIndex : view.parameterIndex,
         windowSize: Math.max(2, height - 7),
-        getLabel: (item) => {
+        getLabel: (item) => oneLineLabel((() => {
           if (!choices && item.id === 'use-model' && view.loading) return spinnerLabel(animationFrame, item.label);
           return choices
             ? `${item.value === view.values[view.activeParameter.id] ? '●' : '○'} ${item.label}`
             : `${item.label}${item.value ? `: ${item.value}` : ''}`;
-        },
-        getDescription: () => '',
+        })()),
         getDisabled: (item) => Boolean(item.disabled || item.blocked || item.loading),
         getDisabledIndicator: (item) => item.loading || item.blocked ? '' : '×',
         wrapItems: false,
@@ -186,6 +187,14 @@ function renderModelConfigPage(state, view, width, height, theme, animationFrame
       }),
     ].filter(Boolean),
   });
+}
+
+
+function oneLineLabel(value) {
+  return String(value ?? '')
+    .replace(/\s*\r?\n\s*/g, ' ')
+    .replace(/[\t ]{2,}/g, ' ')
+    .trim();
 }
 
 function joinContextLines(...lines) {
@@ -208,12 +217,12 @@ function choiceLabel(state, item, theme, animationFrame) {
   if (item.action === 'refresh-models' && item.loading) {
     return renderNode(Spinner({
       frame: animationFrame,
-      label: 'Refreshing available models',
+      label: t(state, 'Refreshing available models'),
     }), 48)[0].trimEnd();
   }
   if (item.model) {
     const selected = Boolean(item.selected);
-    const status = item.model.loaded ? 'Loaded' : 'Not loaded';
+    const status = item.model.loaded ? t(state, 'Loaded') : t(state, 'Not loaded');
     return `${selected ? '●' : '○'} ${item.label} ${color(theme, 'textMuted', `· ${status}`)} ›`;
   }
   if (!item.settingId) return item.label;
@@ -223,30 +232,30 @@ function choiceLabel(state, item, theme, animationFrame) {
 
 function renderSettingsModal({ content, modal, state, width, height, theme }) {
   const modalWidth = Math.max(40, Math.min(68, width - 10));
-  const instructions = modal.field.instructions ?? [];
+  const instructions = (modal.field.instructions ?? []).map((line) => t(state, line));
   const buildModal = ({ width: availableWidth, height: availableHeight }) => {
     const innerWidth = Math.max(26, Math.min(modalWidth - 4, availableWidth - 4));
     const children = [
-      Text(modal.field.description, { wrap: true }),
+      Text(t(state, modal.field.description), { wrap: true }),
       ...instructions.map((line) => Text(color(theme, 'text', line), { wrap: true })),
-      modal.field.unitHint ? Text(color(theme, 'accent', modal.field.unitHint), { wrap: true }) : null,
+      modal.field.unitHint ? Text(color(theme, 'accent', t(state, modal.field.unitHint)), { wrap: true }) : null,
       Text(''),
       ZipflowTextEditorView({
-        title: ` ${modal.field.label} `,
+        title: ` ${t(state, modal.field.label)} `,
         value: state.editor.value,
         cursor: state.editor.cursor,
         width: innerWidth,
         height: 3,
-        placeholder: modal.field.placeholder ?? '',
+        placeholder: t(state, modal.field.placeholder ?? ''),
         lineNumbers: false,
         theme,
       }),
-      modal.error ? Text(color(theme, 'danger', modal.error), { wrap: true }) : null,
+      modal.error ? Text(color(theme, 'danger', t(state, modal.error)), { wrap: true }) : null,
     ].filter(Boolean);
     let node = Modal({
-      title: ` Edit ${modal.field.label} `,
+      title: ` ${t(state, 'Edit')} ${t(state, modal.field.label)} `,
       children,
-      footer: modal.field.path ? '↑/↓ choose · Tab/Enter complete · Esc cancel' : 'Enter save · Esc cancel',
+      footer: t(state, modal.field.path ? '↑/↓ choose · Tab/Enter complete · Esc cancel' : 'Enter save · Esc cancel'),
     });
     const completion = state.pathSuggestions;
     if (modal.field.path && completion?.owner === 'settings-modal' && completion.items?.length && state.pathSuggestionActive) {

@@ -83,6 +83,20 @@ Depending on workflow capabilities, Guarded and Full modes can participate in:
 
 The actual allowed actions are generated at runtime from project state. The presence of a gate does not guarantee that every possible action is available.
 
+
+## Historical simulation
+
+Use **Settings → Local LLM → Test selected model → Simulate autopilot from history** to inspect autopilot behavior before allowing it to act on a live update.
+
+Zipflow reads a stored run and reconstructs only the decision gates supported by its recorded plan, conflicts, check results, applied paths, commit, and deployment result. It then evaluates the same historical state twice:
+
+- **Guarded** uses the safe capability profile. Conflict replacement remains a user decision, `commit-anyway` is unavailable, and deployment after failed checks is skipped by policy.
+- **Full** exposes the additional risky actions that would be eligible in the same state.
+
+The result shows the proposed action, effective action after confidence fallback, evidence, risks, and whether a decision came from the model or from a deterministic profile rule. Low-confidence proposals are displayed as **ask-user**, matching a real run.
+
+Simulation is read-only. It does not extract an archive, modify project files, touch Git, create backups, move source archives, or write a new run record. It uses the currently selected provider, model, token, and model settings, so it can make local LLM requests and can be cancelled with `Esc` or `Ctrl+C`.
+
 ## Cancellation and resume
 
 Pressing `Esc` or cancelling an active LLM decision pauses autopilot for the current run. Zipflow shows the equivalent manual checkpoint and can offer **Resume autopilot** later.

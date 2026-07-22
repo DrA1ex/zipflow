@@ -31,14 +31,15 @@ import { PathCompletionPopup } from './path-completion.js';
 import { runSettingsStatus } from '../app/runtime-settings.js';
 import { ZipflowTextEditorView } from './editor-view.js';
 import { ContextDock, contextText } from './context-dock.js';
+import { translateForState as t } from '../i18n/index.js';
 
 export function renderZipflow({ state, width, height, animationFrame = 0 }) {
   const theme = themes[state.settings?.theme] ?? themes.ocean;
   const title = state.project?.name ? `Zipflow ${ZIPFLOW_VERSION} · ${state.project.name}` : `Zipflow ${ZIPFLOW_VERSION}`;
-  const subtitle = state.project ? displayPath(state.project.root) : 'Safe source archive updates';
+  const subtitle = state.project ? displayPath(state.project.root) : t(state, 'Safe source archive updates');
   state.statusDetail = state.screen === 'settings' ? runSettingsStatus(state) : '';
-  const footerRight = state.statusDetail ? [state.statusDetail] : [state.status].filter(Boolean);
-  const footer = renderGlobalFooter({ left: footerHints(state), right: footerRight, width, theme });
+  const footerRight = (state.statusDetail ? [state.statusDetail] : [state.status]).filter(Boolean).map((value) => t(state, value));
+  const footer = renderGlobalFooter({ left: footerHints(state).map((value) => t(state, value)), right: footerRight, width, theme });
   const { mainHeight } = resolveWorkspaceShellLayout({
     width,
     height,
@@ -200,7 +201,7 @@ function renderCurrent(state, width, height, theme) {
   const selected = state.menuItems[state.selectedIndex];
   const inlineDescriptions = showsInlineDescriptions(state.screen);
   const contextRows = inlineDescriptions ? 0 : contextRowsForScreen(state.screen);
-  const selectedContext = inlineDescriptions ? '' : contextText(selected);
+  const selectedContext = inlineDescriptions ? '' : t(state, contextText(selected));
   const introRows = intro.length ? Math.min(3, intro.length) + 1 : 0;
   const windowSize = Math.max(2, height - 4 - introRows - contextRows);
   state.menuPageSize = windowSize;
@@ -213,37 +214,43 @@ function renderCurrent(state, width, height, theme) {
     footerNode,
     footerMinHeight: contextRows,
     children: [
-      ...intro.slice(0, 3).map((line, index) => Text(index === 0 ? color(theme, 'title', line) : color(theme, 'textMuted', line), { wrap: true })),
+      ...intro.slice(0, 3).map((line, index) => Text(index === 0 ? color(theme, 'title', t(state, line)) : color(theme, 'textMuted', t(state, line)), { wrap: true })),
       intro.length ? Text('') : null,
       SelectList({
         title: 'Choose',
         items: state.menuItems,
         selectedIndex: state.selectedIndex,
         windowSize,
-        getLabel: (item) => menuItemLabel(item),
-        getDescription: (item) => inlineDescriptions ? item.description ?? '' : '',
+        getLabel: (item) => menuItemLabel(item, state),
         getDisabled: (item) => item.disabled,
-        wrapItems: inlineDescriptions,
-        maxItemLines: inlineDescriptions ? 3 : 1,
-        reserveItemLines: inlineDescriptions,
+        wrapItems: false,
+        maxItemLines: 1,
         theme,
         pointerId: 'zipflow:menu',
         onSelect: (_item, index) => state.dispatch?.({ type: 'activate-index', index }),
         onWheel: (event) => {
           const delta = event.deltaY < 0 ? -1 : 1;
-          state.selectedIndex = clamp(state.selectedIndex + delta, 0, state.menuItems.length - 1);
+          state.dispatch?.({ type: 'menu-move-selection', delta });
           event.preventDefault();
+          event.stopPropagation?.();
         },
       }),
     ].filter(Boolean),
   });
 }
 
-function menuItemLabel(item) {
-  const label = String(item?.label ?? '');
+function menuItemLabel(item, state) {
+  const label = oneLineLabel(t(state, String(item?.label ?? '')));
   if (!label || /›\s*$/.test(label)) return label;
   if (item?.navigate || opensSubscreen(item?.id)) return `${label} ›`;
   return label;
+}
+
+function oneLineLabel(value) {
+  return String(value ?? '')
+    .replace(/\s*\r?\n\s*/g, ' ')
+    .replace(/[\t ]{2,}/g, ' ')
+    .trim();
 }
 
 function opensSubscreen(id) {
@@ -261,16 +268,16 @@ function opensSubscreen(id) {
 function renderEditor(state, width, height, theme) {
   const contextRows = Math.max(1, Number(state.editorContext?.contextRows) || 1);
   const context = state.editorContext?.context
-    ?? (state.editorContext?.instructions ?? []).join(' · ');
+    ?? (state.editorContext?.instructions ?? []).map((line) => t(state, line)).join(' · ');
   const editorHeight = Math.max(2, height - contextRows - 2);
   return Column({ height },
     ZipflowTextEditorView({
-      title: ` ${state.editorContext?.label ?? screenTitle(state)} `,
+      title: ` ${t(state, state.editorContext?.label ?? screenTitle(state))} `,
       value: state.editor.value,
       cursor: state.editor.cursor,
       width,
       height: editorHeight,
-      placeholder: state.editorContext?.placeholder ?? '',
+      placeholder: t(state, state.editorContext?.placeholder ?? ''),
       lineNumbers: false,
       theme,
     }),
@@ -285,9 +292,9 @@ function renderBusy(state, height, theme) {
     height,
     theme,
     children: [
-      Text(color(theme, 'title', state.busyLabel), { wrap: true }),
+      Text(color(theme, 'title', t(state, state.busyLabel)), { wrap: true }),
       ProgressBar({ value: state.progress.value, total: Math.max(1, state.progress.total), width: 44, label: state.progress.detail || undefined, theme }),
-      Text(color(theme, 'textMuted', 'Zipflow is preserving the project state while this step runs.'), { wrap: true }),
+      Text(color(theme, 'textMuted', t(state, 'Zipflow is preserving the project state while this step runs.')), { wrap: true }),
     ],
   });
 }
@@ -328,7 +335,7 @@ function runtimePane(title, lines, height, theme) {
 
 function renderDiffView(state, width, height, theme) {
   const view = state.diffView;
-  if (!view?.diff) return WorkspacePane({ title: ' DIFF ', active: true, height, theme, children: [Text('Diff is unavailable.')] });
+  if (!view?.diff) return WorkspacePane({ title: ` ${t(state, 'Diff').toUpperCase()} `, active: true, height, theme, children: [Text(t(state, 'Diff is unavailable.'))] });
   const contentWidth = Math.max(40, width - 4);
   const document = renderDiffDocument(view.diff, view.mode, contentWidth);
   view.hunkOffsets = document.hunkOffsets;
@@ -405,7 +412,7 @@ function screenTitle(state) {
     'manual-deploy-running': 'Deployment', 'manual-deploy-result': 'Deployment report',
     error: 'Error', settings: 'Settings',
   };
-  return titles[state.screen] ?? 'Zipflow';
+  return t(state, titles[state.screen] ?? 'Zipflow');
 }
 
 function footerHints(state) {
@@ -431,10 +438,10 @@ function footerHints(state) {
 function headerStats(state) {
   const step = runStep(state);
   const stats = [
-    { label: 'State', value: state.busy ? 'Working' : state.status },
-    { label: 'Policy', value: state.workflow?.policy?.label ?? state.draft?.policy?.label ?? 'Not configured' },
+    { label: t(state, 'State'), value: t(state, state.busy ? 'Working' : state.status) },
+    { label: t(state, 'Policy'), value: t(state, state.workflow?.policy?.label ?? state.draft?.policy?.label ?? 'Not configured') },
   ];
-  if (step) stats.push({ label: 'Stage', value: `${step.number}/5 ${step.label}` });
+  if (step) stats.push({ label: t(state, 'Stage'), value: `${step.number}/5 ${t(state, step.label)}` });
   return stats;
 }
 
@@ -482,18 +489,20 @@ function renderMenuSearchOverlay(state, content, width, height, promptHeight, th
   );
   return BottomOverlay({ content, overlay, height, bottom: Math.max(1, promptHeight - 1), left: 2, right: 2, width: overlayWidth, align: 'center', opaque: true });
 }
-function contextRowsForScreen(_screen) {
-  return 1;
+function contextRowsForScreen(screen) {
+  return isWorkflowSetupScreen(screen) ? 2 : 1;
 }
-function showsInlineDescriptions(screen) {
-  return isWorkflowSetupScreen(screen);
+function showsInlineDescriptions(_screen) {
+  return false;
 }
 function isWorkflowSetupScreen(screen) {
   return String(screen ?? '').startsWith('setup-') || String(screen ?? '').startsWith('custom-check');
 }
 function isSearchableScreen(screen) {
-  return new Set(['plan-files', 'export-select', 'export-files', 'run-history', 'setup-checks', 'run-file-list']).has(screen);
+  return String(screen ?? '').startsWith('setup-')
+    || new Set(['plan-files', 'export-select', 'export-files', 'run-history', 'run-file-list']).has(screen);
 }
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }

@@ -22,11 +22,11 @@ export async function handleEmptyArchiveEnter(controller, { now = Date.now(), re
     return true;
   }
   state.archiveDiscoveryTap = null;
-  await scanRecentArchives(controller, directory, { returnToInput });
+  await scanRecentArchives(controller, directory, { returnToInput, now });
   return true;
 }
 
-export async function scanRecentArchives(controller, directory, { returnToInput = null } = {}) {
+export async function scanRecentArchives(controller, directory, { returnToInput = null, now = Date.now() } = {}) {
   const { state } = controller;
   const operation = controller.beginOperation({ kind: 'archive-discovery', label: 'Scanning recent archives' });
   state.busy = true;
@@ -35,7 +35,7 @@ export async function scanRecentArchives(controller, directory, { returnToInput 
   controller.invalidate();
   try {
     const candidates = await discoverRecentArchives({
-      directory, project: state.project, maxAgeMs: RECENT_ARCHIVE_MAX_AGE_MS, signal: operation.signal,
+      directory, project: state.project, now, maxAgeMs: RECENT_ARCHIVE_MAX_AGE_MS, signal: operation.signal,
     });
     state.busy = false;
     state.archiveDiscoveryCandidates = candidates;

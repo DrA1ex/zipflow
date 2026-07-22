@@ -16,6 +16,7 @@ import {
 import { ContextDock } from './context-dock.js';
 import { parseRichTextBlocks } from './rich-text.js';
 import { renderSyntaxLines } from './syntax-render.js';
+import { translateForState as t } from '../i18n/index.js';
 
 export function renderModelReplayWorkspace({ content, state, width, height, theme, animationFrame = 0 }) {
   const workspace = state.settingsPanel.modelTestWorkspace;
@@ -42,9 +43,12 @@ export function renderModelReplayWorkspace({ content, state, width, height, them
 
 function renderReplayPreview(state, workspace, width, height, theme) {
   const counts = workspace.run?.plan?.counts ?? {};
+  const autopilot = workspace.kind === 'autopilot';
   const items = [
-    { id: 'start', label: 'Start replay', description: 'Run the current LLM configuration against this stored patch.' },
-    { id: 'back', label: 'Back', description: 'Return to historical updates without starting a model request.' },
+    { id: 'start', label: t(state, autopilot ? 'Start simulation' : 'Start replay'), description: t(state, autopilot
+      ? 'Compare Guarded and Full autopilot decisions reconstructed from this historical run.'
+      : 'Run the current LLM configuration against this stored patch.') },
+    { id: 'back', label: t(state, 'Back'), description: t(state, 'Return to historical updates without starting a model request.') },
   ];
   const selected = items[workspace.previewIndex ?? 0];
   return replayFrame({
@@ -56,19 +60,22 @@ function renderReplayPreview(state, workspace, width, height, theme) {
       Text(color(theme, 'title', workspace.archiveName || 'Historical archive update'), { wrap: false }),
       Text(color(theme, 'textMuted', `${counts.created ?? 0} added · ${counts.updated ?? 0} changed · ${counts.deleted ?? 0} removed`)),
       Text(''),
-      Text('The current model configuration, delivery strategy, review mode, and language settings will be used.', { wrap: true }),
-      Text(color(theme, 'textMuted', 'No project files, Git state, backups, source archives, or run history will be changed.'), { wrap: true }),
+      Text(t(state, autopilot
+        ? 'The current model configuration will evaluate the same decision points in Guarded and Full autopilot modes.'
+        : 'The current model configuration, delivery strategy, review mode, and language settings will be used.'), { wrap: true }),
+      Text(color(theme, 'textMuted', t(state, 'No project files, Git state, backups, source archives, or run history will be changed.')), { wrap: true }),
       Box({ grow: true, height: 'fill' }),
       SelectList({
-        title: 'Choose', items, selectedIndex: workspace.previewIndex ?? 0,
-        windowSize: 2, getLabel: (item) => item.label, getDescription: () => '',
-        wrapItems: false, maxItemLines: 1, theme,
+        title: t(state, 'Choose'), items, selectedIndex: workspace.previewIndex ?? 0,
+        windowSize: 2, getLabel: (item) => item.label,
+        wrapItems: false, theme,
         pointerId: 'zipflow:model-replay-preview',
         onSelect: (_item, index) => state.dispatch?.({ type: 'model-replay-preview-select', index }),
       }),
       ContextDock({ text: selected?.description ?? '', rows: 1, width: Math.max(20, width - 4), theme }),
     ],
-    footer: '↑/↓ choose · Enter open · Esc back',
+    footer: t(state, '↑/↓ choose · Enter open · Esc back'),
+    title: t(state, autopilot ? 'HISTORICAL AUTOPILOT SIMULATION' : 'HISTORICAL MODEL REPLAY'),
   });
 }
 
@@ -110,17 +117,18 @@ function renderReplayProgress(state, workspace, width, height, theme, animationF
       pane,
       replayUnreadIndicator(state, workspace, theme),
     ],
-    footer: footerWithPosition(footer, workspace, innerWidth, theme),
+    footer: footerWithPosition(t(state, footer), workspace, innerWidth, theme),
+    title: t(state, workspace.kind === 'autopilot' ? 'HISTORICAL AUTOPILOT SIMULATION' : 'HISTORICAL MODEL REPLAY'),
   });
 }
 
-function replayFrame({ height, theme, children, footer }) {
+function replayFrame({ height, theme, children, footer, title = 'HISTORICAL MODEL REPLAY' }) {
   return Box({
     border: true,
     borderColor: theme?.borderActive ?? theme?.accent ?? theme?.border,
     padding: { left: 1, right: 1 },
     height,
-    title: ' HISTORICAL MODEL REPLAY ',
+    title: ` ${title} `,
   }, Column({ height: Math.max(1, height - 2) }, ...children, Text(footer, { wrap: false })));
 }
 
@@ -168,6 +176,7 @@ function replayLines(workspace, theme, width) {
 
 function blockLines(block, workspace, theme, width) {
   if (block.id === 'parsed-result' && block.result) return parsedResultLines(block.result, theme, width);
+  if (block.id === 'autopilot-result' && block.result) return autopilotResultLines(block.result, theme, width);
   const token = block.status === 'error' ? 'danger'
     : block.status === 'active' || block.streaming ? 'accent'
       : block.status === 'done' ? 'success' : 'textMuted';
@@ -198,6 +207,21 @@ function richReplayLines(value, theme, width) {
   return parseRichTextBlocks(value).flatMap((block) => block.type === 'code'
     ? renderSyntaxLines(block.code, block.language, { width, theme, indent: 4 })
     : block.lines.flatMap((line) => wrapColoredLine(line, width, 4, theme, 'text')));
+}
+
+function autopilotResultLines(result, theme, width) {
+  const lines = [color(theme, 'success', '✓ AUTOPILOT COMPARISON')];
+  for (const mode of ['guarded', 'full']) {
+    const current = result.modes?.[mode];
+    lines.push('', color(theme, 'accent', mode.toUpperCase()),
+      `  ${color(theme, 'textMuted', `${current?.automatic ?? 0} automatic · ${current?.asksUser ?? 0} ask user`)}`);
+    for (const decision of current?.decisions ?? []) {
+      lines.push(...wrapColoredLine(`${decision.label}: ${decision.action}`, width, 2, theme, decision.action === 'ask-user' ? 'warning' : 'text'));
+      if (decision.summary) lines.push(...wrapColoredLine(decision.summary, width, 4, theme, 'textMuted'));
+    }
+  }
+  lines.push('');
+  return lines;
 }
 
 function parsedResultLines(result, theme, width) {

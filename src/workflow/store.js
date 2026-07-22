@@ -22,6 +22,7 @@ export async function ensureZipflowHome() {
     path.join(home, 'tmp'),
     path.join(home, 'locks'),
     path.join(home, 'projects'),
+    path.join(home, 'languages'),
   ];
   await Promise.all(directories.map(async (directory) => {
     await mkdir(directory, { recursive: true, mode: 0o700 });

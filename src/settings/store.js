@@ -7,7 +7,7 @@ import {
   deleteLlmApiToken, readLlmApiToken, SecureCredentialStoreError, writeLlmApiToken,
 } from '../security/credential-store.js';
 
-export const SETTINGS_VERSION = 15;
+export const SETTINGS_VERSION = 16;
 export const THEME_NAMES = Object.keys(themes);
 export const LLM_PROVIDERS = ['disabled', 'ollama', 'lmstudio'];
 export const LLM_LANGUAGES = ['English', 'Russian', 'German', 'French', 'Spanish', 'Chinese', 'Japanese'];
@@ -20,6 +20,7 @@ export const MANAGED_HISTORY_POLICIES = ['record', 'disabled'];
 
 export const DEFAULT_SETTINGS = Object.freeze({
   version: SETTINGS_VERSION,
+  interfaceLanguage: 'en',
   theme: 'ocean',
   checkOutput: 'last-line',
   llmProvider: 'disabled',
@@ -230,6 +231,8 @@ export function normalizeSettings(settings) {
   const raw = settings && typeof settings === 'object' ? settings : {};
   const source = migrateLegacySettingAliases(raw);
   const value = { ...DEFAULT_SETTINGS, ...source, version: SETTINGS_VERSION };
+  if (typeof value.interfaceLanguage !== 'string' || !value.interfaceLanguage.trim()) value.interfaceLanguage = DEFAULT_SETTINGS.interfaceLanguage;
+  value.interfaceLanguage = value.interfaceLanguage.trim().toLowerCase();
   if (!THEME_NAMES.includes(value.theme)) value.theme = DEFAULT_SETTINGS.theme;
   if (!['compact', 'last-line'].includes(value.checkOutput)) value.checkOutput = DEFAULT_SETTINGS.checkOutput;
   if (!LLM_PROVIDERS.includes(value.llmProvider)) value.llmProvider = DEFAULT_SETTINGS.llmProvider;

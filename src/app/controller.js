@@ -41,6 +41,7 @@ import {
 import { isEditorScreen, isPagedMenuScreen, isSearchableScreen, shouldRecordChoice } from './controller-screen-rules.js';
 import { InputActionGate } from './input-action-gate.js';
 import { insertPastedText, pastedTextFromKey } from '../ui/editor-paste.js';
+import { configureI18n, translateForState as t } from '../i18n/index.js';
 export class ZipflowController {
   constructor(state) {
     this.state = state;
@@ -62,6 +63,7 @@ export class ZipflowController {
     try {
       await ensureZipflowHome();
       this.state.settings = await loadSettings();
+      this.state.i18n = await configureI18n(this.state.settings.interfaceLanguage);
       this.state.project = await discoverProject(process.cwd());
       this.state.workflow = await loadWorkflow(this.state.project.root);
       this.message('Project detected', projectSummary(this.state.project, this.state.workflow), 'project');
@@ -195,6 +197,11 @@ export class ZipflowController {
       if (toggleActivityBlockAtRow(this.state, action.row)) this.invalidate();
       return;
     }
+    if (action.type === 'menu-move-selection') {
+      this.moveSelection(Number(action.delta) || 0);
+      this.invalidate();
+      return;
+    }
     if (action.type === 'settings-select-setting') return selectSetting(this, action.index);
     if (action.type === 'settings-select-parameter') return selectParameter(this, action.index);
     if (action.type === 'settings-select-choice') return selectChoice(this, action.index);
@@ -314,7 +321,7 @@ export class ZipflowController {
   }
 
   toast(message, level = 'info', ttl = 3, detail = '') {
-    this.state.overlays?.toast?.(String(message ?? ''), level, ttl, String(detail ?? ''));
+    this.state.overlays?.toast?.(t(this.state, String(message ?? '')), level, ttl, t(this.state, String(detail ?? '')));
     this.invalidate();
   }
 

@@ -108,9 +108,10 @@ Press `Esc` during review generation to cancel only that local LLM request. Arch
 
 - a quick connection and generation compatibility check;
 - an autonomous-decision compatibility check when autopilot is being configured;
-- a read-only replay of a historical archive update using current settings.
+- a read-only replay of a historical archive update using current settings;
+- a read-only Guarded-versus-Full autopilot simulation reconstructed from historical run state.
 
-Replay shows the selected archive update and safety scope before opening the generation workspace. It never changes project files. Terlio 1.1.3 syntax highlighting is applied consistently to fenced code blocks and standalone JSON in live output, saved raw model responses, Activity, and historical replay. Zipflow infers JSON for partial structured streams so the response remains readable before the closing brace arrives.
+Replay and autopilot simulation show the selected historical update and safety scope before opening the generation workspace. Neither changes project files, Git state, backups, source archives, or run history. Terlio 1.1.3 syntax highlighting is applied consistently to fenced code blocks and standalone JSON in live output, saved raw model responses, Activity, and historical replay. Zipflow infers JSON for partial structured streams so the response remains readable before the closing brace arrives.
 
 ## Autopilot decisions
 

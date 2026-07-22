@@ -137,6 +137,8 @@ Each project workflow has a decision mode:
 
 Autopilot never receives unrestricted shell control. Zipflow supplies a finite action allowlist at each decision gate, records the decision and evidence, checks confidence and project state, and falls back to deterministic or manual handling when the result is invalid or unsafe.
 
+Before enabling it on a live project, open **Settings → Local LLM → Test selected model → Simulate autopilot from history**. Zipflow reconstructs decision gates from a stored run and compares what the current model would do in Guarded and Full modes. The simulation is read-only and never changes files, Git, backups, archives, or history.
+
 See [Decision modes and autopilot](docs/autopilot.md) before enabling autonomous decisions.
 
 ## Supported projects
@@ -180,7 +182,7 @@ Press `Esc` from the archive prompt to open the project menu. Depending on the c
 - **Create ZIP**
 - **Exit**
 
-Global settings are available with `Ctrl+B`.
+Global settings are available with `Ctrl+B`. Workflow setup and Change Workflow use compact one-row choices; descriptions stay in the fixed context dock, and wheel, arrow, Page Up/Page Down, Home, End, and `/` search navigate long lists.
 
 Create ZIP safety review keeps small flagged sets readable: up to five files are shown as full project-relative paths, and larger trees collapse directory chains that contain only one flagged file. Credential-like source filenames such as `credential-store.js` are not treated as secret files by name alone; JSON-like and extensionless credential files remain review candidates.
 
@@ -207,6 +209,19 @@ Context-sensitive help is available with `?`. Diff review and text editors expos
 
 See [Interface and controls](docs/controls.md) for operation-aware cancellation and the complete reference.
 
+
+## Interface languages
+
+The first global setting is **Language**. English remains the default. Zipflow includes English, Russian, German, French, Italian, and Spanish interface packs. **System language** selects a matching installed pack from the operating-system locale and falls back to English.
+
+Custom packs are ordinary JSON files placed in:
+
+```text
+~/.zipflow/languages/
+```
+
+They are validated against `docs/i18n/language.schema.json`. A custom pack may translate only the strings it needs; missing entries fall back to English. Use **Refresh languages** in the language picker or restart Zipflow after adding or replacing a file. See [Interface localization](docs/i18n/README.md).
+
 ## Data and storage
 
 Zipflow stores its settings, workflows, reports, patches, backups, managed-file history, and autonomy records under:
@@ -230,6 +245,7 @@ See [Settings, history, and storage](docs/settings-and-storage.md).
 - [Project detection and checks](docs/project-detection.md)
 - [Local LLM integration](docs/local-llm.md)
 - [Settings, history, and storage](docs/settings-and-storage.md)
+- [Interface localization](docs/i18n/README.md)
 - [Interface and controls](docs/controls.md)
 - [Development and publishing](docs/development.md)
 - [Architecture](ARCHITECTURE.md)

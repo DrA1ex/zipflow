@@ -1,0 +1,105 @@
+{
+  "$schema": "../language.schema.json",
+  "version": 1,
+  "id": "de",
+  "locale": "de-DE",
+  "name": "German",
+  "nativeName": "Deutsch",
+  "messages": {
+    "Starting": "Start",
+    "Project": "Projekt",
+    "Workflow sections": "Workflow-Bereiche",
+    "Checks": "Prüfungen",
+    "Update policy": "Aktualisierungsrichtlinie",
+    "Error": "Fehler",
+    "Settings": "Einstellungen",
+    "Language": "Sprache",
+    "System language": "Systemsprache",
+    "Theme": "Design",
+    "Running checks": "Prüfungen",
+    "Local LLM": "Lokales LLM",
+    "Source archives": "Quellarchive",
+    "Backups": "Sicherungen",
+    "Managed-file history": "Verlauf verwalteter Dateien",
+    "Connection and compatibility test": "Verbindungs- und Kompatibilitätstest",
+    "Replay a historical update": "Historisches Update wiedergeben",
+    "Simulate autopilot from history": "Autopilot anhand des Verlaufs simulieren",
+    "Historical autopilot simulation": "Historische Autopilot-Simulation",
+    "Model tests": "Modelltests",
+    "Start simulation": "Simulation starten",
+    "Back": "Zurück",
+    "Guarded autopilot": "Geschützter Autopilot",
+    "Full autopilot · Dangerous": "Vollständiger Autopilot · Gefährlich",
+    "Decision mode": "Entscheidungsmodus",
+    "Continue": "Weiter",
+    "Enter select": "Enter auswählen",
+    "Esc back": "Esc zurück",
+    "Ctrl+B settings": "Ctrl+B Einstellungen",
+    "? help": "? Hilfe",
+    "↑/↓ choose": "↑/↓ auswählen",
+    "Drop a ZIP file into the terminal or enter its path.": "ZIP-Datei in das Terminal ziehen oder den Pfad eingeben.",
+    "Changes remain in a draft until Review and save succeeds.": "Änderungen bleiben im Entwurf, bis Prüfung und Speichern erfolgreich sind.",
+    "No project files, Git state, backups, source archives, or run history will be changed.": "Projektdateien, Git-Status, Sicherungen, Quellarchive und Verlauf werden nicht verändert.",
+    "No historical runs available": "Keine historischen Läufe verfügbar",
+    "State": "Status",
+    "Policy": "Richtlinie",
+    "Stage": "Phase",
+    "Not configured": "Nicht konfiguriert",
+    "Ready": "Bereit",
+    "Exit": "Beenden",
+    "Interface language": "Oberflächensprache",
+    "Choose the language used by Zipflow itself. Custom JSON language packs are loaded from ~/.zipflow/languages.": "Sprache der Zipflow-Oberfläche wählen. Eigene JSON-Sprachpakete werden aus ~/.zipflow/languages geladen.",
+    "Use the operating-system language when a matching pack is installed; otherwise use English.": "Sprache des Betriebssystems verwenden, wenn ein passendes Paket installiert ist; sonst Englisch.",
+    "English": "Englisch",
+    "Русский": "Russisch",
+    "Deutsch": "Deutsch",
+    "Français": "Französisch",
+    "Italiano": "Italienisch",
+    "Español": "Spanisch",
+    "Language pack directory": "Sprachpaket-Verzeichnis",
+    "Custom language packs": "Benutzerdefinierte Sprachpakete",
+    "Refresh languages": "Sprachen neu laden"
+  },
+  "patterns": [
+    {
+      "source": "{count} checks selected",
+      "target": "{count} Prüfungen ausgewählt"
+    },
+    {
+      "source": "Choose {current}/{total}",
+      "target": "Auswahl {current}/{total}"
+    },
+    {
+      "source": "{count} matching paths",
+      "target": "{count} passende Pfade"
+    },
+    {
+      "source": "{count} matching path",
+      "target": "{count} passender Pfad"
+    },
+    {
+      "source": "Press Enter again to scan recent ZIP files in {directory}",
+      "target": "Drücken Sie erneut Enter, um aktuelle ZIP-Dateien in {directory} zu suchen"
+    },
+    {
+      "source": "{count} added · {updated} changed · {deleted} removed",
+      "target": "{count} hinzugefügt · {updated} geändert · {deleted} entfernt"
+    },
+    {
+      "source": "{name} selected",
+      "target": "{name} ausgewählt"
+    },
+    {
+      "source": "Help · {title}",
+      "target": "Hilfe · {title}"
+    },
+    {
+      "source": "{count} files",
+      "target": "{count} Dateien"
+    },
+    {
+      "source": "{count} file",
+      "target": "{count} Datei"
+    }
+  ]
+}

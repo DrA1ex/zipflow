@@ -14,12 +14,14 @@ export function shouldRecordChoice(screen, itemId) {
 }
 
 export function isSearchableScreen(screen) {
-  return ['plan-files', 'export-select', 'export-files', 'run-history', 'setup-checks', 'run-file-list'].includes(screen);
+  return String(screen ?? '').startsWith('setup-')
+    || ['plan-files', 'export-select', 'export-files', 'run-history', 'run-file-list'].includes(screen);
 }
 
+
 export function isPagedMenuScreen(screen) {
-  return [
-    'plan-files', 'export-select', 'export-files', 'run-history', 'run-details', 'run-file-groups', 'run-file-list', 'run-analytics', 'setup-checks',
+  return String(screen ?? '').startsWith('setup-') || [
+    'plan-files', 'export-select', 'export-files', 'run-history', 'run-details', 'run-file-groups', 'run-file-list', 'run-analytics',
     'run-history-type-filter', 'run-history-status-filter',
   ].includes(screen);
 }
