@@ -64,7 +64,6 @@ export function createInitialState() {
     settings: { ...DEFAULT_SETTINGS },
     settingsPanel: null,
     overlays: null,
-    helpToast: null,
     dispatch: null,
   };
 }

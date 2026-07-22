@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { renderToString, Text, themes } from 'terlio.js';
+import { createOverlayManager, renderToString, Text, themes } from 'terlio.js';
 import { createInitialState, setScreen } from '../src/app/state.js';
 import { ZipflowController } from '../src/app/controller.js';
 import { backPostCheck, activatePostCheck, commitMessageCandidates } from '../src/app/run-postcheck.js';
@@ -237,9 +237,14 @@ test('context help prefers short context and keeps detailed help available', () 
     selectedIndex: 0,
   });
 
+  state.overlays = createOverlayManager();
   controller.showContextHelp();
 
-  assert.deepEqual(state.helpToast.lines, ['Short context.', '', 'Long detailed explanation.']);
+  const overlay = state.overlays.top();
+  assert.equal(overlay.type, 'help');
+  const rendered = stripAnsi(renderToString(renderZipflow({ state, width: 76, height: 24 }), { width: 76, height: 24 }));
+  assert.match(rendered, /Short context/);
+  assert.match(rendered, /Long detailed explanation/);
 });
 
 function stripAnsi(value) {

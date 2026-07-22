@@ -1,5 +1,7 @@
 import path from 'node:path';
 import { copyTextToClipboard, handleInputEditorKey } from 'terlio.js';
+import { runReportPath } from '../runs/store.js';
+import { revealFile } from '../utils/reveal.js';
 import { discoverProject } from '../project/detect.js';
 import { ensureZipflowHome, getZipflowHome, loadWorkflow } from '../workflow/store.js';
 import { loadSettings } from '../settings/store.js';
@@ -74,21 +76,7 @@ export class ZipflowController {
 
   async handleKey(key) {
     const normalized = key.printable && key.text === ' ' ? { ...key, name: 'space' } : key;
-    if (normalized.ctrl && normalized.name === 'c') return this.handleInterrupt();
-    if (this.state.helpToast) {
-      if (normalized.name === 'escape') {
-        this.state.helpToast = null;
-        return this.invalidate();
-      }
-      if (['up', 'down', 'page-up', 'page-down', 'home', 'end'].includes(normalized.name)) {
-        const toast = this.state.helpToast;
-        const amount = normalized.name === 'page-up' || normalized.name === 'page-down' ? 5 : 1;
-        if (normalized.name === 'home') toast.scroll = 0;
-        else if (normalized.name === 'end') toast.scroll = toast.maxScroll ?? 0;
-        else toast.scroll = Math.max(0, Math.min(toast.maxScroll ?? 0, (toast.scroll ?? 0) + (normalized.name === 'up' || normalized.name === 'page-up' ? -amount : amount)));
-        return this.invalidate();
-      }
-    }
+    if (isInterruptKey(normalized)) return this.handleInterrupt();
     if (this.state.menuSearch?.active) return handleMenuSearchKey(this, normalized);
     if (normalized.ctrl && normalized.name === 't') {
       const pointerEnabled = this.runtime?.togglePointerOverride?.();
@@ -120,6 +108,15 @@ export class ZipflowController {
       return;
     }
     if (this.state.busy || ['checks-running', 'deploy-running', 'manual-checks-running', 'manual-deploy-running'].includes(this.state.screen)) return;
+    if (normalized.printable && normalized.text?.toLowerCase() === 'g' && this.state.run?.id) {
+      const report = runReportPath(this.state.run.id);
+      try {
+        await revealFile(report);
+        return this.toast('Opened run report', 'success');
+      } catch (error) {
+        return this.toast('Run report is unavailable', 'warning', 3, error.message);
+      }
+    }
     if (normalized.printable && normalized.text === '?') return showContextHelp(this);
     if ((normalized.name === 'page-up' || normalized.name === 'page-down') && isPagedMenuScreen(this.state.screen)) {
       this.pageSelection(normalized.name === 'page-up' ? -1 : 1);
@@ -131,6 +128,10 @@ export class ZipflowController {
       this.state.transcriptScroll = Math.max(0, Math.min(maxScroll, this.state.transcriptScroll + delta));
       this.state.transcriptSticky = this.state.transcriptScroll >= maxScroll;
       if (this.state.transcriptSticky) this.state.activityUnread = 0;
+      return this.invalidate();
+    }
+    if ((normalized.name === 'home' || normalized.name === 'end') && isPagedMenuScreen(this.state.screen)) {
+      this.jumpSelection(normalized.name === 'home' ? 'first' : 'last');
       return this.invalidate();
     }
     if (normalized.name === 'end' && !isEditorScreen(this.state.screen)) {
@@ -184,11 +185,6 @@ export class ZipflowController {
   }
 
   async dispatch(action) {
-    if (action.type === 'dismiss-help-toast') {
-      this.state.helpToast = null;
-      this.invalidate();
-      return;
-    }
     if (action.type === 'activity-follow-latest') {
       followLatestActivity(this);
       this.invalidate();
@@ -317,15 +313,7 @@ export class ZipflowController {
   }
 
   toast(message, level = 'info', ttl = 3, detail = '') {
-    const body = String(detail ?? '');
-    if (body.includes('\n') || `${message} ${body}`.length > 110) {
-      this.state.helpToast = {
-        title: String(message ?? 'Notice'),
-        lines: body ? body.split(/\r?\n/) : [String(message ?? '')],
-        level,
-        expiresAt: Date.now() + Math.max(4, ttl) * 1000,
-      };
-    } else this.state.overlays?.toast?.(message, level, ttl, detail);
+    this.state.overlays?.toast?.(String(message ?? ''), level, ttl, String(detail ?? ''));
     this.invalidate();
   }
 
@@ -474,6 +462,14 @@ export class ZipflowController {
     this.state.selectedIndex = next;
   }
 
+  jumpSelection(target) {
+    const items = this.state.menuItems ?? [];
+    if (!items.length) return;
+    const indexes = target === 'last' ? [...items.keys()].reverse() : [...items.keys()];
+    const next = indexes.find((index) => !items[index]?.disabled);
+    if (next !== undefined) this.state.selectedIndex = next;
+  }
+
   pageSelection(direction) {
     const items = this.state.menuItems;
     if (!items.length) return;
@@ -483,4 +479,8 @@ export class ZipflowController {
     while (items[next]?.disabled && next >= 0 && next < items.length - 1) next += step;
     if (!items[next]?.disabled) this.state.selectedIndex = next;
   }
+}
+
+function isInterruptKey(key) {
+  return key?.name === 'ctrl-c' || (key?.ctrl && key?.name === 'c') || key?.name === 'zipflow-interrupt' || key?.name === 'ctrl-z';
 }

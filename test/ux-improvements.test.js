@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { writeFile } from 'node:fs/promises';
-import { renderToString } from 'terlio.js';
+import { createOverlayManager, renderToString } from 'terlio.js';
 import { createInitialState, appendMessage, refreshMenuSearch, replaceLastMessage, setScreen } from '../src/app/state.js';
 import { ZipflowController } from '../src/app/controller.js';
 import { captureRunSettings, activeRunSettings } from '../src/app/runtime-settings.js';
@@ -111,22 +111,23 @@ test('sensitive path inspection avoids common template false positives', () => {
   assert.equal(paths.includes('fixtures/credentials.sample.json'), false);
 });
 
-test('context help is a scrollable dismissible toast and never adds an Activity entry', async () => {
+test('context help uses a blocking Terlio help overlay and never adds an Activity entry', () => {
   const state = createInitialState();
   state.project = projectFixture();
   const longHelp = Array.from({ length: 30 }, (_, index) => `Detailed help line ${index + 1}`).join(' ');
   setScreen(state, 'home', { items: [{ id: 'action', label: 'Action', description: longHelp }], status: 'Ready' });
   const controller = new ZipflowController(state);
   controller.invalidate = () => {};
+  state.overlays = createOverlayManager();
 
   controller.showContextHelp();
   assert.equal(state.messages.length, 0);
-  renderToString(renderZipflow({ state, width: 60, height: 20 }), { width: 60, height: 20 });
-  assert.ok(state.helpToast.maxScroll > 0);
-  await controller.handleKey({ name: 'down' });
-  assert.equal(state.helpToast.scroll, 1);
-  await controller.handleKey({ name: 'escape' });
-  assert.equal(state.helpToast, null);
+  assert.equal(state.overlays.top().type, 'help');
+  const output = renderToString(renderZipflow({ state, width: 60, height: 20 }), { width: 60, height: 20 });
+  assert.match(output, /Help · Action/);
+  assert.doesNotMatch(output, /PgUp|PgDn|page-up|page-down/i);
+  state.overlays.handleKey({ name: 'escape' });
+  assert.equal(state.overlays.top(), null);
 });
 
 test('empty archive input exposes existing recent archives only after explicit Tab', async () => {

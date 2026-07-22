@@ -1,5 +1,5 @@
 import { exists } from '../utils/fs.js';
-import { displayPath } from '../utils/paths.js';
+import { displayPath, expandHome } from '../utils/paths.js';
 import { listProjectRuns, loadRunRecord } from '../runs/store.js';
 import { compactPlanLine, formatDuration, runStatusLabel } from '../ui/format.js';
 import { buildRunAnalytics } from '../history/analytics.js';
@@ -47,9 +47,7 @@ export async function showRunHistory(controller, selectedIndex = null) {
   if (filtered.length === 0) items.push({ id: 'history-empty', label: 'No runs match these filters', disabled: true });
   items.push({ id: 'history-back', label: 'Back to project' });
   controller.showMenu('run-history', items, 'Project run history', selectedIndex, [
-    `${filtered.length} of ${runs.length} recent run${runs.length === 1 ? '' : 's'} shown`,
-    'Run type is shown first. Manual tests and deployments do not contain archive file diffs.',
-    'Use / to search by type, archive, run ID, commit message, or revision.',
+    `${filtered.length} of ${runs.length} recent run${runs.length === 1 ? '' : 's'} · / searches archive, run ID, commit, or revision`,
   ]);
 }
 
@@ -145,10 +143,11 @@ export async function repeatLastArchive(controller) {
   if (!runId) return controller.message('No previous archive', ['This workflow has no prior run to repeat.'], 'warning');
   const run = await loadRunRecord(runId);
   if (!run) return controller.message('Previous run is missing', [runId], 'warning');
-  const candidates = [
-    run.archiveDisposition?.action === 'moved' ? run.archiveDisposition.path : null,
+  const candidates = [...new Set([
+    run.archiveDisposition?.action === 'deleted' ? null : run.archiveDisposition?.path,
+    run.archiveDisposition?.action === 'deleted' ? null : run.archiveDisposition?.originalPath,
     run.archivePath,
-  ].filter(Boolean);
+  ].filter(Boolean).map((candidate) => expandHome(String(candidate))))];
   for (const candidate of candidates) {
     if (await exists(candidate)) {
       controller.message('Repeating previous archive', [
@@ -182,7 +181,7 @@ function historyDescription(run) {
 }
 
 function archiveName(run) {
-  const value = run.archiveDisposition?.action === 'moved' ? run.archiveDisposition.path : run.archivePath;
+  const value = run.archiveDisposition?.path || run.archivePath;
   return String(value || 'archive.zip').split(/[\\/]/).at(-1);
 }
 

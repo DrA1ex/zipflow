@@ -52,7 +52,7 @@ export async function completeRun(controller, status) {
   }
   await releaseRunResources(controller);
   controller.message('Final summary', finalSummaryLines(state), 'summary', {
-    collapsedSummary: `Run complete · ${appliedPlanLine(state)} · ${checkSummaryLine(state.run.checks)}`, 
+    collapsedSummary: `Run complete · ${appliedPlanLine(state)} · ${checkSummaryLine(state.run.checks)}`,
   });
   clearRunSettings(state);
   showCompleted(controller);
@@ -78,7 +78,7 @@ export function finalSummaryLines(state) {
     ? ` · Autopilot ${state.run.autonomy.mode}${state.run.autonomy.paused ? ' paused' : ''}`
     : '';
   lines.push(
-    `${appliedPlanLine(state)} · ${checkSummaryLine(state.run.checks)} · Deployment ${deploymentResultLine(state)} · Source archive ${archiveDispositionLine(state.run.archiveDisposition)}${autonomy}`, 
+    `${appliedPlanLine(state)} · ${checkSummaryLine(state.run.checks)} · Deployment ${deploymentResultLine(state)} · Source archive ${archiveDispositionLine(state.run.archiveDisposition)}${autonomy}`,
     `Commit ${state.run.commit ? `${state.run.commit.revision} ${firstLine(state.run.commit.message)}` : state.run.status === 'no_changes' ? 'skipped · no changes' : 'not created'} · Report ${displayPath(runReportPath(state.run.id))}`,
   );
   return lines;

@@ -70,7 +70,7 @@ function treeItem(draft, entry) {
     id: `export-tree-${entry.kind}:${encodeURIComponent(entry.path)}`,
     path: entry.path,
     kind: entry.kind,
-    label: dimIfExcluded(`${marker} ${entry.name}${entry.kind === 'directory' ? '/  ›' : ''}`, selectedCount === 0),
+    label: dimIfExcluded(`${marker} ${entry.name}${entry.kind === 'directory' ? '/ ›' : ''}`, selectedCount === 0),
     description,
     context: entry.kind === 'directory' ? `${description} · Enter opens this folder` : description,
     help: entry.kind === 'directory' ? `${description}. Press Enter to open this folder or Space to toggle the whole folder.` : `${description}. Press Space to include or exclude this file.`,

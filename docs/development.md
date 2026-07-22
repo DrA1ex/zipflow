@@ -58,7 +58,7 @@ npm run check
 npm test
 ```
 
-Regression fixes should include targeted automated tests so unit or integration checks catch the same class of problem before E2E or manual use.
+Regression fixes should include targeted automated tests so unit or integration checks catch the same class of problem before E2E or manual use. Node test workers automatically use a process-specific temporary Zipflow home unless `ZIPFLOW_HOME` is explicitly set, so the test suite cannot overwrite the developer's real settings or credentials.
 
 ## Package inspection
 

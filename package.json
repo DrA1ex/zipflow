@@ -1,6 +1,6 @@
 {
   "name": "zipflow",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Interactive terminal workflow for safely applying source archives",
   "type": "module",
   "bin": {
@@ -26,6 +26,7 @@
   "files": [
     "bin",
     "src",
+    "docs",
     "README.md",
     "ARCHITECTURE.md",
     "LICENSE"

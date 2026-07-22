@@ -4,7 +4,7 @@ import { readJson, writeJsonAtomic } from '../utils/fs.js';
 import { ensureZipflowHome, getZipflowHome } from '../workflow/store.js';
 import { canonicalModelId, modelIdentityKey } from '../llm/model-identity.js';
 
-export const SETTINGS_VERSION = 13;
+export const SETTINGS_VERSION = 14;
 export const THEME_NAMES = Object.keys(themes);
 export const LLM_PROVIDERS = ['disabled', 'ollama', 'lmstudio'];
 export const LLM_LANGUAGES = ['English', 'Russian', 'German', 'French', 'Spanish', 'Chinese', 'Japanese'];
@@ -50,20 +50,28 @@ export const DEFAULT_SETTINGS = Object.freeze({
 let settingsWriteQueue = Promise.resolve();
 
 export async function loadSettings() {
+  await settingsWriteQueue;
   await ensureZipflowHome();
+  const credentials = await readSettingsFile(credentialsPath());
   const primary = await readSettingsFile(settingsPath());
-  if (primary) return normalizeSettings(primary);
+  if (primary) return restoreCredentialToken(normalizeSettings(primary), credentials);
   const backup = await readSettingsFile(settingsBackupPath());
   if (backup) {
-    const restored = normalizeSettings(backup);
+    const restored = restoreCredentialToken(normalizeSettings(backup), credentials);
     await writeJsonAtomic(settingsPath(), restored);
     return restored;
   }
-  return normalizeSettings(null);
+  return restoreCredentialToken(normalizeSettings(null), credentials);
 }
 
-export function saveSettings(settings) {
-  return enqueueSettingsWrite(async () => writeSettingsValue(normalizeSettings(settings)));
+export function saveSettings(settings, { allowClearToken = false } = {}) {
+  return enqueueSettingsWrite(async () => {
+    const stored = await readSettingsFile(settingsPath()) ?? await readSettingsFile(settingsBackupPath());
+    const current = normalizeSettings(stored);
+    const incoming = normalizeSettings(settings);
+    if (!allowClearToken && !incoming.llmApiToken && current.llmApiToken) incoming.llmApiToken = current.llmApiToken;
+    return writeSettingsValue(normalizeSettings({ ...current, ...incoming }), { allowClearToken });
+  });
 }
 
 export function updateSettings(patch, { allowClearToken = false, baseSettings = null } = {}) {
@@ -72,7 +80,7 @@ export function updateSettings(patch, { allowClearToken = false, baseSettings = 
     const current = normalizeSettings({ ...(baseSettings ?? {}), ...(stored ?? {}) });
     const nextPatch = { ...(patch ?? {}) };
     if (!allowClearToken && nextPatch.llmApiToken === '' && current.llmApiToken) delete nextPatch.llmApiToken;
-    return writeSettingsValue(normalizeSettings({ ...current, ...nextPatch }));
+    return writeSettingsValue(normalizeSettings({ ...current, ...nextPatch }), { allowClearToken });
   });
 }
 
@@ -82,12 +90,22 @@ function enqueueSettingsWrite(task) {
   return result;
 }
 
-async function writeSettingsValue(value) {
+async function writeSettingsValue(value, { allowClearToken = false } = {}) {
   await ensureZipflowHome();
   const current = await readSettingsFile(settingsPath());
+  const credentials = await readSettingsFile(credentialsPath());
+  const protectedToken = typeof credentials?.llmApiToken === 'string' ? credentials.llmApiToken : '';
+  if (!allowClearToken && !value.llmApiToken && protectedToken) value = { ...value, llmApiToken: protectedToken };
   if (current) await writeJsonAtomic(settingsBackupPath(), normalizeSettings(current));
   await writeJsonAtomic(settingsPath(), value);
+  if (value.llmApiToken) await writeJsonAtomic(credentialsPath(), { version: 1, llmApiToken: value.llmApiToken });
+  else if (allowClearToken) await writeJsonAtomic(credentialsPath(), { version: 1, llmApiToken: '' });
   return value;
+}
+
+function restoreCredentialToken(settings, credentials) {
+  const token = typeof credentials?.llmApiToken === 'string' ? credentials.llmApiToken : '';
+  return !settings.llmApiToken && token ? { ...settings, llmApiToken: token } : settings;
 }
 
 export function normalizeSettings(settings) {
@@ -231,6 +249,10 @@ export function settingsPath() {
 
 export function settingsBackupPath() {
   return path.join(getZipflowHome(), 'settings.backup.json');
+}
+
+export function credentialsPath() {
+  return path.join(getZipflowHome(), 'credentials.json');
 }
 
 async function readSettingsFile(target) {

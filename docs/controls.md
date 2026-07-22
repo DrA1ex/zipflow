@@ -11,12 +11,13 @@ Esc         go back
 Tab         complete paths or switch Settings pane focus
 Shift+Tab   move Settings focus backward
 ← / →       return from or open a Settings category
-Page Up     scroll Activity upward
-Page Down   scroll Activity downward
-Home        move to the beginning where supported
-End         return to the latest output
+Page Up     move or scroll one page upward
+Page Down   move or scroll one page downward
+Home        move to the first item where supported
+End         move to the last item or latest output
 Ctrl+B      open or close global settings
 Ctrl+T      toggle native terminal text selection
+G           reveal the current run report where available
 Ctrl+C      cancel the active operation; exit while idle
 ?           show context-sensitive help
 ```
@@ -35,7 +36,7 @@ During archive inspection, LLM generation or decisions, checks, deployment, ZIP 
 2. a second press while cancellation is still pending force-stops owned child processes but still does not exit;
 3. after the operation reaches a stable screen, a later `Ctrl+C` exits normally.
 
-Filesystem transactions defer interruption until the current atomic step can complete or be restored.
+Filesystem transactions defer interruption until the current atomic step can complete or be restored. Zipflow intercepts the workspace-level `Ctrl+C` event before Terlio's default exit behavior so an owned operation always receives the cancellation request first.
 
 Cancelling an autonomous decision pauses autopilot for the current run and returns to the equivalent manual checkpoint. It can be resumed explicitly when the screen offers **Resume autopilot**.
 
@@ -43,9 +44,16 @@ Cancelling an autonomous decision pauses autopilot for the current run and retur
 
 Every action list reserves a stable one-line context dock below its choices. Moving between short and long descriptions does not change panel height. Long descriptions are clipped in the dock, while `?` opens the complete context-sensitive explanation.
 
-The help toast wraps to the available terminal size, becomes scrollable when necessary, closes with a click or `Esc`, and expires automatically.
+Context help opens as a native blocking Terlio overlay with the active accent, background dimming, and shadow. It wraps to the available terminal size, becomes scrollable when necessary, and closes with a click or `Esc`. Short transient notifications use Terlio's native toast overlay.
 
 Editors use muted placeholders with a visible cursor so examples cannot be mistaken for entered text.
+
+
+## Active-list navigation
+
+When a file list, run history, run details, analytics, checks list, or another paged choice list has focus, `Page Up`, `Page Down`, `Home`, and `End` navigate that list instead of Activity. Run-history panels expand according to their content: small menus remain compact, while larger history screens expose up to sixteen rows when terminal height permits.
+
+When a run report exists, press `G` to reveal it in the platform file manager. On macOS the report itself is selected; on Linux Zipflow opens its containing directory.
 
 ## Activity
 

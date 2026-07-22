@@ -32,7 +32,7 @@ export function renderSettings(state, width, height, theme, animationFrame = 0) 
       items: view.definitions,
       selectedIndex: view.categoryIndex,
       windowSize: Math.max(2, height - 6),
-      getLabel: (item) => `${item.label}  ›`,
+      getLabel: (item) => item.label,
       getDescription: () => '',
       wrapItems: false,
       maxItemLines: 1,
@@ -102,8 +102,9 @@ function renderSettingsPage(state, view, width, height, theme, animationFrame) {
     active: view.focus !== 'categories' && !view.modal,
     height,
     theme,
+    footerNode: ContextDock({ text: parameterDescription || pageContext, rows: 1, width: Math.max(20, width - 4), theme }),
+    footerMinHeight: 1,
     children: [
-      ContextDock({ text: pageContext, rows: 2, width: Math.max(20, width - 4), theme }),
       SelectList({
         title: showingChoices ? 'Options' : 'Parameters',
         items,
@@ -124,7 +125,6 @@ function renderSettingsPage(state, view, width, height, theme, animationFrame) {
           index,
         }),
       }),
-      ContextDock({ text: parameterDescription, rows: 1, width: Math.max(20, width - 4), theme }),
     ].filter(Boolean),
   });
 }
@@ -147,8 +147,9 @@ function renderModelConfigPage(state, view, width, height, theme, animationFrame
     active: !state.settingsPanel?.modal,
     height,
     theme,
+    footerNode: ContextDock({ text: parameterDescription || pageContext, rows: 1, width: Math.max(20, width - 4), theme, token: view.error ? 'danger' : 'text' }),
+    footerMinHeight: 1,
     children: [
-      ContextDock({ text: pageContext, rows: 2, width: Math.max(20, width - 4), theme, token: view.error ? 'danger' : 'text' }),
       SelectList({
         title: choices ? 'Options' : 'Load configuration',
         items,
@@ -172,7 +173,6 @@ function renderModelConfigPage(state, view, width, height, theme, animationFrame
           index,
         }),
       }),
-      ContextDock({ text: parameterDescription, rows: 1, width: Math.max(20, width - 4), theme }),
     ].filter(Boolean),
   });
 }
@@ -186,7 +186,7 @@ function parameterLabel(state, item, theme, animationFrame) {
   if (item.type === 'section') return color(theme, 'accent', `── ${item.label} ──`);
   if (item.type === 'stat') return `${color(theme, 'textMuted', item.label)}: ${item.value}`;
   const label = item.value ? `${item.label}: ${item.value}` : item.label;
-  return ['choice', 'input', 'subpage'].includes(item.type) ? `${label}  ›` : label;
+  return ['choice', 'input', 'subpage'].includes(item.type) ? `${label} ›` : label;
 }
 
 function choiceLabel(state, item, theme, animationFrame) {
@@ -199,7 +199,7 @@ function choiceLabel(state, item, theme, animationFrame) {
   if (item.model) {
     const selected = Boolean(item.selected);
     const status = item.model.loaded ? 'Loaded' : 'Not loaded';
-    return `${selected ? '●' : '○'} ${item.label} ${color(theme, 'textMuted', `· ${status}`)}  ›`;
+    return `${selected ? '●' : '○'} ${item.label} ${color(theme, 'textMuted', `· ${status}`)} ›`;
   }
   if (!item.settingId) return item.label;
   const selected = item.selected || state.settings[item.settingId] === item.value;
@@ -252,7 +252,7 @@ function renderSettingsModal({ content, modal, state, width, height, theme }) {
   };
   const manager = {
     toasts: [],
-    top: () => ({ type: 'modal', width: modalWidth + 2, opaqueRows: true, render: buildModal }),
+    top: () => ({ type: 'modal', width: modalWidth + 2, opaqueRows: true, shadow: true, render: buildModal }),
   };
   return OverlayHost({ content, manager, theme, width, height, dim: true, toastBottomMargin: 0 });
 }

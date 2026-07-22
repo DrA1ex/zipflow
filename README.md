@@ -189,11 +189,13 @@ Space       toggle or select the current option
 Enter       open, continue, or submit
 Esc         go back or open the project menu
 Tab         complete paths or switch Settings panes
-Page Up     scroll upward
-Page Down   scroll downward
-End         return to the latest Activity entry
+Page Up     move or scroll one page upward
+Page Down   move or scroll one page downward
+Home        move to the first item where supported
+End         move to the last item or latest Activity entry
 Ctrl+B      open or close global settings
 Ctrl+T      toggle native terminal text selection
+G           reveal the current run report where available
 Ctrl+C      cancel an active operation; exit while idle
 ```
 

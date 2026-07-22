@@ -76,8 +76,7 @@ export function renderZipflow({ state, width, height, animationFrame = 0 }) {
     theme,
     children: shell,
   });
-  const withHelp = renderHelpToastOverlay(state, responsive, width, height, theme);
-  return OverlayHost({ content: withHelp, manager: state.overlays, theme, width, height, toastBottomMargin: 2 });
+  return OverlayHost({ content: responsive, manager: state.overlays, theme, width, height, toastBottomMargin: 2 });
 }
 
 function renderWorkflow(state, width, mainHeight, theme) {
@@ -180,19 +179,25 @@ function renderCurrent(state, width, height, theme) {
   const inlineDescriptions = showsInlineDescriptions(state.screen);
   const contextRows = inlineDescriptions ? 0 : contextRowsForScreen(state.screen);
   const selectedContext = inlineDescriptions ? '' : contextText(selected);
+  const introRows = intro.length ? Math.min(3, intro.length) + 1 : 0;
+  const windowSize = Math.max(2, height - 4 - introRows - contextRows);
+  state.menuPageSize = windowSize;
+  const footerNode = ContextDock({ text: selectedContext, rows: contextRows, width: Math.max(20, width - 6), theme });
   return WorkspacePane({
     title: ` ${screenTitle(state)} `,
     active: true,
     height,
     theme,
+    footerNode,
+    footerMinHeight: contextRows,
     children: [
-      ...intro.map((line, index) => Text(index === 0 ? color(theme, 'title', line) : color(theme, 'textMuted', line), { wrap: true })),
+      ...intro.slice(0, 3).map((line, index) => Text(index === 0 ? color(theme, 'title', line) : color(theme, 'textMuted', line), { wrap: true })),
       intro.length ? Text('') : null,
       SelectList({
         title: 'Choose',
         items: state.menuItems,
         selectedIndex: state.selectedIndex,
-        windowSize: Math.max(2, height - 5 - Math.min(6, intro.length) - contextRows),
+        windowSize,
         getLabel: (item) => menuItemLabel(item),
         getDescription: (item) => inlineDescriptions ? item.description ?? '' : '',
         getDisabled: (item) => item.disabled,
@@ -208,7 +213,6 @@ function renderCurrent(state, width, height, theme) {
           event.preventDefault();
         },
       }),
-      ContextDock({ text: selectedContext, rows: contextRows, width: Math.max(20, width - 6), theme }),
     ].filter(Boolean),
   });
 }
@@ -216,7 +220,7 @@ function renderCurrent(state, width, height, theme) {
 function menuItemLabel(item) {
   const label = String(item?.label ?? '');
   if (!label || /›\s*$/.test(label)) return label;
-  if (item?.navigate || opensSubscreen(item?.id)) return `${label}  ›`;
+  if (item?.navigate || opensSubscreen(item?.id)) return `${label} ›`;
   return label;
 }
 
@@ -397,8 +401,9 @@ function footerHints(state) {
     if (['archive-input', 'project-path-input', 'export-path'].includes(state.screen)) return ['Tab complete', '↑/↓ choose', 'Enter confirm', 'Esc back'];
     return ['Enter confirm', 'Esc back'];
   }
-  if (isSearchableScreen(state.screen)) return ['↑/↓ choose', 'Enter select', '/ search', '? help'];
-  return ['↑/↓ choose', 'Enter select', '? help', 'Ctrl+B settings'];
+  const report = state.run?.id ? ['G report'] : [];
+  if (isSearchableScreen(state.screen)) return ['↑/↓ choose', 'PgUp/PgDn', 'Home/End', 'Enter select', '/ search', '? help', ...report];
+  return ['↑/↓ choose', 'Enter select', '? help', ...report, 'Ctrl+B settings'];
 }
 
 function headerStats(state) {
@@ -412,15 +417,22 @@ function headerStats(state) {
 }
 
 function preferredPromptHeight(state, width = 80, mainHeight = 20) {
-  const maximum = Math.max(7, Math.floor(mainHeight * 0.6));
-  if (state.busy) return Math.min(maximum, 8);
-  if (state.screen === 'setup-review') return Math.min(maximum, 8);
+  const compactMaximum = Math.max(7, Math.floor(mainHeight * 0.62));
+  if (state.busy) return Math.min(compactMaximum, 8);
+  if (state.screen === 'setup-review') return Math.min(compactMaximum, 8);
   if (['checks-running', 'manual-checks-running'].includes(state.screen)) {
-    return Math.min(maximum, Math.max(9, Math.min(12, (state.checkRuntime?.checks?.length ?? 0) + 5)));
+    return Math.min(compactMaximum, Math.max(9, Math.min(12, (state.checkRuntime?.checks?.length ?? 0) + 5)));
   }
-  if (['deploy-running', 'manual-deploy-running'].includes(state.screen)) return Math.min(maximum, 9);
-  if (isEditorScreen(state.screen)) return Math.min(maximum, state.editorContext?.multiline ? 13 : 9);
-  return Math.min(maximum, 11);
+  if (['deploy-running', 'manual-deploy-running'].includes(state.screen)) return Math.min(compactMaximum, 9);
+  if (isEditorScreen(state.screen)) return Math.min(compactMaximum, state.editorContext?.multiline ? 13 : 9);
+  const count = state.menuItems?.length ?? 0;
+  const historyScreen = ['run-history', 'run-details', 'run-file-groups', 'run-file-list', 'run-analytics'].includes(state.screen);
+  const desiredItems = count <= 3 ? count : historyScreen ? Math.min(16, Math.max(6, count)) : Math.min(9, Math.max(4, count));
+  const introRows = state.panelIntro?.length ? Math.min(3, state.panelIntro.length) + 1 : 0;
+  const chromeRows = 4 + introRows + contextRowsForScreen(state.screen);
+  const requested = Math.max(7, desiredItems + chromeRows);
+  const maximum = historyScreen ? Math.max(7, mainHeight - 4) : compactMaximum;
+  return Math.min(maximum, requested);
 }
 
 function isEditorScreen(screen) {
@@ -447,42 +459,6 @@ function renderMenuSearchOverlay(state, content, width, height, promptHeight, th
     Text(color(theme, 'textMuted', `${state.menuItems.length} matching item${state.menuItems.length === 1 ? '' : 's'} · Enter keeps filter · Esc clears/closes`), { wrap: true }),
   );
   return BottomOverlay({ content, overlay, height, bottom: Math.max(1, promptHeight - 1), left: 2, right: 2, width: overlayWidth, align: 'center', opaque: true });
-}
-function renderHelpToastOverlay(state, content, width, height, theme) {
-  const toast = state.helpToast;
-  if (!toast) return content;
-  const toastWidth = Math.max(34, Math.min(width - 4, Math.min(82, Math.floor(width * 0.72))));
-  const contentWidth = Math.max(20, toastWidth - 4);
-  const wrapped = (toast.lines ?? []).flatMap((line) => wrapText(String(line ?? ''), contentWidth));
-  const toastHeight = Math.max(5, Math.min(18, Math.min(Math.floor(height * 0.55), wrapped.length + 3)));
-  const visibleRows = Math.max(1, toastHeight - 3);
-  const maxScroll = Math.max(0, wrapped.length - visibleRows);
-  toast.maxScroll = maxScroll;
-  toast.scroll = clamp(toast.scroll ?? 0, 0, maxScroll);
-  const node = ScrollPane({
-    title: ` ${toast.title || 'Help'} `,
-    lines: wrapped.length ? wrapped : ['No additional help is available.'],
-    width: toastWidth,
-    height: toastHeight,
-    scroll: toast.scroll,
-    footer: maxScroll ? `Wheel/↑/↓ scroll · Click or Esc close` : 'Click or Esc to close',
-    theme,
-    pointerId: 'zipflow:help-toast',
-    onWheel: (event) => {
-      toast.scroll = scrollBy(toast.scroll, event.deltaY, maxScroll);
-      event.preventDefault();
-      event.stopPropagation?.();
-    },
-    onClick: (event) => {
-      state.dispatch?.({ type: 'dismiss-help-toast' });
-      event.preventDefault();
-      event.stopPropagation?.();
-    },
-  });
-  return BottomOverlay({ content, overlay: node, height, bottom: 2, left: 2, right: 2, width: toastWidth, align: 'right', opaque: true });
-}
-function showsInlineDescriptions(_screen) {
-  return false;
 }
 function contextRowsForScreen(_screen) {
   return 1;

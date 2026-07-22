@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { renderToString, stripAnsi } from 'terlio.js';
+import { createOverlayManager, renderToString, stripAnsi } from 'terlio.js';
 import { createInitialState } from '../src/app/state.js';
 import { ZipflowController } from '../src/app/controller.js';
 import { initializePlanSelections, selectedPlanCounts, selectedPlanItems } from '../src/app/plan-selection.js';
@@ -195,15 +195,15 @@ test('process SIGINT cancels an active operation and exits only when idle', asyn
   detach();
 });
 
-test('long notices use the adaptive scrollable help toast instead of a clipped one-line toast', () => {
+test('long notices use the native Terlio toast with shadow and content wrapping', () => {
   const { state, controller } = fixtureController();
-  controller.toast('Long notice', 'warning', 5, Array.from({ length: 20 }, (_, index) => `Detailed line ${index + 1}`).join('\n'));
-  assert.equal(state.helpToast.title, 'Long notice');
-  assert.equal(state.helpToast.lines.length, 20);
+  state.overlays = createOverlayManager();
+  controller.toast('Long notice', 'warning', 5, Array.from({ length: 8 }, (_, index) => `Detailed line ${index + 1}`).join(' '));
+  assert.equal(state.overlays.toasts.length, 1);
   const output = stripAnsi(renderToString(renderZipflow({ state, width: 90, height: 26 }), { width: 90, height: 26 }));
   assert.match(output, /Long notice/);
-  assert.ok(state.helpToast.maxScroll > 0);
-  assert.doesNotMatch(output, /Detailed line 20/);
+  assert.match(output, /Detailed line/);
+  assert.doesNotMatch(output, /PgUp|PgDn|page-up|page-down/i);
 });
 
 
@@ -213,8 +213,11 @@ test('truncated context advertises full help and question mark opens the complet
   controller.showMenu('run-history', [{ id: 'long-help', label: 'Long item', context: full, help: full }], 'Run history');
   const output = stripAnsi(renderToString(renderZipflow({ state, width: 72, height: 22 }), { width: 72, height: 22 }));
   assert.match(output, /\[\? full help\]/);
+  state.overlays = createOverlayManager();
   await controller.handleKey({ printable: true, text: '?', name: '?' });
-  assert.equal(state.helpToast.lines.join(' '), full);
+  assert.equal(state.overlays.top().type, 'help');
+  const help = stripAnsi(renderToString(renderZipflow({ state, width: 72, height: 22 }), { width: 72, height: 22 }));
+  assert.match(help, /deliberately long explanation/);
 });
 
 test('export tree marks navigable folders and explains safe-selection actions', () => {

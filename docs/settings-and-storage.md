@@ -27,6 +27,14 @@ Before replacing a valid settings file, Zipflow writes:
 ~/.zipflow/settings.backup.json
 ```
 
+The local LLM bearer token is also mirrored to a small credential sidecar:
+
+```text
+~/.zipflow/credentials.json
+```
+
+This prevents an older or partially migrated settings snapshot from silently clearing the token. Explicit token removal still clears both locations.
+
 If the primary settings file becomes unreadable, the backup is restored automatically. LLM credentials, model and loaded-instance selection, source archive policy, storage directories, and retention limits remain preserved across compatible patch upgrades.
 
 The default maximum rollback-backup storage remains 2 GB.
@@ -114,6 +122,7 @@ By default, Zipflow uses:
 ~/.zipflow/
   settings.json
   settings.backup.json
+  credentials.json
   archive-index.json
   workflows/
   runs/

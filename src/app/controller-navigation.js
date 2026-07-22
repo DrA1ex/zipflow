@@ -1,20 +1,15 @@
+import { openHelpOverlay } from '../ui/help-overlay.js';
 import { handleInputEditorKey } from 'terlio.js';
 import { refreshMenuSearch } from './state.js';
 
 export function showContextHelp(controller) {
   const { state } = controller;
-  const item = state.menuItems[state.selectedIndex];
-  if (!item) return;
-  const summary = item.context || item.description || 'No additional description is available for this action.';
-  const lines = [summary];
-  if (item.help && item.help !== summary) lines.push('', item.help);
-  state.helpToast = {
-    title: `Help · ${item.label}`,
-    lines,
-    level: 'info',
-    expiresAt: Date.now() + 12_000,
-  };
-  controller.invalidate();
+  const selected = state.menuItems?.[state.selectedIndex];
+  const title = selected?.label || state.editorContext?.label || state.status || 'Help';
+  const summary = selected?.context || selected?.disabledReason || selected?.description || state.editorContext?.context
+    || state.editorContext?.instructions?.join(' ') || 'No additional help is available.';
+  const details = selected?.help && selected.help !== summary ? ['', selected.help] : [];
+  return openHelpOverlay(controller, { title: `Help · ${title.replace(/\s*›\s*$/, '')}`, lines: [summary, ...details] });
 }
 
 export function beginMenuSearch(controller) {

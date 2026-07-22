@@ -75,6 +75,9 @@ export async function testSelectedModel(controller) {
       error: null,
     };
     state.settings = await updateSettings({
+      llmProvider: settings.llmProvider,
+      llmModel: canonicalModel,
+      llmDecisionCompatibility: compatibility,
       llmDecisionCompatibilityByModel: {
         ...(state.settings.llmDecisionCompatibilityByModel ?? {}),
         [modelIdentityKey(settings.llmProvider, canonicalModel)]: compatibility,
@@ -108,6 +111,9 @@ export async function testSelectedModel(controller) {
         error: error.message,
       };
       state.settings = await updateSettings({
+        llmProvider: settings.llmProvider,
+        llmModel: canonicalModel,
+        llmDecisionCompatibility: compatibility,
         llmDecisionCompatibilityByModel: {
           ...(state.settings.llmDecisionCompatibilityByModel ?? {}),
           [modelIdentityKey(settings.llmProvider, canonicalModel)]: compatibility,

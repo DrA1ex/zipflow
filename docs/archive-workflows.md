@@ -111,7 +111,7 @@ Every archive update records the archive hash. In Manual mode, selecting a previ
 
 Autopilot rebuilds the plan against the current project. When no content changes remain, it records a `duplicate_skipped` run and returns to archive waiting without checks, commit, deployment, or another LLM decision.
 
-**Repeat last archive** deliberately bypasses the normal duplicate prompt and rebuilds the plan against the current working tree. This is useful after changing workflow settings or correcting an external problem.
+**Repeat last archive** deliberately bypasses the normal duplicate prompt and rebuilds the plan against the current working tree. If the completed run moved the source ZIP into managed storage, Zipflow repeats the managed copy. If the source was kept in place, it repeats the original path. Recorded fallback locations are checked only when the preferred path is unavailable. This is useful after changing workflow settings or correcting an external problem.
 
 ## Source archive disposition
 

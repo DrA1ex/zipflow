@@ -5,6 +5,7 @@ import { updateSettings } from '../settings/store.js';
 import { ensureDir } from '../utils/fs.js';
 import { expandHome } from '../utils/paths.js';
 import { setScreen } from './state.js';
+import { openHelpOverlay } from '../ui/help-overlay.js';
 import {
   handleModelSettingsKey, openModelConfiguration, selectModelChoice, selectModelParameter, settingsModelView,
 } from './settings-model.js';
@@ -199,18 +200,12 @@ function showSettingsHelp(controller) {
     const choices = currentChoices(state);
     item = choices[currentChoiceIndex(state, choices, parameter)] ?? parameter ?? definition;
     title = parameter?.label ?? definition.label;
-  } else if (panel.focus?.startsWith('model-config')) {
-    item = settingsModelView(state)?.activeParameter ?? definition;
-  }
+  } else if (panel.focus?.startsWith('model-config')) item = settingsModelView(state)?.activeParameter ?? definition;
   const summary = item?.disabledReason || item?.description || definition.description || 'No additional help is available.';
-  state.helpToast = {
+  return openHelpOverlay(controller, {
     title: `Help · ${title}`,
     lines: [summary, ...(item?.help && item.help !== summary ? ['', item.help] : [])],
-    level: 'info',
-    expiresAt: Date.now() + 12_000,
-  };
-  controller.invalidate();
-  return true;
+  });
 }
 
 export async function selectSetting(controller, index) {

@@ -19,7 +19,7 @@ export function isSearchableScreen(screen) {
 
 export function isPagedMenuScreen(screen) {
   return [
-    'plan-files', 'export-select', 'export-files', 'run-history', 'run-file-list', 'setup-checks',
+    'plan-files', 'export-select', 'export-files', 'run-history', 'run-details', 'run-file-groups', 'run-file-list', 'run-analytics', 'setup-checks',
     'run-history-type-filter', 'run-history-status-filter',
   ].includes(screen);
 }

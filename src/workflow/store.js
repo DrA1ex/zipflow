@@ -6,7 +6,9 @@ import { canonicalPath } from '../utils/paths.js';
 import { normalizeWorkflow, WORKFLOW_VERSION } from './defaults.js';
 
 export function getZipflowHome() {
-  return process.env.ZIPFLOW_HOME ? path.resolve(process.env.ZIPFLOW_HOME) : path.join(os.homedir(), '.zipflow');
+  if (process.env.ZIPFLOW_HOME) return path.resolve(process.env.ZIPFLOW_HOME);
+  if (process.env.NODE_TEST_CONTEXT) return path.join(os.tmpdir(), `zipflow-test-home-${process.pid}`);
+  return path.join(os.homedir(), '.zipflow');
 }
 
 export async function ensureZipflowHome() {

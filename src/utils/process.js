@@ -20,6 +20,7 @@ export async function runProcess(command, args = [], {
       env: { ...process.env, ...env },
       shell,
       stdio: ['pipe', 'pipe', 'pipe'],
+      detached: process.platform !== 'win32',
     });
     activeChildren.add(child);
     let stdout = '';
@@ -87,13 +88,11 @@ export async function runShell(command, options = {}) {
 
 export async function terminateActiveProcesses({ graceMs = 500 } = {}) {
   const children = [...activeChildren];
-  for (const child of children) {
-    if (!child.killed) child.kill('SIGTERM');
-  }
+  for (const child of children) terminateChild(child, 'SIGTERM');
   if (!children.length) return;
   await new Promise((resolve) => setTimeout(resolve, graceMs));
   for (const child of children) {
-    if (activeChildren.has(child) && !child.killed) child.kill('SIGKILL');
+    if (activeChildren.has(child)) terminateChild(child, 'SIGKILL', { scheduleKill: false });
   }
 }
 
@@ -101,11 +100,26 @@ export function activeProcessCount() {
   return activeChildren.size;
 }
 
-function terminateChild(child) {
-  if (!child.killed) child.kill('SIGTERM');
+function terminateChild(child, signal = 'SIGTERM', { scheduleKill = signal !== 'SIGKILL' } = {}) {
+  signalChildTree(child, signal);
+  if (!scheduleKill) return;
   setTimeout(() => {
-    if (activeChildren.has(child) && !child.killed) child.kill('SIGKILL');
+    if (activeChildren.has(child)) signalChildTree(child, 'SIGKILL');
   }, 2_000).unref();
+}
+
+function signalChildTree(child, signal) {
+  if (!child || child.exitCode !== null || child.signalCode) return;
+  if (process.platform !== 'win32' && Number.isInteger(child.pid)) {
+    try {
+      process.kill(-child.pid, signal);
+      return;
+    } catch {
+      try { child.kill(signal); } catch {}
+      return;
+    }
+  }
+  try { child.kill(signal); } catch {}
 }
 
 function trimOutput(value, limit) {

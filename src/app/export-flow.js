@@ -270,7 +270,7 @@ function showSensitiveReview(controller) {
   const counts = draft.sensitive.reduce((map, item) => map.set(item.category, (map.get(item.category) ?? 0) + 1), new Map());
   controller.showMenu('export-sensitive', [
     { id: 'export-sensitive-exclude', label: 'Exclude recommended files and continue', description: `Remove ${draft.sensitive.length} flagged files from this ZIP` },
-    { id: 'export-sensitive-review', label: 'Review files not recommended for this ZIP  ›', context: 'These files are currently included but Zipflow recommends excluding them.', help: 'Inspect each flagged file and decide whether it should remain included in the ZIP.', navigate: true },
+    { id: 'export-sensitive-review', label: 'Review files not recommended for this ZIP ›', context: 'These files are currently included but Zipflow recommends excluding them.', help: 'Inspect each flagged file and decide whether it should remain included in the ZIP.', navigate: true },
     { id: 'export-sensitive-include', label: 'Include anyway', description: 'Advanced: keep all flagged files in the archive' },
     { id: 'export-cancel', label: 'Cancel' },
   ], 'Files not recommended for this ZIP', 0, [
@@ -404,7 +404,7 @@ function showExportPreview(controller) {
   const draft = controller.state.exportDraft;
   controller.showMenu('export-preview', [
     { id: 'export-choose-path', label: 'Choose output path and create ZIP', description: draft.outputPath },
-    { id: 'export-review-files', label: 'Review included files  ›', context: `${draft.selectedPaths.size} of ${draft.paths.length} files selected. Open the file tree to adjust the selection.`, navigate: true },
+    { id: 'export-review-files', label: 'Review included files ›', context: `${draft.selectedPaths.size} of ${draft.paths.length} files selected. Open the file tree to adjust the selection.`, navigate: true },
     { id: 'export-change-mode', label: 'Change export mode', description: modeLabel(draft.mode) },
     { id: 'export-cancel', label: 'Cancel' },
   ], 'Review ZIP contents', 0, [
