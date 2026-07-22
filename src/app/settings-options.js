@@ -4,6 +4,7 @@ import { displayPath, expandHome } from '../utils/paths.js';
 import { formatByteSize } from '../utils/size.js';
 import { modelConfigSummary } from './settings-model.js';
 import { modelTestDescription, modelTestValue } from './settings-model-check.js';
+import { translateForState as t } from '../i18n/index.js';
 
 export function settingsDefinitions(state) {
   const definitions = [
@@ -335,7 +336,7 @@ export function settingsPageSummary(state, definition) {
     const archives = state.settingsPanel?.storageStats?.archives ?? {};
     return [
       loading ? 'Scanning source archive storage…' : `${archives.count ?? 0} archives · ${formatByteSize(archives.totalBytes ?? 0)}`,
-      `Oldest: ${loading ? 'Scanning…' : dateLabel(archives.oldestAt)}`,
+      `Oldest: ${loading ? t(state, 'Scanning…') : dateLabel(state, archives.oldestAt)}`,
       `Directory: ${displayArchiveDirectory(state.settings.archiveDirectory)}`,
     ];
   }
@@ -343,7 +344,7 @@ export function settingsPageSummary(state, definition) {
     const backups = state.settingsPanel?.storageStats?.backups ?? {};
     return [
       loading ? 'Scanning backup storage…' : `${backups.count ?? 0} backups · ${backups.fileCount ?? 0} files · ${formatByteSize(backups.totalBytes ?? 0)}`,
-      `Oldest: ${loading ? 'Scanning…' : dateLabel(backups.oldestAt)}`,
+      `Oldest: ${loading ? t(state, 'Scanning…') : dateLabel(state, backups.oldestAt)}`,
       `Directory: ${backups.directory ? displayPath(backups.directory) : '~/.zipflow/backups'}`,
     ];
   }
@@ -351,7 +352,7 @@ export function settingsPageSummary(state, definition) {
     const history = state.settingsPanel?.managedHistory ?? { paths: [], updatedAt: null };
     return [
       `${history.paths?.length ?? 0} recorded paths`,
-      `Last updated: ${dateLabel(history.updatedAt)}`,
+      `Last updated: ${dateLabel(state, history.updatedAt)}`,
     ];
   }
   return [];
@@ -376,10 +377,12 @@ function managedHistoryPolicyLabel(value) {
   return value === 'disabled' ? 'Do not record managed files' : 'Keep recording managed files';
 }
 
-function dateLabel(value) {
-  if (!value) return 'None';
+function dateLabel(state, value) {
+  if (!value) return t(state, 'None');
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? 'Unknown' : date.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' });
+  if (Number.isNaN(date.getTime())) return t(state, 'Unknown');
+  const language = state?.i18n?.available?.find((item) => item.id === state?.i18n?.languageId);
+  return date.toLocaleString(language?.locale ?? 'en-GB', { dateStyle: 'medium', timeStyle: 'short' });
 }
 
 function modelChoices(state, parameter) {

@@ -60,6 +60,23 @@ test('scenario reconstruction includes only gates supported by historical state'
   ]);
 });
 
+test('scenario reconstruction ignores null and malformed historical decision entries', () => {
+  const run = fixtureRun({ conflicts: true, failedChecks: true, deploy: true });
+  run.autonomy = { decisions: null };
+  run.decisions = [null, 'legacy', { gate: 'plan-application', action: 'apply' }];
+  run.plan.conflicts = [null, { path: 'src/a.js', kind: 'modified' }];
+  run.checks.results = [null, { name: 'Tests', ok: false, stderr: 'failed' }];
+
+  const scenarios = historicalAutopilotScenarios(run, 'full');
+  const plan = scenarios.find((item) => item.gate === 'plan-application');
+  const conflicts = scenarios.find((item) => item.gate === 'conflicts');
+  const checks = scenarios.find((item) => item.gate === 'failed-checks');
+
+  assert.equal(plan.context.state.previousDecision.gate, 'plan-application');
+  assert.deepEqual(conflicts.context.state.conflicts[0], { path: null, kind: null, reason: null });
+  assert.equal(checks.context.state.checks.results.length, 1);
+});
+
 function fixtureRun({ conflicts = true, failedChecks = true, deploy = true } = {}) {
   return {
     id: 'run-history-1', archivePath: '/tmp/update.zip', createdAt: '2026-07-22T10:00:00.000Z',

@@ -45,3 +45,59 @@ test('language-pack validation enforces the published schema contract', () => {
     unsupported: true, patterns: [{ source: '', target: '', extra: true }],
   }), /unsupported fields: unsupported.*version must be 1.*locale must be a string between 2 and 64 characters.*messages value must be a string.*patterns\[0\] has unsupported fields: extra.*non-empty string source/);
 });
+
+test('Russian menu rows keep help only in the context dock', async () => {
+  const { renderToString, stripAnsi } = await import('terlio.js');
+  const { createInitialState, setScreen } = await import('../src/app/state.js');
+  const { renderZipflow } = await import('../src/ui/render.js');
+  const state = createInitialState();
+  state.project = { name: 'fixture', root: '/tmp/fixture', labels: ['Node.js'], technologies: [{ id: 'node' }], checks: [], git: true };
+  state.settings.interfaceLanguage = 'ru';
+  state.i18n = { languageId: 'ru', available: [] };
+  setScreen(state, 'home', {
+    items: [{
+      id: 'review',
+      label: 'Review changes',
+      description: 'Open file groups and inspect unified or side-by-side diffs',
+    }],
+    status: 'Ready',
+  });
+
+  const output = stripAnsi(renderToString(renderZipflow({ state, width: 100, height: 28 }), { width: 100, height: 28 }));
+  const menuLine = output.split('\n').find((line) => line.includes('› Просмотреть изменения')) ?? '';
+  assert.ok(menuLine, output);
+  assert.doesNotMatch(menuLine, /Открыть группы файлов/);
+  assert.match(output, /Открыть группы файлов и просмотреть объединённые или параллельные различия/);
+  assert.match(output, /Выбор 1\/1/);
+});
+
+test('Russian language pack covers static menu labels and context help', async () => {
+  const { readdir, readFile: readText } = await import('node:fs/promises');
+  const { fileURLToPath } = await import('node:url');
+  const root = fileURLToPath(new URL('../src/', import.meta.url));
+  const locale = JSON.parse(await readText(new URL('../src/i18n/locales/ru.json', import.meta.url), 'utf8'));
+  const translated = new Set(Object.keys(locale.messages));
+  const technical = new Set(['Git', 'Go', 'Python', 'CMake · C/C++']);
+  const missing = [];
+
+  async function visit(directory) {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const target = path.join(directory, entry.name);
+      if (entry.isDirectory()) await visit(target);
+      else if (entry.name.endsWith('.js')) {
+        const source = await readText(target, 'utf8');
+        const pattern = /\b(label|description|context|help|disabledReason)\s*:\s*(['"])(.*?)(?<!\\)\2/gs;
+        for (const match of source.matchAll(pattern)) {
+          const value = match[3].replace(/\\(['"])/g, '$1').replace(/\\n/g, '\n');
+          if (!value || value.includes('${') || technical.has(value) || value.startsWith('.') || value.startsWith('/')) continue;
+          if (!translated.has(value)) missing.push(`${path.relative(root, target)}: ${value}`);
+        }
+      }
+    }
+  }
+
+  await visit(path.join(root, 'app'));
+  await visit(path.join(root, 'ui'));
+  await visit(path.join(root, 'workflow'));
+  assert.deepEqual(missing, []);
+});

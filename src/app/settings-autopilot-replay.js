@@ -167,10 +167,10 @@ export async function simulateHistoricalAutopilotRun({
 export function historicalAutopilotScenarios(run, mode) {
   const counts = run.plan?.counts ?? {};
   const totalChanges = Number(counts.created ?? 0) + Number(counts.updated ?? 0) + Number(counts.deleted ?? 0);
-  const conflicts = run.plan?.conflicts ?? [];
+  const conflicts = arrayOf(run?.plan?.conflicts);
   const conflictCount = Number(counts.conflicts ?? conflicts.length ?? 0);
   const failedChecks = Boolean(run.checks?.failed || run.checks?.cancelled || run.checks?.ok === false);
-  const appliedPaths = run.applied?.paths ?? run.applied?.changedPaths ?? [];
+  const appliedPaths = arrayOf(run?.applied?.paths ?? run?.applied?.changedPaths);
   const scenarios = [];
   if (totalChanges > 0) scenarios.push({
     gate: 'plan-application', label: 'Apply update plan', capability: 'decidePlanApplication',
@@ -272,9 +272,9 @@ function policyScenario({ gate, label, action, summary, evidence, risks }) {
 function compactPlan(plan = {}) {
   return {
     counts: plan.counts ?? null,
-    created: (plan.created ?? []).slice(0, 50),
-    updated: (plan.updated ?? []).slice(0, 50),
-    deleted: (plan.deleted ?? []).slice(0, 50),
+    created: arrayOf(plan.created).slice(0, 50),
+    updated: arrayOf(plan.updated).slice(0, 50),
+    deleted: arrayOf(plan.deleted).slice(0, 50),
     conflictCount: plan.conflicts?.length ?? plan.counts?.conflicts ?? 0,
   };
 }
@@ -288,7 +288,7 @@ function compactChecks(checks) {
   if (!checks) return null;
   return {
     ok: checks.ok, passed: checks.passed, failed: checks.failed, cancelled: checks.cancelled,
-    results: (checks.results ?? []).map((item) => ({
+    results: arrayOf(checks.results).filter((item) => item && typeof item === 'object').map((item) => ({
       name: item.name, required: item.required, ok: item.ok, code: item.code, signal: item.signal,
       timedOut: item.timedOut, durationMs: item.durationMs,
       stdout: String(item.stdout ?? '').slice(-4000), stderr: String(item.stderr ?? '').slice(-4000),
@@ -317,7 +317,15 @@ function compactDeploy(deploy) {
 }
 
 function findHistoricalDecision(run, gate) {
-  return [...(run.autonomy?.decisions ?? []), ...(run.decisions ?? [])].find((item) => item.gate === gate) ?? null;
+  return [
+    ...arrayOf(run?.autonomy?.decisions),
+    ...arrayOf(run?.decisions),
+  ].filter((item) => item && typeof item === 'object')
+    .find((item) => item.gate === gate) ?? null;
+}
+
+function arrayOf(value) {
+  return Array.isArray(value) ? value : [];
 }
 
 function riskFromRun(run) {

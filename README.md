@@ -222,6 +222,8 @@ Custom packs are ordinary JSON files placed in:
 
 They are validated against `docs/i18n/language.schema.json`. A custom pack may translate only the strings it needs; missing entries fall back to English. Use **Refresh languages** in the language picker or restart Zipflow after adding or replacing a file. See [Interface localization](docs/i18n/README.md).
 
+Menu rows contain only the action or setting name. Their translated explanation is rendered once in the context summary below the list, so long help text never changes row height or breaks scrolling. The built-in Russian pack covers the shared menus, workflow setup, settings summaries, validation reasons, replay controls, and common progress states.
+
 ## Data and storage
 
 Zipflow stores its settings, workflows, reports, patches, backups, managed-file history, and autonomy records under:

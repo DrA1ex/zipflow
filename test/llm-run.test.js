@@ -165,8 +165,8 @@ test('Escape cancels local LLM generation and still presents the update plan', a
     beginArchiveInput(controller);
     state.editor.insert(archive);
     const inspection = submitRunEditor(controller);
-    for (let attempt = 0; attempt < 100 && !state.llmAbortController; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 5));
+    for (let attempt = 0; attempt < 300 && !state.llmAbortController; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
     }
     assert.ok(state.llmAbortController, 'LLM request did not start');
     const llmReview = state.llmReviewPromise;

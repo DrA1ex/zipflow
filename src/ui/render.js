@@ -74,8 +74,8 @@ export function renderZipflow({ state, width, height, animationFrame = 0 }) {
     height,
     minWidth: 58,
     minHeight: 20,
-    title: 'Zipflow needs more room',
-    message: 'Resize the terminal to at least 58×20.',
+    title: t(state, 'Zipflow needs more room'),
+    message: t(state, 'Resize the terminal to at least 58×20.'),
     theme,
     children: shell,
   });
@@ -219,7 +219,7 @@ function renderCurrent(state, width, height, theme) {
       ...intro.slice(0, 3).map((line, index) => Text(index === 0 ? color(theme, 'title', t(state, line)) : color(theme, 'textMuted', t(state, line)), { wrap: true })),
       intro.length ? Text('') : null,
       SelectList({
-        title: 'Choose',
+        title: t(state, 'Choose'),
         items: menuRows,
         selectedIndex: state.selectedIndex,
         windowSize,
@@ -476,18 +476,18 @@ function isEditorScreen(screen) {
 function renderMenuSearchOverlay(state, content, width, height, promptHeight, theme) {
   if (!state.menuSearch?.active) return content;
   const overlayWidth = Math.max(32, Math.min(width - 6, 72));
-  const overlay = Box({ border: true, padding: { left: 1, right: 1 }, title: ' Search ' },
+  const overlay = Box({ border: true, padding: { left: 1, right: 1 }, title: ` ${t(state, 'Search')} ` },
     ZipflowTextEditorView({
-      title: ' Filter ',
+      title: ` ${t(state, 'Filter')} `,
       value: state.searchEditor.value,
       cursor: state.searchEditor.cursor,
       width: overlayWidth - 4,
       height: 3,
-      placeholder: 'Type a path, name, or description',
+      placeholder: t(state, 'Type a path, name, or description'),
       lineNumbers: false,
       theme,
     }),
-    Text(color(theme, 'textMuted', `${state.menuItems.length} matching item${state.menuItems.length === 1 ? '' : 's'} · Enter keeps filter · Esc clears/closes`), { wrap: true }),
+    Text(color(theme, 'textMuted', t(state, `${state.menuItems.length} matching item${state.menuItems.length === 1 ? '' : 's'} · Enter keeps filter · Esc clears/closes`)), { wrap: true }),
   );
   return BottomOverlay({ content, overlay, height, bottom: Math.max(1, promptHeight - 1), left: 2, right: 2, width: overlayWidth, align: 'center', opaque: true });
 }

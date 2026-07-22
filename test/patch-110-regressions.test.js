@@ -7,7 +7,9 @@ const read = (name) => readFile(new URL(name, import.meta.url), 'utf8');
 test('workflow setup lists are one-line and wheel events invalidate through controller dispatch', async () => {
   const render = await read('../src/ui/render.js');
   const controller = await read('../src/app/controller.js');
-  assert.match(render, /getLabel: \(item\) => menuItemLabel\(item, state\)/);
+  assert.match(render, /const menuRows = selectRows\(state\.menuItems, \(item\) => menuItemLabel\(item, state\)\)/);
+  assert.match(render, /items: menuRows/);
+  assert.match(render, /getLabel: \(item\) => item\.label/);
   assert.doesNotMatch(render, /getDescription: \(item\) => inlineDescriptions/);
   assert.match(render, /wrapItems: false/);
   assert.match(render, /maxItemLines: 1/);
