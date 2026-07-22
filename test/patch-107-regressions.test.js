@@ -9,19 +9,21 @@ import { inferLanguage, parseRichTextBlocks, standaloneCode } from '../src/ui/ri
 const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 const packageLock = JSON.parse(await readFile(new URL('../package-lock.json', import.meta.url), 'utf8'));
 
-test('multiline paste is one editor insertion and is never interpreted as Enter', () => {
+test('multiline paste is one atomic editor replacement and is never interpreted as Enter', () => {
   const editor = {
-    value: 'subject',
-    insertions: [],
+    value: 'subject', cursor: 7, insertions: [], replacements: [],
     insert(value) { this.insertions.push(value); this.value += value; },
+    set(value) { this.replacements.push(value); this.value = value; this.cursor = value.length; },
   };
   const key = { name: 'paste', text: '\n\nDetailed body\nSecond line' };
   const pasted = pastedTextFromKey(key);
   insertPastedText(editor, pasted, { multiline: true });
 
   assert.equal(pasted, '\n\nDetailed body\nSecond line');
-  assert.deepEqual(editor.insertions, ['\n\nDetailed body\nSecond line']);
+  assert.deepEqual(editor.insertions, []);
+  assert.deepEqual(editor.replacements, ['subject\n\nDetailed body\nSecond line']);
   assert.equal(editor.value, 'subject\n\nDetailed body\nSecond line');
+  assert.equal(editor.cursor, editor.value.length);
   assert.equal(pastedTextFromKey({ name: 'enter' }), null);
 });
 
@@ -70,10 +72,10 @@ test('rich text recognizes fenced code, complete JSON, and streaming JSON langua
   assert.equal(inferLanguage('{"action":"apply",'), 'json');
 });
 
-test('1.0.7 requires Terlio 1.1.3 in package metadata and lockfile', () => {
-  assert.equal(packageJson.version, '1.0.7');
+test('1.0.8 requires Terlio 1.1.3 in package metadata and lockfile', () => {
+  assert.equal(packageJson.version, '1.0.8');
   assert.equal(packageJson.dependencies['terlio.js'], '^1.1.3');
-  assert.equal(packageLock.version, '1.0.7');
+  assert.equal(packageLock.version, '1.0.8');
   assert.equal(packageLock.packages[''].dependencies['terlio.js'], '^1.1.3');
   assert.equal(packageLock.packages['node_modules/terlio.js'].version, '1.1.3');
   assert.equal(packageLock.packages['node_modules/terlio.js'].resolved, 'https://registry.npmjs.org/terlio.js/-/terlio.js-1.1.3.tgz');

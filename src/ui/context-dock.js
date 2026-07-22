@@ -1,6 +1,6 @@
 import { Column, Text, color, truncateVisible, visibleLength, wrapText } from 'terlio.js';
 
-export function ContextDock({ text = '', rows = 1, width = 80, theme = null, token = 'text' } = {}) {
+export function ContextDock({ text = '', rows = 1, width = 80, theme = null, token = 'text', wrapSingleLine = true } = {}) {
   const safeRows = Math.max(0, Number(rows) || 0);
   if (!safeRows) return null;
   const safeWidth = Math.max(12, Number(width) || 80);
@@ -16,9 +16,10 @@ export function ContextDock({ text = '', rows = 1, width = 80, theme = null, tok
       if (lines.length > 1) truncated = true;
       return lines[0] ?? '';
     })
-    : source ? wrapText(source, available) : [];
+    : source ? (wrapSingleLine ? wrapText(source, available) : [source]) : [];
   const clipped = wrapped.slice(0, safeRows);
   truncated ||= wrapped.length > safeRows;
+  if (!preserveExplicitRows && !wrapSingleLine && wrapped.length && visibleLength(wrapped[0]) > available) truncated = true;
   if (truncated && clipped.length) {
     const hint = '  [? full help]';
     clipped[clipped.length - 1] = `${truncateVisible(clipped.at(-1), Math.max(1, available - visibleLength(hint) - 1), '…')}${hint}`;

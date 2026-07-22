@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { renderToString } from 'terlio.js';
+import { createInitialState } from '../src/app/state.js';
+import { renderZipflow } from '../src/ui/render.js';
 import {
   exportTreeItems,
   initializeExportTree,
@@ -101,6 +104,50 @@ test('settings and shell source keep help compact and remove the misleading foot
   assert.match(settingsSource, /const SETTINGS_CONTEXT_ROWS = 2/);
   assert.match(settingsSource, /joinContextLines\(pageContext, parameterDescription\)/);
   assert.match(settingsSource, /windowSize: Math\.max\(2, height - 7\)/);
-  assert.match(renderSource, /WorkspaceFooter\(\{ title: '', left:/);
+  assert.doesNotMatch(renderSource, /WorkspaceFooter/);
+  assert.match(renderSource, /function renderGlobalFooter\(/);
+  assert.match(renderSource, /Box\(\{ border: true, borderColor: theme\?\.border, height: 3/);
   assert.match(renderSource, /function showsInlineDescriptions\(screen\)/);
 });
+
+
+test('Change Workflow and shared full-screen views render an untitled global footer', () => {
+  const workflow = createInitialState();
+  workflow.project = { name: 'fixture', root: '/tmp/fixture', labels: ['Node.js'], git: true };
+  workflow.workflow = { policy: { label: 'Practical' } };
+  workflow.screen = 'setup-sections';
+  workflow.status = 'Edit workflow';
+  workflow.menuItems = [
+    { id: 'section-project', label: 'Project  –  /tmp/fixture · Node.js · Git' },
+    { id: 'section-checks', label: 'Checks  –  4 selected checks' },
+  ];
+
+  const home = createInitialState();
+  home.project = workflow.project;
+  home.workflow = workflow.workflow;
+  home.screen = 'home';
+  home.status = 'Ready';
+  home.menuItems = [{ id: 'change-workflow', label: 'Change workflow' }];
+
+  const editor = createInitialState();
+  editor.project = workflow.project;
+  editor.workflow = workflow.workflow;
+  editor.screen = 'archive-input';
+  editor.status = 'Step 1 of 5 · Choose archive';
+  editor.editorContext = {
+    label: 'ZIP archive path', purpose: 'archive-path',
+    instructions: ['Drop a ZIP file into the terminal or enter its path.'],
+  };
+
+  const outputs = [workflow, home, editor].map((state) => stripAnsi(
+    renderToString(renderZipflow({ state, width: 100, height: 28 }), { width: 100, height: 28 }),
+  ));
+
+  assert.match(outputs[0], /Workflow sections/);
+  assert.match(outputs[0], /Enter select/);
+  for (const output of outputs) assert.doesNotMatch(output, /┌\s+STATUS\b/);
+});
+
+function stripAnsi(value) {
+  return String(value).replace(/\x1b\[[0-9;]*m/g, '');
+}

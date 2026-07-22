@@ -9,7 +9,6 @@ import {
   ScrollPane,
   SelectList,
   Text,
-  WorkspaceFooter,
   WorkspacePane,
   WorkspaceShell,
   color,
@@ -17,6 +16,8 @@ import {
   resolveWorkspaceShellLayout,
   scrollBy,
   themes,
+  truncateVisible,
+  visibleLength,
   wrapText,
 } from 'terlio.js';
 import { displayPath } from '../utils/paths.js';
@@ -37,7 +38,7 @@ export function renderZipflow({ state, width, height, animationFrame = 0 }) {
   const subtitle = state.project ? displayPath(state.project.root) : 'Safe source archive updates';
   state.statusDetail = state.screen === 'settings' ? runSettingsStatus(state) : '';
   const footerRight = state.statusDetail ? [state.statusDetail] : [state.status].filter(Boolean);
-  const footer = WorkspaceFooter({ title: '', left: footerHints(state), right: footerRight, theme });
+  const footer = renderGlobalFooter({ left: footerHints(state), right: footerRight, width, theme });
   const { mainHeight } = resolveWorkspaceShellLayout({
     width,
     height,
@@ -77,6 +78,27 @@ export function renderZipflow({ state, width, height, animationFrame = 0 }) {
     children: shell,
   });
   return OverlayHost({ content: responsive, manager: state.overlays, theme, width, height, toastBottomMargin: 2 });
+}
+function renderGlobalFooter({ left = [], right = [], width = 80, theme = null } = {}) {
+  const separator = '  │  ';
+  const innerWidth = Math.max(1, Number(width) - 4);
+  const leftRaw = left.filter(Boolean).join(separator);
+  const rightRaw = right.filter(Boolean).join(separator);
+  const maxRightWidth = rightRaw ? Math.min(36, Math.max(0, Math.floor(innerWidth * 0.35))) : 0;
+  let rightText = maxRightWidth >= 8 ? truncateVisible(rightRaw, maxRightWidth, '…') : '';
+  const gap = rightText ? 2 : 0;
+  let leftWidth = Math.max(1, innerWidth - visibleLength(rightText) - gap);
+  let leftText = truncateVisible(leftRaw, leftWidth, '…');
+
+  if (rightText && visibleLength(leftText) < Math.min(10, visibleLength(leftRaw))) {
+    rightText = '';
+    leftWidth = innerWidth;
+    leftText = truncateVisible(leftRaw, leftWidth, '…');
+  }
+
+  const spacing = ' '.repeat(Math.max(0, innerWidth - visibleLength(leftText) - visibleLength(rightText)));
+  const line = `${color(theme, 'textMuted', leftText)}${spacing}${rightText ? color(theme, 'textMuted', rightText) : ''}`;
+  return Box({ border: true, borderColor: theme?.border, height: 3, padding: { left: 1, right: 1 } }, Text(line, { wrap: false }));
 }
 
 function renderWorkflow(state, width, mainHeight, theme) {

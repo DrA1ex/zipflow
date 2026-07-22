@@ -12,7 +12,16 @@ export function insertPastedText(editor, pastedText, { multiline = false } = {})
   if (!editor || typeof editor.insert !== 'function') throw new TypeError('Paste target must be an InputEditor.');
   const normalized = String(pastedText ?? '').replace(/\r\n?/g, '\n');
   const value = multiline ? normalized : normalized.replace(/\n+/g, ' ');
-  if (value) editor.insert(value);
+  if (!value) return value;
+  if (!multiline || !value.includes('\n')) {
+    editor.insert(value);
+    return value;
+  }
+  if (typeof editor.set !== 'function') throw new TypeError('Multiline paste target must support atomic replacement.');
+  const current = String(editor.value ?? '');
+  const cursor = Math.max(0, Math.min(current.length, Number(editor.cursor) || 0));
+  editor.set(`${current.slice(0, cursor)}${value}${current.slice(cursor)}`);
+  editor.cursor = cursor + value.length;
   return value;
 }
 

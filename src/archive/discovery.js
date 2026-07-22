@@ -1,8 +1,7 @@
 import path from 'node:path';
-import { readdir } from 'node:fs/promises';
+import { lstat, readdir } from 'node:fs/promises';
 import yauzl from 'yauzl';
 import { DEFAULT_ARCHIVE_LIMITS, validateZipEntry } from './security.js';
-import { inspectArchiveFile } from '../security/archive-input.js';
 import { listTrackedFiles } from '../git/repository.js';
 import { walkFiles } from '../utils/fs.js';
 import { scoreArchiveMatch } from './discovery-match.js';
@@ -20,8 +19,8 @@ export async function discoverRecentArchives({
     if (!entry.isFile() || !entry.name.toLowerCase().endsWith('.zip')) continue;
     const archivePath = path.join(directory, entry.name);
     try {
-      const info = await inspectArchiveFile(archivePath);
-      const modifiedAt = new Date(info.modifiedAt);
+      const info = await inspectDiscoveredArchive(archivePath);
+      const modifiedAt = info.modifiedAt;
       const ageMs = Math.max(0, now - modifiedAt.getTime());
       if (!Number.isFinite(ageMs) || ageMs > maxAgeMs) continue;
       inspected.push({ archivePath, info, modifiedAt, ageMs });
@@ -51,6 +50,13 @@ export async function discoverRecentArchives({
     }
   }
   return candidates.sort((a, b) => b.score - a.score || a.ageMs - b.ageMs).slice(0, limit);
+}
+
+
+async function inspectDiscoveredArchive(archivePath) {
+  const info = await lstat(archivePath);
+  if (info.isSymbolicLink() || !info.isFile()) throw new Error('Archive candidate is not a regular file.');
+  return { size: info.size, modifiedAt: info.mtime };
 }
 
 export async function listArchivePaths(archivePath, { signal = null, limits = DEFAULT_ARCHIVE_LIMITS } = {}) {

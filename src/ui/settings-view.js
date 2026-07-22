@@ -107,7 +107,7 @@ function renderSettingsPage(state, view, width, height, theme, animationFrame) {
     active: view.focus !== 'categories' && !view.modal,
     height,
     theme,
-    footerNode: ContextDock({ text: context, rows: SETTINGS_CONTEXT_ROWS, width: Math.max(20, width - 4), theme }),
+    footerNode: ContextDock({ text: context, rows: SETTINGS_CONTEXT_ROWS, width: Math.max(20, width - 4), theme, wrapSingleLine: false }),
     footerMinHeight: SETTINGS_CONTEXT_ROWS,
     children: [
       SelectList({
@@ -158,7 +158,7 @@ function renderModelConfigPage(state, view, width, height, theme, animationFrame
     active: !state.settingsPanel?.modal,
     height,
     theme,
-    footerNode: ContextDock({ text: context, rows: SETTINGS_CONTEXT_ROWS, width: Math.max(20, width - 4), theme, token: view.error ? 'danger' : 'text' }),
+    footerNode: ContextDock({ text: context, rows: SETTINGS_CONTEXT_ROWS, width: Math.max(20, width - 4), theme, token: view.error ? 'danger' : 'text', wrapSingleLine: false }),
     footerMinHeight: SETTINGS_CONTEXT_ROWS,
     children: [
       SelectList({

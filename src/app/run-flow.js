@@ -60,7 +60,7 @@ export function beginArchiveInput(controller) {
     label: 'ZIP archive path',
     placeholder: '~/Downloads/project-update.zip',
     purpose: 'archive-path',
-    instructions: ['Drop or enter a ZIP path. Tab shows recent files; press Enter twice on an empty field to scan the last archive folder.'],
+    instructions: ['Drop a ZIP file into the terminal or enter its path.'],
   }, '');
   controller.setStatus('Step 1 of 5 · Choose archive');
 }

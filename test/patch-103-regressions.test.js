@@ -203,7 +203,8 @@ test('long notices use the native Terlio toast with shadow and content wrapping'
   const output = stripAnsi(renderToString(renderZipflow({ state, width: 90, height: 26 }), { width: 90, height: 26 }));
   assert.match(output, /Long notice/);
   assert.match(output, /Detailed line/);
-  assert.doesNotMatch(output, /PgUp|PgDn|page-up|page-down/i);
+  const toastText = output.split('\n').filter((line) => /Long notice|Detailed line/.test(line)).join('\n');
+  assert.doesNotMatch(toastText, /PgUp|PgDn|page-up|page-down/i);
 });
 
 
