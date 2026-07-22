@@ -7,12 +7,12 @@ import { createOverlayManager, renderToString, stripAnsi } from 'terlio.js';
 import { createInitialState } from '../src/app/state.js';
 import { ZipflowController } from '../src/app/controller.js';
 import { createInterruptAwareInput } from '../src/ui/interrupt-input.js';
-import { DEFAULT_SETTINGS, credentialsPath, loadSettings, saveSettings, updateSettings } from '../src/settings/store.js';
+import { DEFAULT_SETTINGS, credentialsPath, loadSettings, saveSettings, settingsBackupPath, settingsPath, updateSettings } from '../src/settings/store.js';
 import { repeatLastArchive } from '../src/app/history-flow.js';
 import { saveRunRecord } from '../src/runs/store.js';
 import { getZipflowHome } from '../src/workflow/store.js';
 import { tempDir } from '../test-support/helpers.js';
-import { readJson } from '../src/utils/fs.js';
+import { exists, readJson } from '../src/utils/fs.js';
 import { renderZipflow } from '../src/ui/render.js';
 
 function controllerFixture() {
@@ -25,7 +25,7 @@ function controllerFixture() {
   return { state, controller };
 }
 
-test('credential sidecar restores a token after stale settings are saved', async () => {
+test('secure credential storage preserves a token without writing it to Zipflow JSON files', async () => {
   const previous = process.env.ZIPFLOW_HOME;
   process.env.ZIPFLOW_HOME = await tempDir('zipflow-settings-104-');
   try {
@@ -33,37 +33,48 @@ test('credential sidecar restores a token after stale settings are saved', async
     await saveSettings({ ...DEFAULT_SETTINGS, theme: 'mono', llmApiToken: '' });
     const loaded = await loadSettings();
     assert.equal(loaded.llmApiToken, 'persistent-secret');
-    assert.equal((await readJson(credentialsPath(), null)).llmApiToken, 'persistent-secret');
+    assert.equal(await exists(credentialsPath()), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(await readJson(settingsPath()), 'llmApiToken'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(await readJson(settingsBackupPath()), 'llmApiToken'), false);
   } finally {
     if (previous === undefined) delete process.env.ZIPFLOW_HOME;
     else process.env.ZIPFLOW_HOME = previous;
   }
 });
 
-test('raw Ctrl+C input is remapped before Terlio hard-coded exit handling', () => {
+test('raw Ctrl+C input is consumed and routed before Terlio hard-coded exit handling', () => {
   const input = new EventEmitter();
   input.setEncoding = () => {};
   input.setRawMode = () => {};
   input.resume = () => {};
   input.pause = () => {};
   input.isTTY = true;
-  const wrapped = createInterruptAwareInput(input);
+  let interrupts = 0;
+  const wrapped = createInterruptAwareInput(input, { onInterrupt: () => { interrupts += 1; } });
   let received = '';
-  wrapped.on('data', (value) => { received = String(value); });
+  wrapped.on('data', (value) => { received += String(value); });
   input.emit('data', '\x03');
-  assert.equal(received, '\x1a');
+  assert.equal(interrupts, 1);
+  assert.equal(received, '');
 });
 
-test('Ctrl+C sentinel cancels manual checks before exiting', async () => {
+test('raw Ctrl+C cancels manual checks and exits only after the operation is idle', async () => {
   const { controller } = controllerFixture();
   const exits = [];
   controller.runtime = { exit: (code) => exits.push(code), invalidate: () => {} };
+  const input = new EventEmitter();
+  const wrapped = createInterruptAwareInput(input, {
+    onInterrupt: () => { void controller.handleInterrupt(); },
+  });
+  wrapped.on('data', () => {});
   const operation = controller.beginOperation({ kind: 'manual-checks', label: 'Running manual checks' });
-  await controller.handleKey({ name: 'ctrl-z', ctrl: true });
+  input.emit('data', '\x03');
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(operation.signal.aborted, true);
   assert.deepEqual(exits, []);
   operation.finish();
-  await controller.handleKey({ name: 'ctrl-z', ctrl: true });
+  input.emit('data', '\x03');
+  await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(exits, [0]);
 });
 
@@ -104,18 +115,36 @@ test('Home and End navigate the active file list rather than Activity', async ()
 });
 
 
-test('input adapter remaps Ctrl+C listeners registered through addListener', () => {
+test('input adapter preserves non-interrupt bytes in a mixed buffer', () => {
   const input = new EventEmitter();
   input.setEncoding = () => {};
   input.setRawMode = () => {};
   input.resume = () => {};
   input.pause = () => {};
   input.isTTY = true;
-  const wrapped = createInterruptAwareInput(input);
+  let interrupts = 0;
+  const wrapped = createInterruptAwareInput(input, { onInterrupt: () => { interrupts += 1; } });
   let received = '';
-  wrapped.addListener('data', (value) => { received = String(value); });
-  input.emit('data', Buffer.from('\x03'));
-  assert.equal(received, '\x1a');
+  wrapped.addListener('data', (value) => { received += String(value); });
+  input.emit('data', Buffer.from('a\x03b'));
+  assert.equal(interrupts, 1);
+  assert.equal(received, 'ab');
+});
+
+test('input adapter reports an interrupt once with one-time and persistent data listeners', () => {
+  const input = new EventEmitter();
+  let interrupts = 0;
+  const wrapped = createInterruptAwareInput(input, { onInterrupt: () => { interrupts += 1; } });
+  let oneTimeInput = '';
+  let persistentInput = '';
+  wrapped.once('data', (value) => { oneTimeInput += String(value); });
+  wrapped.on('data', (value) => { persistentInput += String(value); });
+  input.emit('data', '\x03');
+  input.emit('data', 'x');
+  input.emit('data', '\x03');
+  assert.equal(interrupts, 2);
+  assert.equal(oneTimeInput, 'x');
+  assert.equal(persistentInput, 'x');
 });
 
 test('test workers use an isolated Zipflow home unless ZIPFLOW_HOME is explicit', () => {

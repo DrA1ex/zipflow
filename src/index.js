@@ -7,8 +7,9 @@ import { installWorkspaceInterruptHandler } from './ui/workspace-interrupt.js';
 
 export async function startZipflow({ input = process.stdin, output = process.stdout } = {}) {
   const state = createInitialState();
-  const workspaceInput = createInterruptAwareInput(input);
   const controller = new ZipflowController(state);
+  const interrupt = () => { void controller.handleInterrupt().catch((error) => controller.handleUnexpected(error)); };
+  const workspaceInput = createInterruptAwareInput(input, { onInterrupt: interrupt });
   const detachSigint = input === process.stdin ? registerSigintHandler(controller) : () => {};
   let detachWorkspaceInterrupt = () => {};
   const app = createWorkspaceApp({

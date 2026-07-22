@@ -7,7 +7,7 @@ Ollama:    http://127.0.0.1:11434
 LM Studio: http://127.0.0.1:1234
 ```
 
-The provider, optional bearer token, selected model, and output languages are configured in global settings.
+The provider, optional bearer token, selected model, and output languages are configured in global settings. Bearer tokens are stored in macOS Keychain or the Linux system keyring rather than `~/.zipflow` JSON files. On Linux, persistence requires `secret-tool` and an active Secret Service provider; when secure storage is unavailable, Zipflow refuses to save a new token instead of falling back to plaintext.
 
 ## What the model can do
 

@@ -459,7 +459,7 @@ const FIELD_DEFINITIONS = Object.freeze({
     label: 'LLM API token',
     description: 'Optional bearer token used for model discovery and generation.',
     placeholder: 'Paste token or leave empty to clear',
-    instructions: ['The token is stored locally in ~/.zipflow/settings.json and is never shown in Activity.'],
+    instructions: ['The token is stored in macOS Keychain or the Linux system keyring, never in Zipflow JSON files.', 'On Linux, persistent storage requires secret-tool and an active Secret Service provider.'],
     secret: true,
   },
   backupRetentionDays: {

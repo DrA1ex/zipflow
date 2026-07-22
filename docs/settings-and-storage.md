@@ -27,15 +27,18 @@ Before replacing a valid settings file, Zipflow writes:
 ~/.zipflow/settings.backup.json
 ```
 
-The local LLM bearer token is also mirrored to a small credential sidecar:
+The local LLM bearer token is not written to either settings file. Zipflow stores it through the operating-system credential service:
 
-```text
-~/.zipflow/credentials.json
-```
+- macOS Keychain on macOS;
+- a Secret Service-compatible system keyring through `secret-tool` on Linux.
 
-This prevents an older or partially migrated settings snapshot from silently clearing the token. Explicit token removal still clears both locations.
+Zipflow does not create an encrypted sidecar whose decryption key is stored beside it, and it does not fall back to plaintext when secure storage is unavailable. Saving a new token fails with an actionable error instead. Existing `settings.json`, `settings.backup.json`, or legacy `credentials.json` tokens are moved into the system credential store and scrubbed from disk only after the protected write succeeds.
 
-If the primary settings file becomes unreadable, the backup is restored automatically. LLM credentials, model and loaded-instance selection, source archive policy, storage directories, and retention limits remain preserved across compatible patch upgrades.
+The operating-system login or keyring unlock protects the credential encryption key, so Zipflow does not introduce a second application password. This protects credentials at rest and prevents obtaining them by browsing `~/.zipflow`. It does not claim to isolate the token from arbitrary malicious software already running as the same logged-in user while that user's credential store is unlocked.
+
+On Linux, install `secret-tool` and run a Secret Service provider such as GNOME Keyring or another compatible implementation before saving a token. On headless systems without a credential service, leave persistent authentication unset rather than adding a plaintext fallback.
+
+If the primary settings file becomes unreadable, the backup is restored automatically. Model and loaded-instance selection, source archive policy, storage directories, and retention limits remain preserved across compatible patch upgrades; the bearer token is read independently from the system credential store.
 
 The default maximum rollback-backup storage remains 2 GB.
 
@@ -122,7 +125,6 @@ By default, Zipflow uses:
 ~/.zipflow/
   settings.json
   settings.backup.json
-  credentials.json
   archive-index.json
   workflows/
   runs/
@@ -132,6 +134,8 @@ By default, Zipflow uses:
   tmp/
   locks/
 ```
+
+Zipflow creates its state directories with owner-only permissions (`0700`) and atomically written state files with owner-only permissions (`0600`). Credentials remain outside this tree in the operating-system credential store.
 
 Use `ZIPFLOW_HOME` to isolate all Zipflow state:
 

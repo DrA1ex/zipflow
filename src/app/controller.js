@@ -482,5 +482,5 @@ export class ZipflowController {
 }
 
 function isInterruptKey(key) {
-  return key?.name === 'ctrl-c' || (key?.ctrl && key?.name === 'c') || key?.name === 'zipflow-interrupt' || key?.name === 'ctrl-z';
+  return key?.name === 'ctrl-c' || (key?.ctrl && key?.name === 'c');
 }

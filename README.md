@@ -33,6 +33,7 @@ Project setup, archive review, conflict resolution, checks, commits, deployment,
 - macOS or Linux
 - A terminal with TTY support
 - Git is recommended, but not required
+- Persistent LLM tokens on Linux require `secret-tool` and an active Secret Service provider
 
 ## Installation
 
@@ -213,7 +214,7 @@ Zipflow stores its settings, workflows, reports, patches, backups, managed-file 
 
 Set `ZIPFLOW_HOME` to use another location, including an isolated directory for tests.
 
-Settings are written with a recoverable `settings.backup.json`. Source archives are left in place by default; settings can instead move successfully applied archives to managed storage or delete them after completion. Backup and archive retention are configured separately.
+Settings are written with a recoverable `settings.backup.json`, but LLM bearer tokens are excluded from both JSON files. Tokens are stored in macOS Keychain or the Linux system keyring. Zipflow never creates a plaintext or locally decryptable fallback credential file. Source archives are left in place by default; settings can instead move successfully applied archives to managed storage or delete them after completion. Backup and archive retention are configured separately.
 
 See [Settings, history, and storage](docs/settings-and-storage.md).
 

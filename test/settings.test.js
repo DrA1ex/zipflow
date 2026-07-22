@@ -381,7 +381,7 @@ test('settings recover from the backup file without resetting tokens or archive 
   assert.equal(loaded.llmApiToken, 'secret-token');
   assert.equal(loaded.archivePolicy, 'move');
   const restored = JSON.parse(await readFile(settingsPath(), 'utf8'));
-  assert.equal(restored.llmApiToken, 'secret-token');
+  assert.equal(Object.prototype.hasOwnProperty.call(restored, 'llmApiToken'), false);
   assert.equal(restored.archivePolicy, 'move');
 }));
 

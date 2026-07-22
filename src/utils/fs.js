@@ -1,4 +1,5 @@
-import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 
 export async function exists(target) {
@@ -26,17 +27,23 @@ export async function readJson(target, fallback = null) {
 }
 
 export async function writeJsonAtomic(target, value) {
-  await ensureDir(path.dirname(target));
-  const temporary = `${target}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
-  await rename(temporary, target);
+  await writeAtomic(target, `${JSON.stringify(value, null, 2)}\n`);
 }
 
 export async function writeTextAtomic(target, value) {
+  await writeAtomic(target, value);
+}
+
+async function writeAtomic(target, value) {
   await ensureDir(path.dirname(target));
-  const temporary = `${target}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(temporary, value, 'utf8');
-  await rename(temporary, target);
+  const temporary = `${target}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, value, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    await rename(temporary, target);
+    await chmod(target, 0o600);
+  } finally {
+    await rm(temporary, { force: true }).catch(() => {});
+  }
 }
 
 export async function walkFiles(root, { include = () => true, descend = () => true, onVisit = null, signal = null } = {}) {

@@ -463,6 +463,9 @@ function renderMenuSearchOverlay(state, content, width, height, promptHeight, th
 function contextRowsForScreen(_screen) {
   return 1;
 }
+function showsInlineDescriptions(screen) {
+  return isWorkflowSetupScreen(screen);
+}
 function isWorkflowSetupScreen(screen) {
   return String(screen ?? '').startsWith('setup-') || String(screen ?? '').startsWith('custom-check');
 }

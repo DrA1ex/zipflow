@@ -1,7 +1,8 @@
 import os from 'node:os';
 import path from 'node:path';
 import { hashText } from '../utils/hash.js';
-import { ensureDir, readJson, writeJsonAtomic } from '../utils/fs.js';
+import { chmod, mkdir } from 'node:fs/promises';
+import { readJson, writeJsonAtomic } from '../utils/fs.js';
 import { canonicalPath } from '../utils/paths.js';
 import { normalizeWorkflow, WORKFLOW_VERSION } from './defaults.js';
 
@@ -13,14 +14,19 @@ export function getZipflowHome() {
 
 export async function ensureZipflowHome() {
   const home = getZipflowHome();
-  await Promise.all([
-    ensureDir(path.join(home, 'workflows')),
-    ensureDir(path.join(home, 'runs')),
-    ensureDir(path.join(home, 'backups')),
-    ensureDir(path.join(home, 'tmp')),
-    ensureDir(path.join(home, 'locks')),
-    ensureDir(path.join(home, 'projects')),
-  ]);
+  const directories = [
+    home,
+    path.join(home, 'workflows'),
+    path.join(home, 'runs'),
+    path.join(home, 'backups'),
+    path.join(home, 'tmp'),
+    path.join(home, 'locks'),
+    path.join(home, 'projects'),
+  ];
+  await Promise.all(directories.map(async (directory) => {
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    await chmod(directory, 0o700);
+  }));
   return home;
 }
 

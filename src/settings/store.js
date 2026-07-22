@@ -1,10 +1,13 @@
 import path from 'node:path';
 import { themes } from 'terlio.js';
-import { readJson, writeJsonAtomic } from '../utils/fs.js';
+import { readJson, removeIfExists, writeJsonAtomic } from '../utils/fs.js';
 import { ensureZipflowHome, getZipflowHome } from '../workflow/store.js';
 import { canonicalModelId, modelIdentityKey } from '../llm/model-identity.js';
+import {
+  deleteLlmApiToken, readLlmApiToken, SecureCredentialStoreError, writeLlmApiToken,
+} from '../security/credential-store.js';
 
-export const SETTINGS_VERSION = 14;
+export const SETTINGS_VERSION = 15;
 export const THEME_NAMES = Object.keys(themes);
 export const LLM_PROVIDERS = ['disabled', 'ollama', 'lmstudio'];
 export const LLM_LANGUAGES = ['English', 'Russian', 'German', 'French', 'Spanish', 'Chinese', 'Japanese'];
@@ -49,38 +52,88 @@ export const DEFAULT_SETTINGS = Object.freeze({
 
 let settingsWriteQueue = Promise.resolve();
 
+const LEGACY_CREDENTIAL_KEYS = ['llmApiToken', 'apiToken', 'localLlmApiToken', 'llmToken'];
+
 export async function loadSettings() {
   await settingsWriteQueue;
   await ensureZipflowHome();
-  const credentials = await readSettingsFile(credentialsPath());
-  const primary = await readSettingsFile(settingsPath());
-  if (primary) return restoreCredentialToken(normalizeSettings(primary), credentials);
-  const backup = await readSettingsFile(settingsBackupPath());
-  if (backup) {
-    const restored = restoreCredentialToken(normalizeSettings(backup), credentials);
-    await writeJsonAtomic(settingsPath(), restored);
-    return restored;
-  }
-  return restoreCredentialToken(normalizeSettings(null), credentials);
+  const [credentials, primary, backup] = await Promise.all([
+    readSettingsFile(credentialsPath()),
+    readSettingsFile(settingsPath()),
+    readSettingsFile(settingsBackupPath()),
+  ]);
+  const source = primary ?? backup;
+  const settings = normalizeSettings(source);
+  const credentialMarker = containsLegacyCredential(credentials);
+  const credentialRecords = primary
+    ? credentialMarker ? [primary, credentials] : [primary, backup]
+    : [backup, credentials];
+  const credential = await resolveCredential(credentialRecords);
+  const explicitLegacyClear = Boolean(primary)
+    && credentialMarker
+    && !firstLegacyToken([primary, credentials]);
+  const restored = { ...settings, llmApiToken: credential.token };
+  if (!primary && backup) await writeJsonAtomic(settingsPath(), settingsForDisk(restored, { legacyToken: credential.legacyOnDisk }));
+  if (credential.secure || explicitLegacyClear) await scrubLegacyCredentials();
+  return restored;
 }
 
 export function saveSettings(settings, { allowClearToken = false } = {}) {
   return enqueueSettingsWrite(async () => {
-    const stored = await readSettingsFile(settingsPath()) ?? await readSettingsFile(settingsBackupPath());
-    const current = normalizeSettings(stored);
+    const [stored, backup, credentials] = await Promise.all([
+      readSettingsFile(settingsPath()),
+      readSettingsFile(settingsBackupPath()),
+      readSettingsFile(credentialsPath()),
+    ]);
+    const current = normalizeSettings(stored ?? backup);
+    const credential = await resolveCredential(stored ? [stored, credentials] : [backup, credentials]);
     const incoming = normalizeSettings(settings);
-    if (!allowClearToken && !incoming.llmApiToken && current.llmApiToken) incoming.llmApiToken = current.llmApiToken;
-    return writeSettingsValue(normalizeSettings({ ...current, ...incoming }), { allowClearToken });
+    const requestedToken = incoming.llmApiToken;
+    const credentialChange = await applyCredentialChange({
+      requestedToken,
+      currentToken: credential.token,
+      currentSecure: credential.secure,
+      allowClearToken,
+    });
+    return writeSettingsValue(normalizeSettings({ ...current, ...incoming, llmApiToken: credentialChange.token }), {
+      currentRaw: stored,
+      legacyToken: credentialChange.secure ? '' : credential.legacyOnDisk,
+      secure: credentialChange.secure,
+    });
   });
 }
 
 export function updateSettings(patch, { allowClearToken = false, baseSettings = null } = {}) {
   return enqueueSettingsWrite(async () => {
-    const stored = await readSettingsFile(settingsPath()) ?? await readSettingsFile(settingsBackupPath());
-    const current = normalizeSettings({ ...(baseSettings ?? {}), ...(stored ?? {}) });
+    const [stored, backup, credentials] = await Promise.all([
+      readSettingsFile(settingsPath()),
+      readSettingsFile(settingsBackupPath()),
+      readSettingsFile(credentialsPath()),
+    ]);
+    const current = normalizeSettings({ ...(baseSettings ?? {}), ...(stored ?? backup ?? {}) });
+    const credential = await resolveCredential(stored ? [stored, credentials, baseSettings] : [backup, credentials, baseSettings]);
     const nextPatch = { ...(patch ?? {}) };
-    if (!allowClearToken && nextPatch.llmApiToken === '' && current.llmApiToken) delete nextPatch.llmApiToken;
-    return writeSettingsValue(normalizeSettings({ ...current, ...nextPatch }), { allowClearToken });
+    const tokenWasProvided = Object.prototype.hasOwnProperty.call(nextPatch, 'llmApiToken');
+    let token = credential.token;
+    let secure = credential.secure;
+    if (tokenWasProvided) {
+      const requestedToken = typeof nextPatch.llmApiToken === 'string' ? nextPatch.llmApiToken : '';
+      if (requestedToken || allowClearToken) {
+        const credentialChange = await applyCredentialChange({
+          requestedToken,
+          currentToken: credential.token,
+          currentSecure: credential.secure,
+          allowClearToken,
+        });
+        token = credentialChange.token;
+        secure = credentialChange.secure;
+      } else delete nextPatch.llmApiToken;
+    }
+    return writeSettingsValue(normalizeSettings({ ...current, ...nextPatch, llmApiToken: token }), {
+      currentRaw: stored,
+      legacyToken: secure ? '' : credential.legacyOnDisk,
+      secure,
+    });
   });
 }
 
@@ -90,22 +143,87 @@ function enqueueSettingsWrite(task) {
   return result;
 }
 
-async function writeSettingsValue(value, { allowClearToken = false } = {}) {
+async function writeSettingsValue(value, { currentRaw = null, legacyToken = '', secure = false } = {}) {
   await ensureZipflowHome();
-  const current = await readSettingsFile(settingsPath());
-  const credentials = await readSettingsFile(credentialsPath());
-  const protectedToken = typeof credentials?.llmApiToken === 'string' ? credentials.llmApiToken : '';
-  if (!allowClearToken && !value.llmApiToken && protectedToken) value = { ...value, llmApiToken: protectedToken };
-  if (current) await writeJsonAtomic(settingsBackupPath(), normalizeSettings(current));
-  await writeJsonAtomic(settingsPath(), value);
-  if (value.llmApiToken) await writeJsonAtomic(credentialsPath(), { version: 1, llmApiToken: value.llmApiToken });
-  else if (allowClearToken) await writeJsonAtomic(credentialsPath(), { version: 1, llmApiToken: '' });
-  return value;
+  if (currentRaw) await writeJsonAtomic(settingsBackupPath(), settingsForDisk(currentRaw, { legacyToken }));
+  await writeJsonAtomic(settingsPath(), settingsForDisk(value, { legacyToken }));
+  if (secure) await scrubLegacyCredentials();
+  return { ...value, llmApiToken: value.llmApiToken ?? '' };
 }
 
-function restoreCredentialToken(settings, credentials) {
-  const token = typeof credentials?.llmApiToken === 'string' ? credentials.llmApiToken : '';
-  return !settings.llmApiToken && token ? { ...settings, llmApiToken: token } : settings;
+async function applyCredentialChange({ requestedToken, currentToken, currentSecure, allowClearToken }) {
+  const token = String(requestedToken ?? '');
+  if (token) {
+    if (token === currentToken) return { token, secure: currentSecure };
+    await writeLlmApiToken(token);
+    return { token, secure: true };
+  }
+  if (!allowClearToken) return { token: currentToken, secure: currentSecure };
+  await deleteLlmApiToken();
+  return { token: '', secure: true };
+}
+
+async function resolveCredential(records) {
+  const legacyOnDisk = firstLegacyToken(records);
+  let secureToken = '';
+  let secureStoreAvailable = true;
+  try {
+    secureToken = await readLlmApiToken();
+  } catch (error) {
+    if (!(error instanceof SecureCredentialStoreError) || error.code !== 'credential-store-unavailable') throw error;
+    secureStoreAvailable = false;
+  }
+  if (!secureToken && legacyOnDisk && secureStoreAvailable) {
+    try {
+      await writeLlmApiToken(legacyOnDisk);
+      secureToken = legacyOnDisk;
+    } catch (error) {
+      if (!(error instanceof SecureCredentialStoreError) || error.code !== 'credential-store-unavailable') throw error;
+      secureStoreAvailable = false;
+    }
+  }
+  return {
+    token: secureToken || legacyOnDisk,
+    secure: Boolean(secureToken),
+    legacyOnDisk: secureToken ? '' : legacyOnDisk,
+  };
+}
+
+async function scrubLegacyCredentials() {
+  await Promise.all([
+    scrubSettingsCredential(settingsPath()),
+    scrubSettingsCredential(settingsBackupPath()),
+    removeIfExists(credentialsPath()),
+  ]);
+}
+
+async function scrubSettingsCredential(target) {
+  const value = await readSettingsFile(target);
+  if (!value || !containsLegacyCredential(value)) return;
+  await writeJsonAtomic(target, settingsForDisk(value));
+}
+
+function settingsForDisk(settings, { legacyToken = '' } = {}) {
+  const value = normalizeSettings(settings);
+  const disk = { ...value };
+  for (const key of LEGACY_CREDENTIAL_KEYS) delete disk[key];
+  if (legacyToken) disk.llmApiToken = legacyToken;
+  return disk;
+}
+
+function firstLegacyToken(records) {
+  for (const record of records) {
+    if (!record || typeof record !== 'object') continue;
+    for (const key of LEGACY_CREDENTIAL_KEYS) {
+      if (typeof record[key] === 'string' && record[key]) return record[key];
+    }
+  }
+  return '';
+}
+
+function containsLegacyCredential(value) {
+  if (!value || typeof value !== 'object') return false;
+  return LEGACY_CREDENTIAL_KEYS.some((key) => Object.prototype.hasOwnProperty.call(value, key));
 }
 
 export function normalizeSettings(settings) {
