@@ -7,6 +7,7 @@ import { openModelConfiguration, selectModelChoice, selectModelParameter, settin
 import { settingsViewModel } from '../src/app/settings-panel.js';
 import { listLocalModelChoices } from '../src/llm/client.js';
 import { DEFAULT_SETTINGS } from '../src/settings/store.js';
+import { settingsDefinitions } from '../src/app/settings-options.js';
 import { renderZipflow } from '../src/ui/render.js';
 import { tempDir } from '../test-support/helpers.js';
 
@@ -42,8 +43,9 @@ function settingsState(modelChoices) {
   state.project = { name: 'fixture', root: '/tmp/fixture' };
   state.screen = 'settings';
   state.settings = { ...DEFAULT_SETTINGS, llmProvider: 'lmstudio', llmModel: 'qwen-loaded' };
+  const localLlmIndex = settingsDefinitions(state).findIndex((item) => item.id === 'localLlm');
   state.settingsPanel = {
-    focus: 'choices', categoryIndex: 2, parameterIndices: { localLlm: 1 }, choiceIndices: {},
+    focus: 'choices', categoryIndex: localLlmIndex, parameterIndices: { localLlm: 1 }, choiceIndices: {},
     activeParameterId: 'llmModel', models: modelChoices, modelsProvider: 'lmstudio', modelError: null,
     loadingModels: false, managedCount: 0, modal: null, modelConfig: null,
     previous: { screen: 'home', menuItems: [], selectedIndex: 0, status: 'Ready' },

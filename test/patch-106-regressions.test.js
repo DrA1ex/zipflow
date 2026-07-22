@@ -151,3 +151,4 @@ test('Change Workflow and shared full-screen views render an untitled global foo
 function stripAnsi(value) {
   return String(value).replace(/\x1b\[[0-9;]*m/g, '');
 }
+

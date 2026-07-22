@@ -28,8 +28,9 @@ function settingsState() {
   state.project = projectFixture();
   state.screen = 'settings';
   state.settings = { ...DEFAULT_SETTINGS, llmProvider: 'ollama', llmModel: 'qwen' };
+  const localLlmIndex = settingsDefinitions(state).findIndex((item) => item.id === 'localLlm');
   state.settingsPanel = {
-    focus: 'parameters', categoryIndex: 2, parameterIndices: { localLlm: 0 }, choiceIndices: {},
+    focus: 'parameters', categoryIndex: localLlmIndex, parameterIndices: { localLlm: 0 }, choiceIndices: {},
     activeParameterId: null, subpage: 'llmModelTests', models: [], modelsProvider: 'ollama',
     modelError: null, loadingModels: false, managedCount: 0, modal: null, modelConfig: null,
     modelTest: { running: true, status: 'Testing connection…' }, modelTestWorkspace: null,

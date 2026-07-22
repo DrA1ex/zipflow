@@ -31,6 +31,7 @@ import { PathCompletionPopup } from './path-completion.js';
 import { runSettingsStatus } from '../app/runtime-settings.js';
 import { ZipflowTextEditorView } from './editor-view.js';
 import { ContextDock, contextText } from './context-dock.js';
+import { selectRowIndex, selectRows } from './select-rows.js';
 import { translateForState as t } from '../i18n/index.js';
 
 export function renderZipflow({ state, width, height, animationFrame = 0 }) {
@@ -85,7 +86,7 @@ function renderGlobalFooter({ left = [], right = [], width = 80, theme = null } 
   const innerWidth = Math.max(1, Number(width) - 4);
   const leftRaw = left.filter(Boolean).join(separator);
   const rightRaw = right.filter(Boolean).join(separator);
-  const maxRightWidth = rightRaw ? Math.min(36, Math.max(0, Math.floor(innerWidth * 0.35))) : 0;
+  const maxRightWidth = rightRaw ? Math.min(64, Math.max(0, Math.floor(innerWidth * 0.55))) : 0;
   let rightText = maxRightWidth >= 8 ? truncateVisible(rightRaw, maxRightWidth, '…') : '';
   const gap = rightText ? 2 : 0;
   let leftWidth = Math.max(1, innerWidth - visibleLength(rightText) - gap);
@@ -206,6 +207,7 @@ function renderCurrent(state, width, height, theme) {
   const windowSize = Math.max(2, height - 4 - introRows - contextRows);
   state.menuPageSize = windowSize;
   const footerNode = ContextDock({ text: selectedContext, rows: contextRows, width: Math.max(20, width - 6), theme });
+  const menuRows = selectRows(state.menuItems, (item) => menuItemLabel(item, state));
   return WorkspacePane({
     title: ` ${screenTitle(state)} `,
     active: true,
@@ -218,16 +220,16 @@ function renderCurrent(state, width, height, theme) {
       intro.length ? Text('') : null,
       SelectList({
         title: 'Choose',
-        items: state.menuItems,
+        items: menuRows,
         selectedIndex: state.selectedIndex,
         windowSize,
-        getLabel: (item) => menuItemLabel(item, state),
+        getLabel: (item) => item.label,
         getDisabled: (item) => item.disabled,
         wrapItems: false,
         maxItemLines: 1,
         theme,
         pointerId: 'zipflow:menu',
-        onSelect: (_item, index) => state.dispatch?.({ type: 'activate-index', index }),
+        onSelect: (item, index) => state.dispatch?.({ type: 'activate-index', index: selectRowIndex(item, index) }),
         onWheel: (event) => {
           const delta = event.deltaY < 0 ? -1 : 1;
           state.dispatch?.({ type: 'menu-move-selection', delta });
@@ -492,7 +494,8 @@ function renderMenuSearchOverlay(state, content, width, height, promptHeight, th
 function contextRowsForScreen(screen) {
   return isWorkflowSetupScreen(screen) ? 2 : 1;
 }
-function showsInlineDescriptions(_screen) {
+function showsInlineDescriptions(screen) {
+  void screen;
   return false;
 }
 function isWorkflowSetupScreen(screen) {

@@ -14,6 +14,7 @@ import { refreshPathSuggestions } from '../src/app/path-suggestions.js';
 import { normalizeOutputArchivePath } from '../src/export/output-path.js';
 import { submitExportEditor } from '../src/app/export-flow.js';
 import { DEFAULT_SETTINGS } from '../src/settings/store.js';
+import { settingsDefinitions } from '../src/app/settings-options.js';
 import { tempDir } from '../test-support/helpers.js';
 
 function projectFixture(root = '/tmp/fixture') {
@@ -52,8 +53,9 @@ function settingsTestState() {
   state.project = projectFixture();
   state.screen = 'settings';
   state.settings = { ...DEFAULT_SETTINGS, llmProvider: 'ollama', llmModel: 'qwen' };
+  const localLlmIndex = settingsDefinitions(state).findIndex((item) => item.id === 'localLlm');
   state.settingsPanel = {
-    focus: 'parameters', categoryIndex: 2, parameterIndices: { localLlm: 0 }, choiceIndices: {},
+    focus: 'parameters', categoryIndex: localLlmIndex, parameterIndices: { localLlm: 0 }, choiceIndices: {},
     activeParameterId: null, subpage: 'llmModelTests', models: [], modelsProvider: 'ollama',
     modelError: null, loadingModels: false, managedCount: 0, modal: null, modelConfig: null,
     modelTest: { running: true, status: 'Testing connection…' }, modelTestWorkspace: null,

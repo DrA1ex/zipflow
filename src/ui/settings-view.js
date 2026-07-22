@@ -17,6 +17,7 @@ import { PathCompletionPopup } from './path-completion.js';
 import { renderModelReplayWorkspace } from './model-replay-view.js';
 import { ZipflowTextEditorView } from './editor-view.js';
 import { ContextDock } from './context-dock.js';
+import { selectRowIndex, selectRows } from './select-rows.js';
 import { localizeUiItem, translateForState as t } from '../i18n/index.js';
 
 const SETTINGS_CONTEXT_ROWS = 2;
@@ -25,6 +26,8 @@ export function renderSettings(state, width, height, theme, animationFrame = 0) 
   const view = settingsViewModel(state);
   const leftWidth = Math.max(24, Math.min(34, Math.floor(width * 0.3)));
   const rightWidth = Math.max(26, width - leftWidth - 2);
+  const localizedDefinitions = view.definitions.map((item) => localizeUiItem(state, item));
+  const categoryRows = selectRows(localizedDefinitions, (item) => oneLineLabel(item.label));
   const categories = WorkspacePane({
     title: ` ${t(state, 'Categories').toUpperCase()} `,
     active: view.focus === 'categories' && !view.modal,
@@ -32,15 +35,15 @@ export function renderSettings(state, width, height, theme, animationFrame = 0) 
     theme,
     children: [SelectList({
       title: t(state, 'Settings'),
-      items: view.definitions.map((item) => localizeUiItem(state, item)),
+      items: categoryRows,
       selectedIndex: view.categoryIndex,
       windowSize: Math.max(2, height - 6),
-      getLabel: (item) => oneLineLabel(item.label),
+      getLabel: (item) => item.label,
       wrapItems: false,
       maxItemLines: 1,
       theme,
       pointerId: 'zipflow:settings-categories',
-      onSelect: (_item, index) => state.dispatch?.({ type: 'settings-select-setting', index }),
+      onSelect: (item, index) => state.dispatch?.({ type: 'settings-select-setting', index: selectRowIndex(item, index) }),
     })],
   });
   const right = view.modelConfig
@@ -105,6 +108,9 @@ function renderSettingsPage(state, view, width, height, theme, animationFrame) {
   const context = nestedChoice
     ? joinContextLines(pageContext, parameterDescription)
     : parameterDescription || pageContext;
+  const rows = selectRows(items, (item) => oneLineLabel(showingChoices
+    ? choiceLabel(state, item, theme, animationFrame)
+    : parameterLabel(state, item, theme, animationFrame)));
   return WorkspacePane({
     title,
     active: view.focus !== 'categories' && !view.modal,
@@ -115,21 +121,19 @@ function renderSettingsPage(state, view, width, height, theme, animationFrame) {
     children: [
       SelectList({
         title: t(state, showingChoices ? 'Options' : 'Parameters'),
-        items,
+        items: rows,
         selectedIndex: showingChoices ? view.choiceIndex : view.parameterIndex,
         windowSize: Math.max(2, height - 7),
-        getLabel: (item) => oneLineLabel(showingChoices
-          ? choiceLabel(state, item, theme, animationFrame)
-          : parameterLabel(state, item, theme, animationFrame)),
+        getLabel: (item) => item.label,
         getDisabled: (item) => Boolean(item.disabled || item.blocked || item.loading),
         getDisabledIndicator: (item) => item.loading || item.blocked ? '' : '×',
         wrapItems: false,
         maxItemLines: 1,
         theme,
         pointerId: showingChoices ? 'zipflow:settings-choices' : 'zipflow:settings-parameters',
-        onSelect: (_item, index) => state.dispatch?.({
+        onSelect: (item, index) => state.dispatch?.({
           type: showingChoices ? 'settings-select-choice' : 'settings-select-parameter',
-          index,
+          index: selectRowIndex(item, index),
         }),
       }),
     ].filter(Boolean),
@@ -155,6 +159,12 @@ function renderModelConfigPage(state, view, width, height, theme, animationFrame
   const context = choices
     ? joinContextLines(pageContext, parameterDescription)
     : parameterDescription || pageContext;
+  const rows = selectRows(items, (item) => oneLineLabel((() => {
+    if (!choices && item.id === 'use-model' && view.loading) return spinnerLabel(animationFrame, item.label);
+    return choices
+      ? `${item.value === view.values[view.activeParameter.id] ? '●' : '○'} ${item.label}`
+      : `${item.label}${item.value ? `: ${item.value}` : ''}`;
+  })()));
   return WorkspacePane({
     title: ` ${t(state, model.label).toUpperCase()} `,
     active: !state.settingsPanel?.modal,
@@ -165,24 +175,19 @@ function renderModelConfigPage(state, view, width, height, theme, animationFrame
     children: [
       SelectList({
         title: t(state, choices ? 'Options' : 'Load configuration'),
-        items,
+        items: rows,
         selectedIndex: choices ? view.choiceIndex : view.parameterIndex,
         windowSize: Math.max(2, height - 7),
-        getLabel: (item) => oneLineLabel((() => {
-          if (!choices && item.id === 'use-model' && view.loading) return spinnerLabel(animationFrame, item.label);
-          return choices
-            ? `${item.value === view.values[view.activeParameter.id] ? '●' : '○'} ${item.label}`
-            : `${item.label}${item.value ? `: ${item.value}` : ''}`;
-        })()),
+        getLabel: (item) => item.label,
         getDisabled: (item) => Boolean(item.disabled || item.blocked || item.loading),
         getDisabledIndicator: (item) => item.loading || item.blocked ? '' : '×',
         wrapItems: false,
         maxItemLines: 1,
         theme,
         pointerId: choices ? 'zipflow:model-config-choices' : 'zipflow:model-config-parameters',
-        onSelect: (_item, index) => state.dispatch?.({
+        onSelect: (item, index) => state.dispatch?.({
           type: choices ? 'settings-model-select-choice' : 'settings-model-select-parameter',
-          index,
+          index: selectRowIndex(item, index),
         }),
       }),
     ].filter(Boolean),

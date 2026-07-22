@@ -104,13 +104,12 @@ test('settings keep categories on the left and the selected category page on the
   const output = renderToString(renderZipflow({ state, width: 110, height: 30 }), { width: 110, height: 30 });
 
   assert.equal(view.focus, 'categories');
-  assert.deepEqual(view.definitions.map((item) => item.id), ['theme', 'checkOutput', 'localLlm', 'sourceArchive', 'backups', 'managedHistory']);
+  assert.deepEqual(view.definitions.map((item) => item.id), ['language', 'theme', 'checkOutput', 'localLlm', 'sourceArchive', 'backups', 'managedHistory']);
   assert.equal(view.direct, true);
-  assert.equal(view.activeParameter.id, 'theme');
-  assert.equal(view.choices[view.choiceIndex].id, 'theme:ocean');
+  assert.equal(view.activeParameter.id, 'interfaceLanguage');
   assert.match(output, /CATEGORIES/);
-  assert.match(output, /THEME/);
-  assert.match(output, /● Ocean/);
+  assert.match(output, /LANGUAGE/);
+  assert.match(output, /System language/);
 });
 
 test('a choice replaces only the right pane and returns to the originating parameter on Enter', async () => withSettingsHome(async () => {
@@ -136,7 +135,7 @@ test('a choice replaces only the right pane and returns to the originating param
 test('single-option setting categories open their choices directly and keep the active value selected', async () => withSettingsHome(async () => {
   const { state, controller } = await settingsController({ theme: 'ocean' });
 
-  await handleSettingsKey(controller, { name: 'enter' });
+  await selectCategory(controller, 'theme');
   let view = settingsViewModel(state);
   assert.equal(view.direct, true);
   assert.equal(view.focus, 'choices');

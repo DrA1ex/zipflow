@@ -14,6 +14,7 @@ import {
   wrapText,
 } from 'terlio.js';
 import { ContextDock } from './context-dock.js';
+import { selectRowIndex, selectRows } from './select-rows.js';
 import { parseRichTextBlocks } from './rich-text.js';
 import { renderSyntaxLines } from './syntax-render.js';
 import { translateForState as t } from '../i18n/index.js';
@@ -51,6 +52,7 @@ function renderReplayPreview(state, workspace, width, height, theme) {
     { id: 'back', label: t(state, 'Back'), description: t(state, 'Return to historical updates without starting a model request.') },
   ];
   const selected = items[workspace.previewIndex ?? 0];
+  const rows = selectRows(items, (item) => item.label);
   return replayFrame({
     width,
     height,
@@ -66,11 +68,11 @@ function renderReplayPreview(state, workspace, width, height, theme) {
       Text(color(theme, 'textMuted', t(state, 'No project files, Git state, backups, source archives, or run history will be changed.')), { wrap: true }),
       Box({ grow: true, height: 'fill' }),
       SelectList({
-        title: t(state, 'Choose'), items, selectedIndex: workspace.previewIndex ?? 0,
+        title: t(state, 'Choose'), items: rows, selectedIndex: workspace.previewIndex ?? 0,
         windowSize: 2, getLabel: (item) => item.label,
         wrapItems: false, theme,
         pointerId: 'zipflow:model-replay-preview',
-        onSelect: (_item, index) => state.dispatch?.({ type: 'model-replay-preview-select', index }),
+        onSelect: (item, index) => state.dispatch?.({ type: 'model-replay-preview-select', index: selectRowIndex(item, index) }),
       }),
       ContextDock({ text: selected?.description ?? '', rows: 1, width: Math.max(20, width - 4), theme }),
     ],
