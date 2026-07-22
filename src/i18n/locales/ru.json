@@ -543,7 +543,197 @@
     "M mode": "M — режим",
     "Esc cancel LLM": "Esc — отменить LLM",
     "G report": "G — отчёт",
-    "Search": "Поиск"
+    "Search": "Поиск",
+    "Activity block toggled": "Блок событий переключён",
+    "Archive not found": "Архив не найден",
+    "Archive root needs confirmation": "Требуется подтверждение корня архива",
+    "Archive scan cancelled": "Сканирование архивов отменено",
+    "Archive scan failed": "Не удалось просканировать архивы",
+    "Asking the local LLM to explain the error": "Локальная LLM анализирует ошибку",
+    "Asking the local LLM to explain the failed check": "Локальная LLM анализирует ошибку проверки",
+    "Autopilot decision unavailable": "Решение автопилота недоступно",
+    "Autopilot paused": "Автопилот приостановлен",
+    "Autopilot resumed": "Автопилот возобновлён",
+    "Backup cleanup cancelled": "Очистка резервных копий отменена",
+    "Backup cleanup stopped": "Очистка резервных копий остановлена",
+    "Cancelling ZIP preview preparation…": "Отмена подготовки предпросмотра ZIP…",
+    "Cancelling local LLM generation…": "Отмена генерации локальной LLM…",
+    "Cancelling model test…": "Отмена проверки модели…",
+    "Cancellation completed after Git commit": "Отмена завершена после создания Git-коммита",
+    "Cancellation completed after Git rewrite": "Отмена завершена после изменения Git-коммита",
+    "Checkpoint cancelled": "Создание контрольной точки отменено",
+    "Checkpoint created": "Контрольная точка создана",
+    "Checkpoint unavailable": "Контрольная точка недоступна",
+    "Check result summary": "Итоги проверок",
+    "Checks cancelled": "Проверки отменены",
+    "Checks starting": "Запуск проверок",
+    "Clipboard transfer unavailable": "Буфер обмена недоступен",
+    "Commit cancelled": "Создание коммита отменено",
+    "Commit created": "Коммит создан",
+    "Commit rewrite cancelled": "Изменение коммита отменено",
+    "Commit rewrite was not created": "Изменённый коммит не создан",
+    "Commit template saved": "Шаблон коммита сохранён",
+    "Commit was not created": "Коммит не создан",
+    "Continuing without Git": "Продолжение без Git",
+    "Could not create ZIP archive": "Не удалось создать ZIP-архив",
+    "Could not open archive location": "Не удалось открыть расположение архива",
+    "Could not prepare ZIP preview": "Не удалось подготовить предпросмотр ZIP",
+    "Could not use this directory": "Не удалось использовать эту папку",
+    "Custom check removed": "Пользовательская проверка удалена",
+    "Deploy command configured": "Команда развёртывания настроена",
+    "Deployment completed": "Развёртывание завершено",
+    "Deployment is not configured": "Развёртывание не настроено",
+    "Deployment output": "Вывод развёртывания",
+    "Diagnostics copied": "Диагностика скопирована",
+    "Enable managed-file recording first": "Сначала включите запись управляемых файлов",
+    "Enter a commit message template.": "Введите шаблон сообщения коммита.",
+    "Enter a commit message.": "Введите сообщение коммита.",
+    "Enter a message for the first commit.": "Введите сообщение первого коммита.",
+    "Enter a short display name for this check.": "Введите короткое название проверки.",
+    "Enter the deploy command.": "Введите команду развёртывания.",
+    "Enter the exact command Zipflow should run.": "Введите точную команду, которую должен выполнить Zipflow.",
+    "External effects may remain": "Внешние изменения могли сохраниться",
+    "Failed command output": "Вывод завершившейся с ошибкой команды",
+    "Failure report copied": "Отчёт об ошибке скопирован",
+    "Final summary": "Итоговая сводка",
+    "First commit created": "Первый коммит создан",
+    "First commit was not created": "Первый коммит не создан",
+    "Git initialization failed": "Не удалось инициализировать Git",
+    "Git repository initialized": "Репозиторий Git инициализирован",
+    "Guarded autopilot paused": "Безопасный автопилот приостановлен",
+    "Initial commit": "Начальный коммит",
+    "Interrupted run closed": "Прерванный запуск закрыт",
+    "Interrupted update detected": "Обнаружено прерванное обновление",
+    "Keeping changes after failed checks": "Изменения сохранены несмотря на ошибки проверок",
+    "Local LLM analysis starting": "Запуск анализа локальной LLM",
+    "Local LLM archive suitability": "Оценка пригодности архива локальной LLM",
+    "Local LLM error explanation": "Объяснение ошибки локальной LLM",
+    "Local LLM fallback used": "Использован резервный режим локальной LLM",
+    "Local LLM generation cancelled": "Генерация локальной LLM отменена",
+    "Local LLM review coverage": "Охват проверки локальной LLM",
+    "Local LLM review skipped": "Проверка локальной LLM пропущена",
+    "Local LLM summary": "Сводка локальной LLM",
+    "Local LLM summary was not generated": "Сводка локальной LLM не создана",
+    "Manual checks starting": "Запуск ручных проверок",
+    "Manual deployment starting": "Запуск ручного развёртывания",
+    "Manual run report": "Отчёт о ручном запуске",
+    "Model configuration cancelled": "Настройка модели отменена",
+    "Model refresh failed": "Не удалось обновить список моделей",
+    "Model test could not start": "Не удалось запустить проверку модели",
+    "Model test passed": "Проверка модели пройдена",
+    "No checks configured": "Проверки не настроены",
+    "No matching recent ZIP files found": "Подходящие недавние ZIP-файлы не найдены",
+    "No previous archive": "Предыдущего архива нет",
+    "No previous archive folder": "Папка предыдущего архива неизвестна",
+    "No previous run": "Предыдущего запуска нет",
+    "No stored file diffs are available": "Сохранённые различия файлов недоступны",
+    "Opened archive location": "Расположение архива открыто",
+    "Opened run report": "Отчёт о запуске открыт",
+    "Opening the containing folder is not supported on this platform.": "Открытие содержащей папки не поддерживается на этой платформе.",
+    "Previous archive is unavailable": "Предыдущий архив недоступен",
+    "Previous archive result": "Результат предыдущего архива",
+    "Previous run is missing": "Предыдущий запуск отсутствует",
+    "Previously applied archive detected": "Обнаружен ранее применённый архив",
+    "Raw LLM response": "Необработанный ответ LLM",
+    "Ready for another archive": "Готово к следующему архиву",
+    "Recommended .gitignore groups": "Рекомендуемые группы .gitignore",
+    "Repeating previous archive": "Повторное применение предыдущего архива",
+    "Rollback completed": "Откат завершён",
+    "Rollback failed": "Не удалось выполнить откат",
+    "Rollback is not safe": "Безопасный откат невозможен",
+    "Run details": "Сведения о запуске",
+    "Run failed": "Запуск завершился ошибкой",
+    "Run report is missing": "Отчёт о запуске отсутствует",
+    "Run report is unavailable": "Отчёт о запуске недоступен",
+    "Run summary copied": "Сводка запуска скопирована",
+    "Safe plan accepted automatically": "Безопасный план принят автоматически",
+    "Saved conflict policy applied": "Применена сохранённая политика конфликтов",
+    "Settings are available after this operation finishes": "Настройки будут доступны после завершения текущей операции",
+    "Source archive cleanup cancelled": "Очистка исходных архивов отменена",
+    "Source archive cleanup stopped": "Очистка исходных архивов остановлена",
+    "Source archive deleted": "Исходный архив удалён",
+    "Source archive moved": "Исходный архив перемещён",
+    "Source archive policy could not be applied": "Не удалось применить политику исходных архивов",
+    "Source archive was already missing": "Исходный архив уже отсутствовал",
+    "Step 1 of 5 · Choose archive": "Шаг 1 из 5 · Выбор архива",
+    "Storage scan is unavailable while another operation is active": "Сканирование хранилища недоступно во время другой операции",
+    "Storage statistics refreshed": "Статистика хранилища обновлена",
+    "The stored patch for this run is unavailable": "Сохранённый патч этого запуска недоступен",
+    "This historical run has no decisions to simulate": "В этом историческом запуске нет решений для симуляции",
+    "Unexpected error": "Непредвиденная ошибка",
+    "Unsafe archive path": "Небезопасный путь внутри архива",
+    "Unsupported archive": "Неподдерживаемый архив",
+    "Update applied": "Обновление применено",
+    "Update cancelled": "Обновление отменено",
+    "Waiting for archive": "Ожидание архива",
+    "ZIP archive created": "ZIP-архив создан",
+    "ZIP creation cancelled": "Создание ZIP отменено",
+    "ZIP path copied": "Путь к ZIP скопирован",
+    "ZIP preview preparation cancelled": "Подготовка предпросмотра ZIP отменена",
+    "Additional LLM context reduction": "Дополнительное сокращение контекста LLM",
+    "All checks passed": "Все проверки пройдены",
+    "Archive inspected": "Архив проверен",
+    "Archive inspection cancelled": "Проверка архива отменена",
+    "Autopilot decision details": "Подробности решения автопилота",
+    "Autopilot paused for Git conflicts": "Автопилот приостановлен из-за конфликтов Git",
+    "Autopilot paused for staged changes": "Автопилот приостановлен из-за подготовленных изменений Git",
+    "Autopilot resolved conflicts": "Автопилот разрешил конфликты",
+    "Conflict decision": "Решение по конфликту",
+    "Conflict resolved": "Конфликт разрешён",
+    "Conflict review completed": "Проверка конфликтов завершена",
+    "Activity text copied": "Текст событий скопирован",
+    "Archive already exists": "Архив уже существует",
+    "Archive ready": "Архив готов",
+    "Archive root selected": "Корень архива выбран",
+    "Archive was used before": "Архив уже использовался",
+    "Backups cleared": "Резервные копии очищены",
+    "Backups partially cleared": "Резервные копии очищены частично",
+    "Checks selected": "Проверки выбраны",
+    "Choose a matching archive": "Выберите подходящий архив",
+    "Choose deployment command": "Выберите команду развёртывания",
+    "Confirm dangerous decision mode": "Подтвердите опасный режим решений",
+    "Confirm rollback": "Подтвердите откат",
+    "Create the Git baseline": "Создать исходную точку Git",
+    "Create ZIP archive": "Создать ZIP-архив",
+    "Deploying": "Развёртывание",
+    "Deploying current version": "Развёртывание текущей версии",
+    "Deployment cancelled": "Развёртывание отменено",
+    "Do not commit the applied update": "Не создавать коммит после применения обновления",
+    "Do not create checkpoint commits": "Не создавать контрольные коммиты",
+    "Edit workflow": "Изменить процесс",
+    "Existing .gitignore found": "Найден существующий .gitignore",
+    "Files not recommended for this ZIP": "Файлы, не рекомендуемые для этого ZIP",
+    "Filter run result": "Фильтр по результату запуска",
+    "Filter run type": "Фильтр по типу запуска",
+    "Git is not initialized": "Git не инициализирован",
+    "Include protected project data?": "Включить защищённые данные проекта?",
+    "Loading historical updates": "Загрузка исторических обновлений",
+    "Model configuration": "Настройка модели",
+    "Model saved and selected": "Модель сохранена и выбрана",
+    "No deploy command": "Без команды развёртывания",
+    "Only clean Git-tracked files": "Только чистые файлы под контролем Git",
+    "Overlay archive": "Архив-наложение",
+    "Path selected · press Enter to continue": "Путь выбран · нажмите Enter для продолжения",
+    "Project run history": "История запусков проекта",
+    "Project selected": "Проект выбран",
+    "Protect affected local changes with Git": "Защитить затронутые локальные изменения с помощью Git",
+    "Protect local and generated files": "Защитить локальные и сгенерированные файлы",
+    "Read message from the archive": "Прочитать сообщение из архива",
+    "Recent archives · Enter selects": "Недавние архивы · Enter — выбрать",
+    "Recover interrupted update": "Восстановить прерванное обновление",
+    "Review update plan": "Проверить план обновления",
+    "Review workflow": "Проверить процесс",
+    "Review ZIP contents": "Проверить содержимое ZIP",
+    "Source archives cleared": "Исходные архивы очищены",
+    "Source archives partially cleared": "Исходные архивы очищены частично",
+    "Storage scan cancelled": "Сканирование хранилища отменено",
+    "Storage scan failed": "Не удалось просканировать хранилище",
+    "Workflow not configured": "Процесс не настроен",
+    "Your choice": "Ваш выбор",
+    "HUNK": "ФРАГМЕНТ",
+    "FILE": "ФАЙЛ",
+    "UNIFIED": "ОБЪЕДИНЁННО",
+    "SIDE BY SIDE": "ПАРАЛЛЕЛЬНО"
   },
   "patterns": [
     {
@@ -564,7 +754,7 @@
     },
     {
       "source": "Press Enter again to scan recent ZIP files in {directory}",
-      "target": "Нажмите Enter ещё раз, чтобы просканировать свежие ZIP в {directory}"
+      "target": "Нажмите Enter ещё раз, чтобы найти недавние ZIP в {directory}"
     },
     {
       "source": "{count} added · {updated} changed · {deleted} removed",
@@ -709,6 +899,126 @@
     {
       "source": "{count} matching items · Enter keeps filter · Esc clears/closes",
       "target": "Совпадений: {count} · Enter — оставить фильтр · Esc — очистить/закрыть"
+    },
+    {
+      "source": "{count} archives · {size} · oldest {oldest}",
+      "target": "Архивов: {count} · {size} · самый старый: {oldest}"
+    },
+    {
+      "source": "{count} backups · {files} files · {size} · oldest {oldest}",
+      "target": "Резервных копий: {count} · файлов: {files} · {size} · самая старая: {oldest}"
+    },
+    {
+      "source": "{count} recorded paths · last updated {updated}",
+      "target": "Записанных путей: {count} · последнее обновление: {updated}"
+    },
+    {
+      "source": "{count} new",
+      "target": "Новых: {count}"
+    },
+    {
+      "source": "↓ {count} new Activity entry · click or press End",
+      "target": "↓ {count} новое событие · щёлкните или нажмите End"
+    },
+    {
+      "source": "↓ {count} new Activity entries · click or press End",
+      "target": "↓ Новых событий: {count} · щёлкните или нажмите End"
+    },
+    {
+      "source": "{label} saved",
+      "target": "{label}: сохранено"
+    },
+    {
+      "source": "{count} {provider} models available",
+      "target": "Доступно моделей {provider}: {count}"
+    },
+    {
+      "source": "{model} selected",
+      "target": "Модель {model} выбрана"
+    },
+    {
+      "source": "{summary} removed before cancellation",
+      "target": "До отмены удалено: {summary}"
+    },
+    {
+      "source": "Report saved at {path}",
+      "target": "Отчёт сохранён: {path}"
+    },
+    {
+      "source": "Scanned {directory} for archives modified in the last 24 hours.",
+      "target": "Проверена папка {directory}: искались архивы, изменённые за последние 24 часа."
+    },
+    {
+      "source": "{count} potentially sensitive files excluded",
+      "target": "Исключено потенциально конфиденциальных файлов: {count}"
+    },
+    {
+      "source": "{count} old backups removed",
+      "target": "Удалено старых резервных копий: {count}"
+    },
+    {
+      "source": "{count} old backup removed",
+      "target": "Удалена {count} старая резервная копия"
+    },
+    {
+      "source": "Testing {model}",
+      "target": "Проверка модели {model}"
+    },
+    {
+      "source": "Model test passed · {duration}",
+      "target": "Проверка модели пройдена · {duration}"
+    },
+    {
+      "source": "{parameter} updated",
+      "target": "Параметр «{parameter}» обновлён"
+    },
+    {
+      "source": "Diff mode: {mode}",
+      "target": "Режим различий: {mode}"
+    },
+    {
+      "source": "Diff hunk {index} of {count}",
+      "target": "Фрагмент различий {index} из {count}"
+    },
+    {
+      "source": "Diff file {index} of {count} · {path}",
+      "target": "Файл различий {index} из {count} · {path}"
+    },
+    {
+      "source": "Cancellation requested · finishing {operation}…",
+      "target": "Запрошена отмена · завершение операции «{operation}»…"
+    },
+    {
+      "source": "Force-stopping {operation}…",
+      "target": "Принудительная остановка операции «{operation}»…"
+    },
+    {
+      "source": "Cancelling {operation}…",
+      "target": "Отмена операции «{operation}»…"
+    },
+    {
+      "source": "{mode} decision",
+      "target": "Решение режима «{mode}»"
+    },
+    {
+      "source": "Failed output · {check}",
+      "target": "Вывод неудачной проверки · {check}"
+    },
+    {
+      "source": "Update run {runId}",
+      "target": "Запуск обновления {runId}"
+    },
+    {
+      "source": "{count} parameters",
+      "target": "Параметров: {count}"
+    },
+    {
+      "source": "maximum context {count}",
+      "target": "максимальный контекст {count}"
+    },
+    {
+      "source": "{start}-{end} of {total} · N/P hunk · J/K file · M mode · Esc back",
+      "target": "{start}–{end} из {total} · N/P — фрагмент · J/K — файл · M — режим · Esc — назад"
     }
   ]
 }

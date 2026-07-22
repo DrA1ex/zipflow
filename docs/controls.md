@@ -47,7 +47,7 @@ Workflow action lists render every choice as exactly one row. Descriptions are k
 
 The global footer is an untitled key-hint bar. It may include a short contextual value on the right, but it is not presented as a separate status panel.
 
-Context help opens as a native blocking Terlio overlay with the active accent, background dimming, and shadow. It wraps to the available terminal size, becomes scrollable when necessary, and closes with a click or `Esc`. Short transient notifications use Terlio's native toast overlay.
+Context help opens as a native blocking Terlio overlay with the active accent, background dimming, and shadow. It wraps to the available terminal size, becomes scrollable when necessary, and closes with a click or `Esc`. Transient notifications use Zipflow's adaptive toast overlay: width follows the content within terminal bounds, detail text wraps, the tail is preserved, and clicking dismisses the notification.
 
 Editors use muted placeholders with a visible cursor so examples cannot be mistaken for entered text.
 
@@ -111,7 +111,7 @@ Page Up     scroll upward
 Page Down   scroll downward
 Home        first line
 End         last line
-Mouse wheel scroll the diff directly
+Mouse wheel scrolls the diff by exactly three rows
 ```
 
 Conflict review also exposes direct keep-local and use-archive shortcuts in the active footer. Every action remains available through the normal menu.

@@ -33,6 +33,8 @@ import { ZipflowTextEditorView } from './editor-view.js';
 import { ContextDock, contextText } from './context-dock.js';
 import { selectRowIndex, selectRows } from './select-rows.js';
 import { translateForState as t } from '../i18n/index.js';
+import { wheelScrollDelta } from './wheel.js';
+import { overlayManagerWithoutToasts, renderZipflowToasts } from './toast-overlay.js';
 
 export function renderZipflow({ state, width, height, animationFrame = 0 }) {
   const theme = themes[state.settings?.theme] ?? themes.ocean;
@@ -79,7 +81,15 @@ export function renderZipflow({ state, width, height, animationFrame = 0 }) {
     theme,
     children: shell,
   });
-  return OverlayHost({ content: responsive, manager: state.overlays, theme, width, height, toastBottomMargin: 2 });
+  const hosted = OverlayHost({
+    content: responsive,
+    manager: overlayManagerWithoutToasts(state.overlays),
+    theme,
+    width,
+    height,
+    toastBottomMargin: 0,
+  });
+  return renderZipflowToasts({ content: hosted, manager: state.overlays, theme, width, height, bottom: 2 });
 }
 function renderGlobalFooter({ left = [], right = [], width = 80, theme = null } = {}) {
   const separator = '  │  ';
@@ -142,8 +152,8 @@ function renderTranscript(state, width, height, theme) {
   const hasCollapsed = transcript.ranges.some((item) => item.collapsible);
   const unread = Math.max(0, Number(state.activityUnread) || 0);
   const activityTitle = unread && !state.transcriptSticky
-    ? ` Activity · ${unread} new ↓ `
-    : ' Activity ';
+    ? ` ${t(state, 'Activity')} · ${t(state, '{count} new', { count: unread })} ↓ `
+    : ` ${t(state, 'Activity')} `;
   const pane = ScrollPane({
     title: activityTitle,
     lines,
@@ -154,7 +164,7 @@ function renderTranscript(state, width, height, theme) {
     theme,
     pointerId: 'zipflow:transcript',
     onWheel: (event) => {
-      state.transcriptScroll = scrollBy(state.transcriptScroll, event.deltaY, maxScroll);
+      state.transcriptScroll = scrollBy(state.transcriptScroll, wheelScrollDelta(event), maxScroll);
       state.transcriptSticky = state.transcriptScroll >= maxScroll;
       if (state.transcriptSticky) state.activityUnread = 0;
       event.preventDefault();
@@ -173,7 +183,7 @@ function renderTranscript(state, width, height, theme) {
     },
     onCopy: (text, _selection, _event, context) => {
       const result = copyTextToClipboard(text, { output: context.runtime.output });
-      if (result.copied) state.overlays?.toast?.('Activity text copied', 'success', 2);
+      if (result.copied) state.overlays?.toast?.(t(state, 'Activity text copied'), 'success', 2);
       else state.status = 'Clipboard transfer unavailable';
       return result.copied;
     },
@@ -188,7 +198,9 @@ function renderTranscript(state, width, height, theme) {
       event.stopPropagation?.();
     },
   }, Box({ border: true, padding: { left: 1, right: 1 } },
-    Text(color(theme, 'accent', `↓ ${unread} new Activity entr${unread === 1 ? 'y' : 'ies'} · click or press End`), { wrap: false }),
+    Text(color(theme, 'accent', t(state, unread === 1
+      ? '↓ {count} new Activity entry · click or press End'
+      : '↓ {count} new Activity entries · click or press End', { count: unread })), { wrap: false }),
   ));
   return BottomOverlay({ content: pane, overlay: indicator, height, bottom: 1, left: 2, right: 2, align: 'center', opaque: true });
 }
@@ -231,8 +243,8 @@ function renderCurrent(state, width, height, theme) {
         pointerId: 'zipflow:menu',
         onSelect: (item, index) => state.dispatch?.({ type: 'activate-index', index: selectRowIndex(item, index) }),
         onWheel: (event) => {
-          const delta = event.deltaY < 0 ? -1 : 1;
-          state.dispatch?.({ type: 'menu-move-selection', delta });
+          const delta = wheelScrollDelta(event);
+          if (delta) state.dispatch?.({ type: 'menu-move-selection', delta });
           event.preventDefault();
           event.stopPropagation?.();
         },
@@ -312,17 +324,17 @@ function renderChecksRunning(state, height, theme) {
     return `${color(theme, token, status.padEnd(5))} ${check.name}${duration}`;
   });
   if (state.settings.checkOutput === 'last-line' && runtime.lastLine) lines.push('', runtime.lastLine);
-  return runtimePane(' Running checks ', lines, height, theme);
+  return runtimePane(` ${t(state, 'Running checks')} `, lines, height, theme);
 }
 
 function renderDeployRunning(state, height, theme) {
   const runtime = state.deployRuntime ?? {};
   const lines = [
-    `${color(theme, 'accent', 'RUN  ')} Deploy command`,
+    `${color(theme, 'accent', 'RUN  ')} ${t(state, 'Deploy command')}`,
     runtime.commandText ? `      ${runtime.commandText}` : '',
   ].filter(Boolean);
   if (state.settings.checkOutput === 'last-line' && runtime.lastLine) lines.push('', runtime.lastLine);
-  return runtimePane(' Deploying ', lines, height, theme);
+  return runtimePane(` ${t(state, 'Deploying')} `, lines, height, theme);
 }
 
 function runtimePane(title, lines, height, theme) {
@@ -351,21 +363,22 @@ function renderDiffView(state, width, height, theme) {
   const visibleRows = Math.max(1, height - 4);
   const maxScroll = Math.max(0, lines.length - visibleRows);
   view.scroll = clamp(view.scroll, 0, maxScroll);
-  const hunkLabel = document.hunkCount ? ` · HUNK ${view.hunkIndex + 1}/${document.hunkCount}` : '';
-  const fileLabel = view.files?.length > 1 ? ` · FILE ${(view.fileIndex ?? 0) + 1}/${view.files.length}` : '';
+  const hunkLabel = document.hunkCount ? ` · ${t(state, 'HUNK')} ${view.hunkIndex + 1}/${document.hunkCount}` : '';
+  const fileLabel = view.files?.length > 1 ? ` · ${t(state, 'FILE')} ${(view.fileIndex ?? 0) + 1}/${view.files.length}` : '';
   return ScrollPane({
-    title: ` ${view.diff.path} · ${view.mode === 'unified' ? 'UNIFIED' : 'SIDE BY SIDE'}${fileLabel}${hunkLabel} `,
+    title: ` ${view.diff.path} · ${t(state, view.mode === 'unified' ? 'UNIFIED' : 'SIDE BY SIDE')}${fileLabel}${hunkLabel} `,
     lines,
     width,
     height,
     scroll: view.scroll,
-    footer: `${view.scroll + 1}-${Math.min(lines.length, view.scroll + visibleRows)} of ${Math.max(1, lines.length)} · N/P hunk · J/K file · M mode · Esc back`,
+    footer: t(state, '{start}-{end} of {total} · N/P hunk · J/K file · M mode · Esc back', {
+      start: view.scroll + 1, end: Math.min(lines.length, view.scroll + visibleRows), total: Math.max(1, lines.length),
+    }),
     theme,
     pointerId: 'zipflow:diff',
     selection: state.diffSelection,
     onWheel: (event) => {
-      const direction = event.deltaY < 0 ? -1 : 1;
-      view.scroll = scrollBy(view.scroll, direction * 3, maxScroll);
+      view.scroll = scrollBy(view.scroll, wheelScrollDelta(event), maxScroll);
       event.preventDefault();
       event.stopPropagation?.();
     },

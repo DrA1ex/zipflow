@@ -19,6 +19,7 @@ import { ZipflowTextEditorView } from './editor-view.js';
 import { ContextDock } from './context-dock.js';
 import { selectRowIndex, selectRows } from './select-rows.js';
 import { localizeUiItem, translateForState as t } from '../i18n/index.js';
+import { wheelScrollDelta } from './wheel.js';
 
 const SETTINGS_CONTEXT_ROWS = 2;
 
@@ -44,6 +45,12 @@ export function renderSettings(state, width, height, theme, animationFrame = 0) 
       theme,
       pointerId: 'zipflow:settings-categories',
       onSelect: (item, index) => state.dispatch?.({ type: 'settings-select-setting', index: selectRowIndex(item, index) }),
+      onWheel: (event) => {
+        const delta = wheelScrollDelta(event);
+        if (delta) state.dispatch?.({ type: 'settings-wheel', delta });
+        event.preventDefault();
+        event.stopPropagation?.();
+      },
     })],
   });
   const right = view.modelConfig
@@ -97,17 +104,17 @@ function renderSettingsPage(state, view, width, height, theme, animationFrame) {
     ? ` ${(activeParameter?.label ?? t(state, 'Choose')).toUpperCase()} `
     : ` ${t(state, view.pageTitle ?? selectedSetting.label).toUpperCase()} `;
   const selectedParameter = !showingChoices ? items[view.parameterIndex] : null;
-  const summary = nestedChoice ? [] : settingsPageSummary(state, view.selectedSetting).map((line) => t(state, line));
+  const summary = nestedChoice ? [] : settingsPageSummary(state, view.selectedSetting);
   const pageContext = nestedChoice
     ? activeParameter?.description ?? ''
-    : summary.length ? summary.join(' · ') : selectedSetting.description;
+    : selectedSetting.description ?? '';
   const selectedChoice = showingChoices ? items[view.choiceIndex] : null;
   const parameterDescription = showingChoices
     ? selectedChoice?.disabled ? selectedChoice.disabledReason ?? '' : selectedChoice?.description ?? ''
     : selectedParameter?.disabled ? selectedParameter.disabledReason ?? '' : selectedParameter?.description ?? '';
   const context = nestedChoice
     ? joinContextLines(pageContext, parameterDescription)
-    : parameterDescription || pageContext;
+    : joinContextLines(parameterDescription || pageContext, ...summary);
   const rows = selectRows(items, (item) => oneLineLabel(showingChoices
     ? choiceLabel(state, item, theme, animationFrame)
     : parameterLabel(state, item, theme, animationFrame)));
@@ -135,6 +142,12 @@ function renderSettingsPage(state, view, width, height, theme, animationFrame) {
           type: showingChoices ? 'settings-select-choice' : 'settings-select-parameter',
           index: selectRowIndex(item, index),
         }),
+        onWheel: (event) => {
+          const delta = wheelScrollDelta(event);
+          if (delta) state.dispatch?.({ type: 'settings-wheel', delta });
+          event.preventDefault();
+          event.stopPropagation?.();
+        },
       }),
     ].filter(Boolean),
   });
@@ -145,10 +158,10 @@ function renderModelConfigPage(state, view, width, height, theme, animationFrame
   const items = (choices ? view.choices : view.parameters).map((item) => localizeUiItem(state, item));
   const model = view.model;
   const info = [
-    model.paramsString ? `${model.paramsString} parameters` : null,
+    model.paramsString ? t(state, '{count} parameters', { count: model.paramsString }) : null,
     model.quantization,
     model.loaded ? t(state, 'Loaded instance') : t(state, 'Not loaded'),
-    model.maxContextLength ? t(state, `maximum context ${model.maxContextLength.toLocaleString('en-US')}`) : null,
+    model.maxContextLength ? t(state, 'maximum context {count}', { count: model.maxContextLength.toLocaleString('en-US') }) : null,
   ].filter(Boolean).join(' · ');
   const selectedParameter = !choices ? items[view.parameterIndex] : null;
   const pageContext = choices ? localizeUiItem(state, view.activeParameter)?.description ?? '' : [info, t(state, view.error)].filter(Boolean).join(' · ');
@@ -189,6 +202,12 @@ function renderModelConfigPage(state, view, width, height, theme, animationFrame
           type: choices ? 'settings-model-select-choice' : 'settings-model-select-parameter',
           index: selectRowIndex(item, index),
         }),
+        onWheel: (event) => {
+          const delta = wheelScrollDelta(event);
+          if (delta) state.dispatch?.({ type: 'settings-wheel', delta });
+          event.preventDefault();
+          event.stopPropagation?.();
+        },
       }),
     ].filter(Boolean),
   });

@@ -121,4 +121,4 @@ The model never executes shell commands directly. See [Decision modes and autopi
 
 ## Languages
 
-Prompt, summary, and commit-message languages are configured separately. New installations default to English prompts. Migrated installations preserve previous summary and commit-message languages where possible.
+Prompt, summary, and commit-message languages are configured separately. New installations default to English prompts. Migrated installations preserve previous summary and commit-message languages where possible. Ukrainian is not offered as a generated-output language.

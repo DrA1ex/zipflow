@@ -182,7 +182,7 @@ Press `Esc` from the archive prompt to open the project menu. Depending on the c
 - **Create ZIP**
 - **Exit**
 
-Global settings are available with `Ctrl+B`. Workflow setup and Change Workflow use compact one-row choices; descriptions stay in the fixed context dock, and wheel, arrow, Page Up/Page Down, Home, End, and `/` search navigate long lists.
+Global settings are available with `Ctrl+B`. Workflow setup and Change Workflow use compact one-row choices; descriptions stay in the fixed context dock. Every mouse-wheel notch moves exactly three rows in menus, Settings, Activity, diffs, and replay workspaces; arrows, Page Up/Page Down, Home, End, and `/` search remain available for longer navigation. Transient notifications use an adaptive overlay that grows within the terminal width and wraps long detail text instead of clipping it.
 
 Create ZIP safety review keeps small flagged sets readable: up to five files are shown as full project-relative paths, and larger trees collapse directory chains that contain only one flagged file. Credential-like source filenames such as `credential-store.js` are not treated as secret files by name alone; JSON-like and extensionless credential files remain review candidates.
 
@@ -220,7 +220,7 @@ Custom packs are ordinary JSON files placed in:
 ~/.zipflow/languages/
 ```
 
-They are validated against `docs/i18n/language.schema.json`. A custom pack may translate only the strings it needs; missing entries fall back to English. Use **Refresh languages** in the language picker or restart Zipflow after adding or replacing a file. See [Interface localization](docs/i18n/README.md).
+They are validated against `docs/i18n/language.schema.json`. A custom pack may translate only the strings it needs; missing entries fall back to English. Use **Refresh languages** in the language picker or restart Zipflow after adding or replacing a file. See [Interface localization](docs/i18n/README.md). Zipflow audits menu labels, selected-item help, dialog text, statuses, and toast titles against the Russian catalog in its regression suite. When multiple translation patterns overlap, the most specific pattern wins.
 
 Menu rows contain only the action or setting name. Their translated explanation is rendered once in the context summary below the list, so long help text never changes row height or breaks scrolling. The built-in Russian pack covers the shared menus, workflow setup, settings summaries, validation reasons, replay controls, and common progress states.
 

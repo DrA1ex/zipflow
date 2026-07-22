@@ -207,6 +207,13 @@ export class ZipflowController {
     if (action.type === 'settings-select-choice') return selectChoice(this, action.index);
     if (action.type === 'settings-model-select-parameter') return selectModelSettingParameter(this, action.index);
     if (action.type === 'settings-model-select-choice') return selectModelSettingChoice(this, action.index);
+    if (action.type === 'settings-wheel') {
+      const delta = Math.trunc(Number(action.delta) || 0);
+      if (!delta) return;
+      const key = { name: delta < 0 ? 'up' : 'down' };
+      for (let index = 0; index < Math.abs(delta); index += 1) await handleSettingsKey(this, key);
+      return;
+    }
     if (handleReplayDispatch(this, action)) return;
     if (action.type === 'path-select') {
       selectPathSuggestion(this.state, action.index);

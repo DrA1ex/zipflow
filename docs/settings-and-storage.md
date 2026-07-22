@@ -152,5 +152,10 @@ Temporary and lock directories are managed by Zipflow. Active operations own the
 
 Each pack is validated against [`docs/i18n/language.schema.json`](i18n/language.schema.json). Invalid files are ignored and never partially registered. Message lookup uses the active pack first and English second, so a small custom pack can override selected strings without copying the complete catalog.
 
-Language files do not contain executable code. Zipflow reads JSON only, validates metadata, strings, and placeholder patterns, and does not evaluate expressions from a pack.
+Language files do not contain executable code. Zipflow reads JSON only, validates metadata, strings, and placeholder patterns, and does not evaluate expressions from a pack. The bundled Russian pack is checked against static user-facing fields and common status/toast calls during `npm test`; missing entries fail the suite.
 
+
+
+## Compact storage statistics
+
+Source archives, backups, and managed-file history keep one compact statistics row in the two-row Settings context dock. The first row remains the selected parameter help; the second shows count and size plus the oldest archive/backup or the history's last-update time. Refresh and cleanup actions update this projection without turning statistics into selectable rows.

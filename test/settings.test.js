@@ -4,7 +4,7 @@ import path from 'node:path';
 import { renderToString } from 'terlio.js';
 import { tempDir } from '../test-support/helpers.js';
 import { writeFile, readFile } from 'node:fs/promises';
-import { DEFAULT_SETTINGS, loadSettings, normalizeSettings, saveSettings, settingsBackupPath, settingsPath } from '../src/settings/store.js';
+import { DEFAULT_SETTINGS, LLM_LANGUAGES, loadSettings, normalizeSettings, saveSettings, settingsBackupPath, settingsPath } from '../src/settings/store.js';
 import { createInitialState } from '../src/app/state.js';
 import { renderZipflow } from '../src/ui/render.js';
 import { ZipflowController } from '../src/app/controller.js';
@@ -304,6 +304,14 @@ test('LLM token uses a modal and never pre-fills the stored secret', async () =>
   assert.equal(state.settings.llmApiToken, 'replacement');
   assert.equal(settingsViewModel(state).parameters[settingsViewModel(state).parameterIndex].id, 'llmApiToken');
 }));
+
+test('Ukrainian is not offered and legacy Ukrainian settings migrate to English', async () => withSettingsHome(async () => {
+  assert.equal(LLM_LANGUAGES.includes('Ukrainian'), false);
+  await saveSettings({ ...DEFAULT_SETTINGS, llmLanguage: 'Ukrainian' });
+  const settings = await loadSettings();
+  assert.equal(settings.llmLanguage, 'English');
+}));
+
 
 test('archive review mode is selected from the Local LLM page and preserves the originating parameter', async () => withSettingsHome(async () => {
   const { state, controller } = await settingsController({

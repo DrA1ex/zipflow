@@ -334,26 +334,29 @@ export function settingsPageSummary(state, definition) {
   const loading = Boolean(state.settingsPanel?.loadingStorage);
   if (definition.id === 'sourceArchive') {
     const archives = state.settingsPanel?.storageStats?.archives ?? {};
-    return [
-      loading ? 'Scanning source archive storage…' : `${archives.count ?? 0} archives · ${formatByteSize(archives.totalBytes ?? 0)}`,
-      `Oldest: ${loading ? t(state, 'Scanning…') : dateLabel(state, archives.oldestAt)}`,
-      `Directory: ${displayArchiveDirectory(state.settings.archiveDirectory)}`,
-    ];
+    if (loading) return [t(state, 'Scanning source archive storage…')];
+    return [t(state, '{count} archives · {size} · oldest {oldest}', {
+      count: archives.count ?? 0,
+      size: formatByteSize(archives.totalBytes ?? 0),
+      oldest: dateLabel(state, archives.oldestAt),
+    })];
   }
   if (definition.id === 'backups') {
     const backups = state.settingsPanel?.storageStats?.backups ?? {};
-    return [
-      loading ? 'Scanning backup storage…' : `${backups.count ?? 0} backups · ${backups.fileCount ?? 0} files · ${formatByteSize(backups.totalBytes ?? 0)}`,
-      `Oldest: ${loading ? t(state, 'Scanning…') : dateLabel(state, backups.oldestAt)}`,
-      `Directory: ${backups.directory ? displayPath(backups.directory) : '~/.zipflow/backups'}`,
-    ];
+    if (loading) return [t(state, 'Scanning backup storage…')];
+    return [t(state, '{count} backups · {files} files · {size} · oldest {oldest}', {
+      count: backups.count ?? 0,
+      files: backups.fileCount ?? 0,
+      size: formatByteSize(backups.totalBytes ?? 0),
+      oldest: dateLabel(state, backups.oldestAt),
+    })];
   }
   if (definition.id === 'managedHistory') {
     const history = state.settingsPanel?.managedHistory ?? { paths: [], updatedAt: null };
-    return [
-      `${history.paths?.length ?? 0} recorded paths`,
-      `Last updated: ${dateLabel(state, history.updatedAt)}`,
-    ];
+    return [t(state, '{count} recorded paths · last updated {updated}', {
+      count: history.paths?.length ?? 0,
+      updated: dateLabel(state, history.updatedAt),
+    })];
   }
   return [];
 }

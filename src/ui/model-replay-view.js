@@ -18,6 +18,7 @@ import { selectRowIndex, selectRows } from './select-rows.js';
 import { parseRichTextBlocks } from './rich-text.js';
 import { renderSyntaxLines } from './syntax-render.js';
 import { translateForState as t } from '../i18n/index.js';
+import { wheelScrollDelta } from './wheel.js';
 
 export function renderModelReplayWorkspace({ content, state, width, height, theme, animationFrame = 0 }) {
   const workspace = state.settingsPanel.modelTestWorkspace;
@@ -100,7 +101,7 @@ function renderReplayProgress(state, workspace, width, height, theme, animationF
     footer: false,
     pointerId: 'zipflow:model-replay-workspace',
     onWheel: (event) => {
-      state.dispatch?.({ type: 'model-replay-scroll', delta: Math.sign(event.deltaY) * 3 });
+      state.dispatch?.({ type: 'model-replay-scroll', delta: wheelScrollDelta(event) });
       event.preventDefault();
       event.stopPropagation?.();
     },

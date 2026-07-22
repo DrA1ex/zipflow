@@ -170,7 +170,7 @@ function normalizePack(value) {
       source: entry.source,
       target: entry.target,
       matcher: compilePattern(entry.source),
-    })),
+    })).sort((left, right) => right.source.length - left.source.length),
   };
 }
 

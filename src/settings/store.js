@@ -361,6 +361,7 @@ function normalizeOptionalBoolean(value) {
 }
 
 function normalizeLanguage(value, fallback) {
+  if (value === 'Ukrainian') return fallback;
   return LLM_LANGUAGES.includes(value) ? value : fallback;
 }
 

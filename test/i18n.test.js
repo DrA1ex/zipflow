@@ -76,9 +76,21 @@ test('Russian language pack covers static menu labels and context help', async (
   const { fileURLToPath } = await import('node:url');
   const root = fileURLToPath(new URL('../src/', import.meta.url));
   const locale = JSON.parse(await readText(new URL('../src/i18n/locales/ru.json', import.meta.url), 'utf8'));
-  const translated = new Set(Object.keys(locale.messages));
-  const technical = new Set(['Git', 'Go', 'Python', 'CMake · C/C++']);
+  const translated = new Set([
+    ...Object.keys(locale.messages),
+    ...(locale.patterns ?? []).map((entry) => entry.source),
+  ]);
+  const technical = new Set([
+    'Git', 'Go', 'Python', 'CMake · C/C++', 'CMake and C++', 'npm run test:custom', 'tsc --noEmit',
+    '~/zipflow-archive', '~/Downloads/project-update.zip', 'zipflow: apply {runId}', 'utf8',
+  ]);
   const missing = [];
+
+  function shouldIgnore(value) {
+    return !value || value.includes('${') || technical.has(value)
+      || value.startsWith('.') || value.startsWith('/') || value.startsWith('~')
+      || (/^[A-Za-z0-9_.:/@-]+$/.test(value) && !value.includes(' '));
+  }
 
   async function visit(directory) {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -86,11 +98,19 @@ test('Russian language pack covers static menu labels and context help', async (
       if (entry.isDirectory()) await visit(target);
       else if (entry.name.endsWith('.js')) {
         const source = await readText(target, 'utf8');
-        const pattern = /\b(label|description|context|help|disabledReason)\s*:\s*(['"])(.*?)(?<!\\)\2/gs;
-        for (const match of source.matchAll(pattern)) {
-          const value = match[3].replace(/\\(['"])/g, '$1').replace(/\\n/g, '\n');
-          if (!value || value.includes('${') || technical.has(value) || value.startsWith('.') || value.startsWith('/')) continue;
-          if (!translated.has(value)) missing.push(`${path.relative(root, target)}: ${value}`);
+        const patterns = [
+          /\b(label|description|context|help|disabledReason|title|placeholder|unitHint)\s*:\s*(['"])((?:\\.|(?!\2).)*)\2/g,
+          /\bt\s*\(\s*(?:state\s*,\s*)?(['"])((?:\\.|(?!\1).)*)\1/g,
+          /\.(?:toast|setStatus)\s*\(\s*(['"])((?:\\.|(?!\1).)*)\1/g,
+          /\b(?:state|controller\.state)\.status\s*=\s*(['"])((?:\\.|(?!\1).)*)\1/g,
+        ];
+        for (const pattern of patterns) {
+          for (const match of source.matchAll(pattern)) {
+            const valueIndex = pattern === patterns[0] ? 3 : 2;
+            const value = match[valueIndex].replace(/\\(['"])/g, '$1').replace(/\\n/g, '\n');
+            if (shouldIgnore(value) || translated.has(value)) continue;
+            missing.push(`${path.relative(root, target)}: ${value}`);
+          }
         }
       }
     }

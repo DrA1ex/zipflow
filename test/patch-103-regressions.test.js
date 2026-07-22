@@ -195,7 +195,7 @@ test('process SIGINT cancels an active operation and exits only when idle', asyn
   detach();
 });
 
-test('long notices use the native Terlio toast with shadow and content wrapping', () => {
+test('long notices use the adaptive Zipflow toast with shadow and content wrapping', () => {
   const { state, controller } = fixtureController();
   state.overlays = createOverlayManager();
   controller.toast('Long notice', 'warning', 5, Array.from({ length: 8 }, (_, index) => `Detailed line ${index + 1}`).join(' '));
