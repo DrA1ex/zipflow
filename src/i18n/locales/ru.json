@@ -758,7 +758,25 @@
     "Project structure rescanned": "Структура проекта пересканирована",
     "Invalid project path": "Недопустимый путь проекта",
     "Could not add this project": "Не удалось добавить проект",
-    "Directory selected · enter the command after ::": "Каталог выбран · введите команду после ::"
+    "Directory selected · enter the command after ::": "Каталог выбран · введите команду после ::",
+    "Use a command directly, or path/ :: command to run in a subdirectory.": "Введите команду напрямую или используйте путь/ :: команда для запуска из подкаталога.",
+    "npm test  or  web/ :: npm test": "npm test  или  web/ :: npm test",
+    "Ignore detected subprojects when suggesting commands.": "Не учитывать найденные подпроекты при предложении команд.",
+    "Enter a relative directory with path completion.": "Введите относительный путь к каталогу с автодополнением.",
+    "Scan the workspace root and one directory level again.": "Повторно просканировать корень рабочей области и один уровень каталогов.",
+    "Select a different root directory.": "Выбрать другой корневой каталог.",
+    "web/ or packages/client/": "web/ или packages/client/",
+    "Use a type label even when standard marker files were not found.": "Указать тип проекта, даже если стандартные файлы-маркеры не найдены.",
+    "Enter a project path relative to the workspace root.": "Введите путь к проекту относительно корня рабочей области.",
+    "Start over": "Начать заново",
+    "Build a new workflow from recommendations. The current workflow stays active until the new one is saved.": "Создать новый workflow из рекомендаций. Текущий workflow останется активным до сохранения нового.",
+    "Start a new workflow setup": "Начать новую настройку workflow",
+    "Discard only the current draft and rebuild recommendations from the workspace.": "Сбросить только текущий черновик и заново сформировать рекомендации для рабочей области.",
+    "Keep editing this workflow": "Продолжить редактирование этого workflow",
+    "Return without changing the draft or the saved workflow.": "Вернуться без изменения черновика или сохранённого workflow.",
+    "Start workflow setup over": "Начать настройку workflow заново",
+    "The saved workflow remains active until the replacement workflow reaches Review and save.": "Сохранённый workflow останется активным, пока новый не будет подтверждён на шаге просмотра и сохранения.",
+    "Leaving the new setup before saving keeps the current workflow unchanged.": "Если выйти из новой настройки до сохранения, текущий workflow останется без изменений."
   },
   "patterns": [
     {

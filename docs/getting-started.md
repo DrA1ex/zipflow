@@ -109,6 +109,8 @@ Press `Esc` from archive waiting to open the compact project menu. It can includ
 
 `Esc` on the project menu does not terminate Zipflow. Use **Exit** or press `Ctrl+C` while no operation is active.
 
+**Change workflow** opens the saved configuration by section. Choose **Start over** when editing individual sections would be more cumbersome. Zipflow creates a fresh draft from a new project scan, but keeps the current workflow active until the replacement is reviewed and saved. Cancelling the new setup restores the saved project selection and workflow unchanged.
+
 ## Manual checks and deployment
 
 **Run tests** and **Run deployment** operate on the current project without applying an archive. They write normal JSON and text reports and appear as distinct record types in run history.

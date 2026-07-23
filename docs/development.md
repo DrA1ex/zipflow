@@ -49,7 +49,7 @@ npm run verify
 
 `npm run verify` performs source checks and runs the automated test suite.
 
-The source checker enforces the JavaScript file-size policy: 1,000 lines is the hard limit and 500 lines is the preferred limit.
+The source checker enforces the JavaScript file-size policy: 1,000 lines is the hard limit and 500 lines is the preferred limit. It also verifies `en.json` as the complete canonical interface catalog, rejects built-in translations with unknown English keys, and audits static UI strings for missing English entries.
 
 Run the parts separately when needed:
 

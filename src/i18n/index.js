@@ -184,6 +184,7 @@ function translateWithPack(pack, source) {
   if (!pack) return null;
   if (Object.prototype.hasOwnProperty.call(pack.messages, source)) return pack.messages[source];
   for (const pattern of pack.patterns) {
+    if (pattern.source === source) return pattern.target;
     const match = pattern.matcher.regex.exec(source);
     if (!match) continue;
     const variables = Object.fromEntries(pattern.matcher.names.map((name, index) => [name, match[index + 1]]));

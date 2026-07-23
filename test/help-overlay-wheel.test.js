@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { renderToString } from 'terlio.js';
 import { openHelpOverlay } from '../src/ui/help-overlay.js';
 
 function findNode(node, predicate) {
@@ -25,15 +26,37 @@ test('Help wheel scrolls exactly one row and stops at the viewport boundary', ()
   const lines = Array.from({ length: 20 }, (_, index) => `Help line ${index + 1}`);
 
   assert.equal(openHelpOverlay(controller, { title: 'Help', lines }), true);
-  const initial = findNode(overlay.render({ width: 50, height: 8 }), (node) => node.props?.pointerId === 'zipflow:help-overlay');
-  assert.equal(initial.props.scroll, 0);
+  const render = () => {
+    const tree = overlay.render({ width: 50, height: 8 });
+    return {
+      tree,
+      text: renderToString(tree, { width: 50, height: 8 }),
+      wheel: findNode(tree, (node) => node.props?.pointerId === 'zipflow:help-overlay'),
+    };
+  };
 
-  initial.props.onWheel({ deltaY: 1, preventDefault() {}, stopPropagation() {} });
-  const moved = findNode(overlay.render({ width: 50, height: 8 }), (node) => node.props?.pointerId === 'zipflow:help-overlay');
-  assert.equal(moved.props.scroll, 1);
+  const initial = render();
+  assert.ok(initial.wheel?.props?.onWheel);
+  assert.match(initial.text, /Help line 1/);
+  assert.doesNotMatch(initial.text, /Help line 7/);
 
-  moved.props.onWheel({ deltaY: -1, preventDefault() {}, stopPropagation() {} });
-  const returned = findNode(overlay.render({ width: 50, height: 8 }), (node) => node.props?.pointerId === 'zipflow:help-overlay');
-  assert.equal(returned.props.scroll, 0);
-  assert.ok(invalidations >= 3);
+  initial.wheel.props.onWheel({ deltaY: 1, preventDefault() {}, stopPropagation() {} });
+  const moved = render();
+  assert.doesNotMatch(moved.text, /Help line 1/);
+  assert.match(moved.text, /Help line 2/);
+  assert.match(moved.text, /Help line 7/);
+
+  for (let index = 0; index < 100; index += 1) {
+    moved.wheel.props.onWheel({ deltaY: 1, preventDefault() {}, stopPropagation() {} });
+  }
+  const bottom = render();
+  assert.match(bottom.text, /Help line 20/);
+  bottom.wheel.props.onWheel({ deltaY: 1, preventDefault() {}, stopPropagation() {} });
+  assert.equal(render().text, bottom.text);
+
+  for (let index = 0; index < 100; index += 1) {
+    bottom.wheel.props.onWheel({ deltaY: -1, preventDefault() {}, stopPropagation() {} });
+  }
+  assert.equal(render().text, initial.text);
+  assert.ok(invalidations >= 203);
 });

@@ -25,6 +25,33 @@ test('built-in interface languages are discoverable and Russian translates share
   assert.equal(translate('Update policy', {}, 'ru'), 'Политика обновления');
 });
 
+
+test('English is the canonical catalog for built-in language packs', async () => {
+  const { readdir, readFile: readText } = await import('node:fs/promises');
+  const localeDirectory = new URL('../src/i18n/locales/', import.meta.url);
+  const names = (await readdir(localeDirectory)).filter((name) => name.endsWith('.json')).sort();
+  const packs = await Promise.all(names.map(async (name) => JSON.parse(await readText(new URL(name, localeDirectory), 'utf8'))));
+  const english = packs.find((pack) => pack.id === 'en');
+  assert.ok(english);
+  assert.ok(Object.keys(english.messages).length >= 700);
+  assert.ok(Object.entries(english.messages).every(([source, target]) => source === target));
+  assert.ok((english.patterns ?? []).every((entry) => entry.source === entry.target));
+
+  const englishMessages = new Set(Object.keys(english.messages));
+  const englishPatterns = new Set((english.patterns ?? []).map((entry) => entry.source));
+  for (const pack of packs) {
+    assert.deepEqual(Object.keys(pack.messages).filter((source) => !englishMessages.has(source)), [], pack.id);
+    assert.deepEqual((pack.patterns ?? []).map((entry) => entry.source).filter((source) => !englishPatterns.has(source)), [], pack.id);
+  }
+});
+
+test('pattern templates translate before variable interpolation', () => {
+  assert.equal(
+    translate('{count} archives · {size} · oldest {oldest}', { count: 4, size: '2 KB', oldest: 'today' }, 'ru'),
+    'Архивов: 4 · 2 KB · самый старый: today',
+  );
+});
+
 test('radio markers are kept outside translation patterns', () => {
   assert.equal(
     translate('● Only clean Git-tracked files', {}, 'ru'),

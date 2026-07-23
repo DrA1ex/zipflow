@@ -10,6 +10,7 @@ export function createInitialState() {
     draft: null,
     setupEditing: false,
     setupReturnScreen: null,
+    setupProjectSnapshot: null,
     pendingProjectEntry: null,
     run: null,
     runSettings: null,

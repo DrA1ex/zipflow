@@ -18,11 +18,15 @@ import {
   showDeployPolicyStep, submitDeployEditor,
 } from './setup-deploy.js';
 import { activateAutonomy, autonomyReviewLines, showAutonomyStep } from './setup-autonomy.js';
+import { activateWorkflowRestart, cancelWorkflowSetup, showWorkflowRestartConfirmation } from './setup-restart.js';
 
 export async function beginSetup(controller, { fresh = false } = {}) {
   const { state } = controller;
+  const enteringSetup = state.setupProjectSnapshot === null;
   state.setupEditing = Boolean(state.workflow && !fresh);
-  await hydrateConfiguredProjects(controller);
+  if (fresh && state.workflow) state.project = await discoverProject(state.project.root);
+  else await hydrateConfiguredProjects(controller);
+  if (enteringSetup) state.setupProjectSnapshot = structuredClone(state.project);
   state.draft = fresh || !state.workflow ? createRecommendedWorkflow(state.project) : structuredClone(state.workflow);
   syncDraftProjects(controller);
   controller.message(fresh ? 'Starting a new workflow' : 'Reviewing workflow', [
@@ -45,6 +49,10 @@ export async function activateSetup(controller, itemId) {
   const { screen } = controller.state;
   if (handlesGitBootstrapScreen(screen)) return activateGitBootstrap(controller, itemId);
   if (screen === 'setup-sections') return activateWorkflowSection(controller, itemId);
+  if (screen === 'setup-restart-confirm') return activateWorkflowRestart(controller, itemId, {
+    onConfirm: () => beginSetup(controller, { fresh: true }),
+    onCancel: () => showWorkflowSections(controller, 'restart'),
+  });
   if (screen === 'setup-project') return activateProject(controller, itemId);
   if (screen === 'setup-project-confirm' || screen === 'setup-project-type') return activateProjectConfirm(controller, itemId);
   if (screen === 'setup-checks') return activateChecks(controller, itemId, () => finishSetupSection(controller, () => showPolicyStep(controller)));
@@ -81,7 +89,7 @@ export function handleSetupShortcut(controller, key) {
   return handleChecksShortcut(controller, key);
 }
 
-export function backSetup(controller) {
+export async function backSetup(controller) {
   const screen = controller.state.screen;
   if (backProjectSetup(controller)) return;
   if (handlesGitBootstrapScreen(screen)) {
@@ -89,8 +97,9 @@ export function backSetup(controller) {
     if (handled !== false) return handled;
     return showProjectStructureStep(controller);
   }
-  if (screen === 'setup-sections') return controller.showHome();
-  if (screen === 'setup-project') return isEditingSection(controller, 'project') ? showWorkflowSections(controller) : controller.showHome();
+  if (screen === 'setup-sections') return cancelSetup(controller);
+  if (screen === 'setup-restart-confirm') return showWorkflowSections(controller, 'restart');
+  if (screen === 'setup-project') return isEditingSection(controller, 'project') ? showWorkflowSections(controller) : cancelSetup(controller);
   if (screen === 'setup-checks') return isEditingSection(controller, 'checks') ? showWorkflowSections(controller) : showProjectStructureStep(controller);
   if (screen === 'setup-policy') return isEditingSection(controller, 'policy') ? showWorkflowSections(controller) : showChecksStep(controller);
   if (screen === 'setup-autonomy') return isEditingSection(controller, 'autonomy') ? showWorkflowSections(controller) : showPolicyStep(controller);
@@ -136,6 +145,10 @@ async function submitProjectPath(controller) {
 }
 
 
+function cancelSetup(controller) {
+  return cancelWorkflowSetup(controller);
+}
+
 function showWorkflowSections(controller, selectedSection = null) {
   const workflow = controller.state.draft;
   const returnSection = selectedSection ?? controller.state.setupSection;
@@ -150,6 +163,7 @@ function showWorkflowSections(controller, selectedSection = null) {
     ...(controller.state.project.git ? [{ id: 'section-git', label: 'Git', description: `${checkpointLabel(workflow.git.checkpoint)} · ${resultCommitLabel(workflow.git.resultCommit)}` }] : []),
     { id: 'section-deploy', label: 'Deployment', description: deployPolicyDescription(workflow.deploy.policy) },
     { id: 'section-review', label: 'Review and save', description: 'Review every section before replacing the active workflow' },
+    { id: 'section-restart', label: 'Start over', description: 'Build a new workflow from recommendations. The current workflow stays active until the new one is saved.' },
     { id: 'section-cancel', label: 'Cancel', description: 'Keep the currently saved workflow unchanged' },
   ];
   const selectedIndex = Math.max(0, items.findIndex((item) => item.id === `section-${returnSection}`));
@@ -157,8 +171,9 @@ function showWorkflowSections(controller, selectedSection = null) {
 }
 
 function activateWorkflowSection(controller, itemId) {
-  if (itemId === 'section-cancel') return controller.showHome();
+  if (itemId === 'section-cancel') return cancelSetup(controller);
   if (itemId === 'section-review') return showReviewStep(controller);
+  if (itemId === 'section-restart') return showWorkflowRestartConfirmation(controller);
   if (!itemId.startsWith('section-')) return;
   return openWorkflowSection(controller, itemId.slice(8));
 }
@@ -342,6 +357,7 @@ async function activateReview(controller, itemId) {
   if (itemId === 'save-workflow') {
     controller.state.workflow = await saveWorkflow(controller.state.draft);
     controller.state.draft = null;
+    controller.state.setupProjectSnapshot = null;
     upsertMessage(controller.state, 'workflow-review-draft', 'Workflow saved', [controller.state.workflow.name], 'success', { collapsible: false, collapsed: false });
     const { beginArchiveInput } = await import('./run-flow.js');
     beginArchiveInput(controller);

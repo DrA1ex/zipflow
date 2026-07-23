@@ -6,6 +6,7 @@ import { createInitialState } from '../src/app/state.js';
 import { ZipflowController } from '../src/app/controller.js';
 import { activateSetup, beginSetup } from '../src/app/setup-flow.js';
 import { discoverProject } from '../src/project/detect.js';
+import { createRecommendedWorkflow } from '../src/workflow/defaults.js';
 import { tempDir, writeFiles } from '../test-support/helpers.js';
 
 function projectFixture() {
@@ -18,6 +19,46 @@ function projectFixture() {
     git: true,
   };
 }
+
+
+test('workflow settings can start over without replacing the saved workflow before save', async () => {
+  const root = await tempDir('zipflow-setup-restart-');
+  await writeFiles(root, {
+    'package.json': '{"name":"restart-fixture","scripts":{"test":"node --test"}}\n',
+    'web/package.json': '{"name":"restart-web","scripts":{"test":"node --test"}}\n',
+  });
+  const state = createInitialState();
+  state.project = await discoverProject(root);
+  state.workflow = createRecommendedWorkflow(state.project);
+  state.workflow.projects = state.workflow.projects.map((entry) => ({ ...entry, selected: entry.path === '.' }));
+  state.workflow.checks = state.workflow.checks.filter((check) => (check.cwd ?? '.') === '.');
+  state.workflow.policy = { ...state.workflow.policy, id: 'trust', label: 'Trust archive' };
+  const savedWorkflow = structuredClone(state.workflow);
+  const controller = new ZipflowController(state);
+
+  await beginSetup(controller, { fresh: false });
+  assert.equal(state.screen, 'setup-sections');
+  assert.ok(state.menuItems.some((item) => item.id === 'section-restart'));
+
+  await activateSetup(controller, 'section-restart');
+  assert.equal(state.screen, 'setup-restart-confirm');
+  await activateSetup(controller, 'restart-workflow-cancel');
+  assert.equal(state.screen, 'setup-sections');
+  assert.deepEqual(state.workflow, savedWorkflow);
+  assert.equal(state.draft.policy.id, 'trust');
+
+  await activateSetup(controller, 'section-restart');
+  await activateSetup(controller, 'restart-workflow-confirm');
+  assert.equal(state.screen, 'setup-project');
+  assert.deepEqual(state.workflow, savedWorkflow);
+  assert.equal(state.draft.policy.id, 'practical');
+  assert.deepEqual(state.project.activeProjects.map((entry) => entry.path), ['.', 'web']);
+
+  await controller.back();
+  assert.equal(state.screen, 'home');
+  assert.deepEqual(state.workflow, savedWorkflow);
+  assert.deepEqual(state.project.activeProjects.map((entry) => entry.path), ['.']);
+});
 
 test('custom checks ask for the command before the display name', async () => {
   const state = createInitialState();

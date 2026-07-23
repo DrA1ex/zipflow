@@ -110,7 +110,7 @@ export function applyProjectSelection(project, selectedPaths) {
   return aggregateWorkspaceProject({
     root: project.root,
     start: project.start,
-    gitRoot: project.gitRoot,
+    gitRoot: project.gitRoot ?? (project.git ? project.root : null),
     rootEntry,
     projects,
     ignoredDirectories: project.ignoredDirectories ?? [],
@@ -125,7 +125,7 @@ export function mergeManualProjects(project, manualProjects = []) {
   return aggregateWorkspaceProject({
     root: project.root,
     start: project.start,
-    gitRoot: project.gitRoot,
+    gitRoot: project.gitRoot ?? (project.git ? project.root : null),
     rootEntry,
     projects,
     ignoredDirectories: project.ignoredDirectories ?? [],
