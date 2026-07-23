@@ -42,6 +42,7 @@ import { isEditorScreen, isPagedMenuScreen, isSearchableScreen, shouldRecordChoi
 import { InputActionGate } from './input-action-gate.js';
 import { insertPastedText, pastedTextFromKey } from '../ui/editor-paste.js';
 import { configureI18n, translateForState as t } from '../i18n/index.js';
+import { moveSelectableIndex, nearestSelectableIndex, pageSelectableIndex } from './list-navigation.js';
 export class ZipflowController {
   constructor(state) {
     this.state = state;
@@ -198,7 +199,7 @@ export class ZipflowController {
       return;
     }
     if (action.type === 'menu-move-selection') {
-      this.moveSelection(Number(action.delta) || 0);
+      this.moveSelection(Number(action.delta) || 0, { wrap: action.wrap !== false });
       this.invalidate();
       return;
     }
@@ -210,11 +211,15 @@ export class ZipflowController {
     if (action.type === 'settings-wheel') {
       const delta = Math.trunc(Number(action.delta) || 0);
       if (!delta) return;
-      const key = { name: delta < 0 ? 'up' : 'down' };
+      const key = { name: delta < 0 ? 'up' : 'down', navigationWrap: action.wrap !== false };
       for (let index = 0; index < Math.abs(delta); index += 1) await handleSettingsKey(this, key);
       return;
     }
     if (handleReplayDispatch(this, action)) return;
+    if (action.type === 'path-move') {
+      if (movePathSuggestion(this.state, Number(action.delta) || 0, { wrap: action.wrap !== false })) this.invalidate();
+      return;
+    }
     if (action.type === 'path-select') {
       selectPathSuggestion(this.state, action.index);
       if (this.state.pathSuggestions?.owner === 'settings-modal') {
@@ -478,33 +483,25 @@ export class ZipflowController {
     return this.showHome();
   }
 
-  moveSelection(delta) {
-    const items = this.state.menuItems;
+  moveSelection(delta, { wrap = true } = {}) {
+    const items = this.state.menuItems ?? [];
     if (!items.length) return;
-    let next = this.state.selectedIndex;
-    for (let attempts = 0; attempts < items.length; attempts += 1) {
-      next = (next + delta + items.length) % items.length;
-      if (!items[next].disabled) break;
-    }
-    this.state.selectedIndex = next;
+    this.state.selectedIndex = moveSelectableIndex(items, this.state.selectedIndex, delta, { wrap });
   }
 
   jumpSelection(target) {
     const items = this.state.menuItems ?? [];
     if (!items.length) return;
-    const indexes = target === 'last' ? [...items.keys()].reverse() : [...items.keys()];
-    const next = indexes.find((index) => !items[index]?.disabled);
-    if (next !== undefined) this.state.selectedIndex = next;
+    const last = target === 'last';
+    const next = nearestSelectableIndex(items, last ? items.length - 1 : 0, { preferDirection: last ? -1 : 1 });
+    if (next !== null) this.state.selectedIndex = next;
   }
 
   pageSelection(direction) {
-    const items = this.state.menuItems;
+    const items = this.state.menuItems ?? [];
     if (!items.length) return;
     const page = Math.max(5, Math.min(12, Number(this.state.menuPageSize) || 8));
-    let next = Math.max(0, Math.min(items.length - 1, this.state.selectedIndex + direction * page));
-    const step = direction < 0 ? -1 : 1;
-    while (items[next]?.disabled && next >= 0 && next < items.length - 1) next += step;
-    if (!items[next]?.disabled) this.state.selectedIndex = next;
+    this.state.selectedIndex = pageSelectableIndex(items, this.state.selectedIndex, direction, page);
   }
 }
 

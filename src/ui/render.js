@@ -244,7 +244,7 @@ function renderCurrent(state, width, height, theme) {
         onSelect: (item, index) => state.dispatch?.({ type: 'activate-index', index: selectRowIndex(item, index) }),
         onWheel: (event) => {
           const delta = wheelScrollDelta(event);
-          if (delta) state.dispatch?.({ type: 'menu-move-selection', delta });
+          if (delta) state.dispatch?.({ type: 'menu-move-selection', delta, wrap: false });
           event.preventDefault();
           event.stopPropagation?.();
         },

@@ -111,7 +111,7 @@ Page Up     scroll upward
 Page Down   scroll downward
 Home        first line
 End         last line
-Mouse wheel scrolls the diff by exactly three rows
+Mouse wheel moves the active surface by exactly one row and stops at list boundaries
 ```
 
 Conflict review also exposes direct keep-local and use-archive shortcuts in the active footer. Every action remains available through the normal menu.

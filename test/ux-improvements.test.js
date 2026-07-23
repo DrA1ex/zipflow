@@ -24,6 +24,16 @@ function jsonResponse(value, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
+function findNode(node, predicate) {
+  if (!node) return null;
+  if (predicate(node)) return node;
+  for (const child of node.children ?? []) {
+    const found = findNode(child, predicate);
+    if (found) return found;
+  }
+  return null;
+}
+
 test('active runs use an immutable settings snapshot while global settings can change', () => {
   const state = createInitialState();
   state.settings = {
@@ -126,6 +136,14 @@ test('context help uses a blocking Terlio help overlay and never adds an Activit
   const output = renderToString(renderZipflow({ state, width: 60, height: 20 }), { width: 60, height: 20 });
   assert.match(output, /Help · Action/);
   assert.doesNotMatch(output, /PgUp|PgDn|page-up|page-down/i);
+  const firstRender = state.overlays.top().render({ width: 58, height: 18 });
+  const wheelRegion = findNode(firstRender, (node) => node.props?.pointerId === 'zipflow:help-overlay');
+  assert.ok(wheelRegion?.props?.onWheel);
+  assert.equal(wheelRegion.props.scroll, 0);
+  wheelRegion.props.onWheel({ deltaY: 1, preventDefault() {}, stopPropagation() {} });
+  const secondRender = state.overlays.top().render({ width: 58, height: 18 });
+  const movedRegion = findNode(secondRender, (node) => node.props?.pointerId === 'zipflow:help-overlay');
+  assert.equal(movedRegion.props.scroll, 1);
   state.overlays.handleKey({ name: 'escape' });
   assert.equal(state.overlays.top(), null);
 });

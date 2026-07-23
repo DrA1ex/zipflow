@@ -47,7 +47,7 @@ export function renderSettings(state, width, height, theme, animationFrame = 0) 
       onSelect: (item, index) => state.dispatch?.({ type: 'settings-select-setting', index: selectRowIndex(item, index) }),
       onWheel: (event) => {
         const delta = wheelScrollDelta(event);
-        if (delta) state.dispatch?.({ type: 'settings-wheel', delta });
+        if (delta) state.dispatch?.({ type: 'settings-wheel', delta, wrap: false });
         event.preventDefault();
         event.stopPropagation?.();
       },
@@ -144,7 +144,7 @@ function renderSettingsPage(state, view, width, height, theme, animationFrame) {
         }),
         onWheel: (event) => {
           const delta = wheelScrollDelta(event);
-          if (delta) state.dispatch?.({ type: 'settings-wheel', delta });
+          if (delta) state.dispatch?.({ type: 'settings-wheel', delta, wrap: false });
           event.preventDefault();
           event.stopPropagation?.();
         },
@@ -204,7 +204,7 @@ function renderModelConfigPage(state, view, width, height, theme, animationFrame
         }),
         onWheel: (event) => {
           const delta = wheelScrollDelta(event);
-          if (delta) state.dispatch?.({ type: 'settings-wheel', delta });
+          if (delta) state.dispatch?.({ type: 'settings-wheel', delta, wrap: false });
           event.preventDefault();
           event.stopPropagation?.();
         },

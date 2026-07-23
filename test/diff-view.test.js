@@ -57,5 +57,5 @@ test('diff view scrolls with the mouse wheel', async () => {
   }, { runtime: { output: { write() {} } } });
 
   assert.equal(result.event.handled, true);
-  assert.equal(state.diffView.scroll, 3);
+  assert.equal(state.diffView.scroll, 1);
 });

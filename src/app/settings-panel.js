@@ -15,6 +15,7 @@ import {
   clearPathSuggestions, movePathSuggestion, refreshPathSuggestions, resetPathSuggestionInput, selectPathSuggestion,
 } from './path-suggestions.js';
 import { validateSettingValue } from './settings-validation.js';
+import { pageSelectableIndex } from './list-navigation.js';
 import { testSelectedModel } from './settings-model-check.js';
 import {
   handleModelReplayWorkspaceKey, loadModelReplayRuns, startHistoricalModelReplay,
@@ -138,9 +139,9 @@ export async function handleSettingsKey(controller, key) {
   if (panel.modal) return handleModalKey(controller, key);
   if (panel.choiceSearch?.active) return handleSettingsChoiceSearchKey(controller, key, (delta) => moveChoice(controller.state, delta));
   if (key.printable && key.text === '?') return showSettingsHelp(controller);
+  if (panel.focus?.startsWith('model-config')) return handleModelSettingsKey(controller, key);
   if (key.name === 'page-up' || key.name === 'page-down') return pageSettingsSelection(controller, key.name === 'page-up' ? -1 : 1);
   if (key.name === 'tab') return toggleSettingsPane(controller);
-  if (panel.focus?.startsWith('model-config')) return handleModelSettingsKey(controller, key);
   if (key.printable && key.text === '/' && canSearchSettingsChoices(controller.state)) {
     panel.choiceSearch = { active: true, query: '' };
     controller.state.searchEditor.set('');
@@ -151,9 +152,10 @@ export async function handleSettingsKey(controller, key) {
   if (key.name === 'escape' || key.name === 'left') return handleBack(controller);
   if (key.name === 'up' || key.name === 'down') {
     const delta = key.name === 'up' ? -1 : 1;
-    if (panel.focus === 'categories') await moveCategory(controller, delta);
-    else if (panel.focus === 'parameters') moveParameter(controller.state, delta);
-    else moveChoice(controller.state, delta);
+    const wrapNavigation = key.navigationWrap !== false;
+    if (panel.focus === 'categories') await moveCategory(controller, delta, { wrap: wrapNavigation });
+    else if (panel.focus === 'parameters') moveParameter(controller.state, delta, { wrap: wrapNavigation });
+    else moveChoice(controller.state, delta, { wrap: wrapNavigation });
     controller.invalidate();
     return true;
   }
@@ -177,15 +179,13 @@ async function pageSettingsSelection(controller, direction) {
     await ensureDefinitionData(controller, currentDefinition(state));
   } else if (panel.focus === 'parameters') {
     const parameters = settingsParameters(state, currentDefinition(state));
-    setParameterIndex(state, currentParameterIndex(state, parameters) + direction * amount);
-    if (panelParameter(state, parameters)?.disabled) moveParameter(state, direction);
+    setParameterIndex(state, pageSelectableIndex(parameters, currentParameterIndex(state, parameters), direction, amount), { preferDirection: direction });
   } else {
     const parameter = panelParameter(state);
     const choices = currentChoices(state);
     if (parameter && choices.length) {
       const current = currentChoiceIndex(state, choices, parameter);
-      panel.choiceIndices[parameter.id] = clamp(current + direction * amount, 0, choices.length - 1);
-      if (choices[panel.choiceIndices[parameter.id]]?.disabled) moveChoice(state, direction);
+      panel.choiceIndices[parameter.id] = pageSelectableIndex(choices, current, direction, amount);
     }
   }
   controller.invalidate();
@@ -317,10 +317,12 @@ async function handleBack(controller) {
   closeSettings(controller);
   return true;
 }
-async function moveCategory(controller, delta) {
+async function moveCategory(controller, delta, { wrap: wrapNavigation = true } = {}) {
   const { state } = controller;
   const definitions = settingsDefinitions(state);
-  state.settingsPanel.categoryIndex = wrap(state.settingsPanel.categoryIndex + delta, definitions.length);
+  state.settingsPanel.categoryIndex = wrapNavigation
+    ? wrap(state.settingsPanel.categoryIndex + delta, definitions.length)
+    : clamp(state.settingsPanel.categoryIndex + delta, 0, Math.max(0, definitions.length - 1));
   state.settingsPanel.modelConfig = null;
   state.settingsPanel.subpage = null;
   await ensureDefinitionData(controller, currentDefinition(state));

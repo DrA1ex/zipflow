@@ -1,5 +1,6 @@
 import { filterSettingsChoices } from './settings-choice-search.js';
 import { settingsChoices, settingsDefinitions, settingsParameters } from './settings-options.js';
+import { moveSelectableIndex, nearestSelectableIndex, normalizeSelectableIndex } from './list-navigation.js';
 
 export function currentDefinition(state) {
   const definitions = settingsDefinitions(state);
@@ -17,41 +18,33 @@ export function panelParameter(state, parameters = null) {
 export function currentParameterIndex(state, parameters = null) {
   const items = parameters ?? settingsParameters(state, currentDefinition(state));
   const categoryId = currentDefinition(state).id;
-  let index = clamp(state.settingsPanel?.parameterIndices?.[categoryId] ?? 0, 0, Math.max(0, items.length - 1));
-  if (items[index]?.disabled) {
-    const enabled = items.findIndex((item) => !item.disabled);
-    if (enabled >= 0) index = enabled;
-  }
+  let index = normalizeSelectableIndex(items, state.settingsPanel?.parameterIndices?.[categoryId] ?? 0);
   if (state.settingsPanel) state.settingsPanel.parameterIndices[categoryId] = index;
   return index;
 }
 
-export function setParameterIndex(state, index) {
+export function setParameterIndex(state, index, { preferDirection = 1 } = {}) {
   const items = settingsParameters(state, currentDefinition(state));
-  state.settingsPanel.parameterIndices[currentDefinition(state).id] = clamp(index, 0, Math.max(0, items.length - 1));
+  state.settingsPanel.parameterIndices[currentDefinition(state).id] = normalizeSelectableIndex(items, index, { preferDirection });
 }
 
-export function moveParameter(state, delta) {
+export function moveParameter(state, delta, { wrap = true } = {}) {
   const items = settingsParameters(state, currentDefinition(state));
   if (!items.length) return;
-  let index = currentParameterIndex(state, items);
-  for (let attempts = 0; attempts < items.length; attempts += 1) {
-    index = wrap(index + delta, items.length);
-    if (!items[index].disabled) break;
-  }
-  setParameterIndex(state, index);
+  const index = moveSelectableIndex(items, currentParameterIndex(state, items), delta, { wrap });
+  setParameterIndex(state, index, { preferDirection: Math.sign(delta) || 1 });
 }
 
-export function moveChoice(state, delta) {
+export function moveChoice(state, delta, { wrap = true } = {}) {
   const choices = currentChoices(state);
   if (!choices.length) return;
   const parameter = panelParameter(state);
-  let index = currentChoiceIndex(state, choices, parameter);
-  for (let attempts = 0; attempts < choices.length; attempts += 1) {
-    index = wrap(index + delta, choices.length);
-    if (!choices[index].disabled) break;
-  }
-  state.settingsPanel.choiceIndices[parameter.id] = index;
+  state.settingsPanel.choiceIndices[parameter.id] = moveSelectableIndex(
+    choices,
+    currentChoiceIndex(state, choices, parameter),
+    delta,
+    { wrap },
+  );
 }
 
 export function currentChoices(state) {
@@ -62,20 +55,19 @@ export function currentChoices(state) {
 export function currentChoiceIndex(state, choices, parameter) {
   if (!parameter || !choices.length) return 0;
   const saved = state.settingsPanel?.choiceIndices?.[parameter.id];
-  if (Number.isInteger(saved) && choices[saved] && !choices[saved].disabled) return saved;
+  if (Number.isInteger(saved)) return normalizeSelectableIndex(choices, saved);
   return selectedChoiceIndex(state, choices, parameter);
 }
 
 export function selectedChoiceIndex(state, choices, parameter) {
   const selected = choices.findIndex((item) => item.settingId === parameter.settingId
     && (item.value === state.settings[parameter.settingId] || item.selected));
-  if (selected >= 0) return selected;
+  if (selected >= 0) return normalizeSelectableIndex(choices, selected);
   if (parameter.settingId === 'llmModel') {
     const firstModel = choices.findIndex((item) => item.model && !item.disabled);
     if (firstModel >= 0) return firstModel;
   }
-  const enabled = choices.findIndex((item) => !item.disabled);
-  return enabled >= 0 ? enabled : 0;
+  return nearestSelectableIndex(choices, selected >= 0 ? selected : 0) ?? 0;
 }
 
 export function rememberParameter(state, parameterId) {

@@ -4,7 +4,7 @@ import { renderToString } from 'terlio.js';
 import { createInitialState } from '../src/app/state.js';
 import { ZipflowController } from '../src/app/controller.js';
 import { openModelConfiguration, selectModelChoice, selectModelParameter, settingsModelView } from '../src/app/settings-model.js';
-import { settingsViewModel } from '../src/app/settings-panel.js';
+import { handleSettingsKey, settingsViewModel } from '../src/app/settings-panel.js';
 import { listLocalModelChoices } from '../src/llm/client.js';
 import { DEFAULT_SETTINGS } from '../src/settings/store.js';
 import { settingsDefinitions } from '../src/app/settings-options.js';
@@ -89,6 +89,24 @@ test('model selection skips Refresh and model configuration starts on Save and s
   assert.equal(view.parameters[view.parameterIndex].id, 'use-model');
   assert.equal(view.parameters[view.parameterIndex].label, 'Save and select');
   assert.equal(view.parameters.some((item) => /Use loaded instance/i.test(item.label)), false);
+});
+
+test('Page Up and Page Down navigate the visible model configuration only', async () => {
+  const modelChoices = await models();
+  const state = settingsState(modelChoices);
+  const controller = new ZipflowController(state);
+  controller.invalidate = () => {};
+  openModelConfiguration(controller, modelChoices.find((item) => item.key === 'gemma-12b'));
+  state.settingsPanel.modelConfig.parameterIndex = 0;
+  const hiddenParameterIndex = state.settingsPanel.parameterIndices.localLlm;
+
+  await handleSettingsKey(controller, { name: 'page-down' });
+
+  assert.equal(settingsModelView(state).parameters[state.settingsPanel.modelConfig.parameterIndex].id, 'back-models');
+  assert.equal(state.settingsPanel.parameterIndices.localLlm, hiddenParameterIndex);
+
+  await handleSettingsKey(controller, { name: 'page-up' });
+  assert.equal(state.settingsPanel.modelConfig.parameterIndex, 0);
 });
 
 test('loaded LM Studio models allow configuration changes and reload the selected instance', async () => {

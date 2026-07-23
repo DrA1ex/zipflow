@@ -7,6 +7,9 @@ import { getZipflowHome } from '../workflow/store.js';
 const BUILTIN_DIRECTORY = fileURLToPath(new URL('./locales/', import.meta.url));
 const LANGUAGE_VERSION = 1;
 const ID_PATTERN = /^[a-z][a-z0-9-]{1,31}$/;
+const NUMERIC_PATTERN_NAMES = new Set([
+  'count', 'current', 'deleted', 'end', 'files', 'index', 'shown', 'start', 'total', 'updated',
+]);
 const builtins = loadBuiltins();
 let registry = new Map(builtins);
 let configuredLanguage = 'en';
@@ -42,10 +45,13 @@ export function availableLanguages() {
 export function translate(source, variables = {}, language = activeLanguage) {
   const text = String(source ?? '');
   if (!text) return text;
+  const decoration = splitLeadingChoiceMarker(text);
   const id = resolveLanguageId(language, registry);
   const pack = registry.get(id) ?? registry.get('en');
-  const translated = translateWithPack(pack, text) ?? translateWithPack(registry.get('en'), text) ?? text;
-  return interpolate(translated, variables);
+  const translated = translateWithPack(pack, decoration.text)
+    ?? translateWithPack(registry.get('en'), decoration.text)
+    ?? decoration.text;
+  return `${decoration.prefix}${interpolate(translated, variables)}`;
 }
 
 export function translateForState(state, source, variables = {}) {
@@ -192,8 +198,11 @@ function compilePattern(source) {
   let expression = '^';
   for (const match of source.matchAll(/\{([A-Za-z][A-Za-z0-9_]*)\}/g)) {
     expression += escapeRegex(source.slice(cursor, match.index));
-    expression += '(.+?)';
-    names.push(match[1]);
+    const name = match[1];
+    expression += NUMERIC_PATTERN_NAMES.has(name)
+      ? '([0-9][0-9A-Za-z.,_+%\\-\\s]*?)'
+      : '(.+?)';
+    names.push(name);
     cursor = match.index + match[0].length;
   }
   expression += `${escapeRegex(source.slice(cursor))}$`;
@@ -204,6 +213,11 @@ function interpolate(value, variables) {
   return String(value ?? '').replace(/\{([A-Za-z][A-Za-z0-9_]*)\}/g, (_match, name) => (
     Object.prototype.hasOwnProperty.call(variables, name) ? String(variables[name]) : `{${name}}`
   ));
+}
+
+function splitLeadingChoiceMarker(value) {
+  const match = String(value ?? '').match(/^([●○]\s+)(.*)$/u);
+  return match ? { prefix: match[1], text: match[2] } : { prefix: '', text: String(value ?? '') };
 }
 
 function normalizeConfiguredLanguage(value) {

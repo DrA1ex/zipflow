@@ -182,7 +182,7 @@ Press `Esc` from the archive prompt to open the project menu. Depending on the c
 - **Create ZIP**
 - **Exit**
 
-Global settings are available with `Ctrl+B`. Workflow setup and Change Workflow use compact one-row choices; descriptions stay in the fixed context dock. Every mouse-wheel notch moves exactly three rows in menus, Settings, Activity, diffs, and replay workspaces; arrows, Page Up/Page Down, Home, End, and `/` search remain available for longer navigation. Transient notifications use an adaptive overlay that grows within the terminal width and wraps long detail text instead of clipping it.
+Global settings are available with `Ctrl+B`. Workflow setup and Change Workflow use compact one-row choices; descriptions stay in the fixed context dock. Every mouse-wheel event moves the active menu, Settings list, path suggestion list, help view, Activity view, diff, or replay workspace by exactly one row. Wheel navigation stops at list boundaries; keyboard navigation may wrap where documented. Arrows, Page Up/Page Down, Home, End, and `/` search remain available for longer navigation. Transient notifications use an adaptive overlay that grows within the terminal width and wraps long detail text instead of clipping it.
 
 Create ZIP safety review keeps small flagged sets readable: up to five files are shown as full project-relative paths, and larger trees collapse directory chains that contain only one flagged file. Credential-like source filenames such as `credential-store.js` are not treated as secret files by name alone; JSON-like and extensionless credential files remain review candidates.
 

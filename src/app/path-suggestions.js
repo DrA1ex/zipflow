@@ -2,6 +2,7 @@ import path from 'node:path';
 import { exists } from '../utils/fs.js';
 import { suggestPathEntries } from '../utils/paths.js';
 import { outputPathForDirectory } from '../export/output-path.js';
+import { moveSelectableIndex } from './list-navigation.js';
 
 const PATH_SCREENS = new Set(['project-path-input', 'archive-input', 'export-path']);
 
@@ -90,10 +91,10 @@ export function resetPathSuggestionInput(state) {
   clearPathSuggestions(state);
 }
 
-export function movePathSuggestion(state, delta) {
+export function movePathSuggestion(state, delta, { wrap = true } = {}) {
   const completion = state.pathSuggestions;
   if (!completion?.items?.length) return false;
-  completion.selectedIndex = (completion.selectedIndex + delta + completion.items.length) % completion.items.length;
+  completion.selectedIndex = moveSelectableIndex(completion.items, completion.selectedIndex, delta, { wrap });
   return true;
 }
 

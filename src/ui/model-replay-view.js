@@ -74,6 +74,15 @@ function renderReplayPreview(state, workspace, width, height, theme) {
         wrapItems: false, theme,
         pointerId: 'zipflow:model-replay-preview',
         onSelect: (item, index) => state.dispatch?.({ type: 'model-replay-preview-select', index: selectRowIndex(item, index) }),
+        onWheel: (event) => {
+          const delta = wheelScrollDelta(event);
+          if (delta) {
+            const index = Math.max(0, Math.min(items.length - 1, (workspace.previewIndex ?? 0) + delta));
+            state.dispatch?.({ type: 'model-replay-preview-select', index });
+          }
+          event.preventDefault();
+          event.stopPropagation?.();
+        },
       }),
       ContextDock({ text: selected?.description ?? '', rows: 1, width: Math.max(20, width - 4), theme }),
     ],

@@ -8,6 +8,8 @@ import { renderSettings } from '../src/ui/settings-view.js';
 
 test('path completion delegates list rendering to the Terlio SelectList primitive', () => {
   const state = createInitialState();
+  const actions = [];
+  state.dispatch = (action) => actions.push(action);
   state.pathSuggestionActive = true;
   state.pathSuggestions = {
     selectedIndex: 0,
@@ -15,6 +17,8 @@ test('path completion delegates list rendering to the Terlio SelectList primitiv
   };
   const node = PathCompletionPopup({ state, height: 5, theme: themes.ocean });
   assert.equal(node.type, 'selectList');
+  node.props.onWheel({ deltaY: 1, preventDefault() {}, stopPropagation() {} });
+  assert.deepEqual(actions, [{ type: 'path-move', delta: 1, wrap: false }]);
 });
 
 test('settings use the Terlio SplitPane primitive for the two-column layout', () => {

@@ -1,5 +1,6 @@
 import { Box, ScrollPane, Text, color, themes, wrapText } from 'terlio.js';
 import { translateForState as t } from '../i18n/index.js';
+import { wheelScrollDelta } from './wheel.js';
 
 export function openHelpOverlay(controller, { title = 'Help', lines = [] } = {}) {
   const manager = controller.state.overlays;
@@ -32,6 +33,13 @@ export function openHelpOverlay(controller, { title = 'Help', lines = [] } = {})
         border: false,
         footer: false,
         theme,
+        pointerId: 'zipflow:help-overlay',
+        onWheel: (event) => {
+          view.scroll = Math.max(0, Math.min(view.maxScroll, view.scroll + wheelScrollDelta(event)));
+          controller.invalidate();
+          event.preventDefault();
+          event.stopPropagation?.();
+        },
       }));
     },
     onKey: ({ key }) => {

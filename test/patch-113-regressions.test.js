@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createOverlayManager, renderToString, stripAnsi } from 'terlio.js';
 import { appendMessage, createInitialState, setScreen } from '../src/app/state.js';
+import { ZipflowController } from '../src/app/controller.js';
 import { renderZipflow } from '../src/ui/render.js';
 import { WHEEL_SCROLL_ROWS, wheelScrollDelta } from '../src/ui/wheel.js';
 import { zipflowToastWidth } from '../src/ui/toast-overlay.js';
@@ -30,16 +31,16 @@ function event(deltaY) {
   return { deltaY, preventDefault() {}, stopPropagation() {} };
 }
 
-test('mouse wheel movement is normalized to exactly three rows in either direction', () => {
-  assert.equal(WHEEL_SCROLL_ROWS, 3);
-  assert.equal(wheelScrollDelta({ deltaY: 0.1 }), 3);
-  assert.equal(wheelScrollDelta({ deltaY: 120 }), 3);
-  assert.equal(wheelScrollDelta({ deltaY: -0.1 }), -3);
-  assert.equal(wheelScrollDelta({ deltaY: -120 }), -3);
+test('mouse wheel movement is normalized to exactly one row in either direction', () => {
+  assert.equal(WHEEL_SCROLL_ROWS, 1);
+  assert.equal(wheelScrollDelta({ deltaY: 0.1 }), 1);
+  assert.equal(wheelScrollDelta({ deltaY: 120 }), 1);
+  assert.equal(wheelScrollDelta({ deltaY: -0.1 }), -1);
+  assert.equal(wheelScrollDelta({ deltaY: -120 }), -1);
   assert.equal(wheelScrollDelta({ deltaY: 0 }), 0);
 });
 
-test('menu, Activity, and Settings wheel handlers all use the three-row contract', () => {
+test('menu, Activity, and Settings wheel handlers all use the one-row contract', () => {
   const menuState = createInitialState();
   menuState.project = projectFixture();
   menuState.workflow = { checks: [], policy: { label: 'Practical' } };
@@ -51,7 +52,7 @@ test('menu, Activity, and Settings wheel handlers all use the three-row contract
   });
   const menuTree = renderZipflow({ state: menuState, width: 100, height: 28 });
   findNode(menuTree, (node) => node.props?.pointerId === 'zipflow:menu').props.onWheel(event(1));
-  assert.deepEqual(menuActions.pop(), { type: 'menu-move-selection', delta: 3 });
+  assert.deepEqual(menuActions.pop(), { type: 'menu-move-selection', delta: 1, wrap: false });
 
   const activityState = createInitialState();
   activityState.project = projectFixture();
@@ -61,7 +62,7 @@ test('menu, Activity, and Settings wheel handlers all use the three-row contract
   activityState.transcriptScroll = 9;
   const activityTree = renderZipflow({ state: activityState, width: 100, height: 28 });
   findNode(activityTree, (node) => node.props?.pointerId === 'zipflow:transcript').props.onWheel(event(-1));
-  assert.equal(activityState.transcriptScroll, 6);
+  assert.equal(activityState.transcriptScroll, 8);
 
   const settingsState = createInitialState();
   settingsState.project = projectFixture();
@@ -78,7 +79,26 @@ test('menu, Activity, and Settings wheel handlers all use the three-row contract
   settingsState.dispatch = (action) => settingsActions.push(action);
   const settingsTree = renderZipflow({ state: settingsState, width: 110, height: 30 });
   findNode(settingsTree, (node) => node.props?.pointerId === 'zipflow:settings-parameters').props.onWheel(event(1));
-  assert.deepEqual(settingsActions.pop(), { type: 'settings-wheel', delta: 3 });
+  assert.deepEqual(settingsActions.pop(), { type: 'settings-wheel', delta: 1, wrap: false });
+});
+
+test('menu paging and wheel movement keep selection valid at disabled boundaries', async () => {
+  const state = createInitialState();
+  state.menuItems = [
+    { id: 'empty', label: 'No changed files recorded', disabled: true },
+    { id: 'back', label: 'Back to run details' },
+  ];
+  state.selectedIndex = 1;
+  const controller = new ZipflowController(state);
+  controller.invalidate = () => {};
+
+  controller.pageSelection(-1);
+  assert.equal(state.selectedIndex, 1);
+
+  await controller.dispatch({ type: 'menu-move-selection', delta: 1, wrap: false });
+  assert.equal(state.selectedIndex, 1);
+  assert.ok(state.selectedIndex >= 0 && state.selectedIndex < state.menuItems.length);
+  assert.equal(state.menuItems[state.selectedIndex].disabled, undefined);
 });
 
 test('Zipflow toasts auto-size and wrap all detail text instead of clipping it', () => {

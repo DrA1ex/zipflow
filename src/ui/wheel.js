@@ -1,4 +1,4 @@
-export const WHEEL_SCROLL_ROWS = 3;
+export const WHEEL_SCROLL_ROWS = 1;
 
 export function wheelScrollDelta(event, rows = WHEEL_SCROLL_ROWS) {
   const delta = Number(event?.deltaY) || 0;

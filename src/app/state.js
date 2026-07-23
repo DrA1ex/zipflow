@@ -1,5 +1,6 @@
 import { InputEditor, createTextSelectionState } from 'terlio.js';
 import { DEFAULT_SETTINGS } from '../settings/store.js';
+import { normalizeSelectableIndex } from './list-navigation.js';
 
 export function createInitialState() {
   return {
@@ -76,7 +77,7 @@ export function setScreen(state, screen, { items = [], selectedIndex = 0, status
   state.menuSourceItems = Array.isArray(items) ? items : [];
   state.menuSearch = state.menuSearch?.screen === screen ? state.menuSearch : null;
   state.menuItems = applyMenuSearch(state.menuSourceItems, state.menuSearch?.query);
-  state.selectedIndex = Math.max(0, Math.min(selectedIndex, Math.max(0, state.menuItems.length - 1)));
+  state.selectedIndex = normalizeSelectableIndex(state.menuItems, selectedIndex);
   state.panelIntro = Array.isArray(intro) ? intro : [String(intro ?? '')].filter(Boolean);
   if (status) state.status = status;
 }
@@ -87,7 +88,7 @@ export function refreshMenuSearch(state, query) {
   state.menuSearch.query = String(query ?? '');
   state.menuItems = applyMenuSearch(state.menuSourceItems, state.menuSearch.query);
   const preserved = state.menuItems.findIndex((item) => item.id === selectedId);
-  state.selectedIndex = preserved >= 0 ? preserved : firstEnabledIndex(state.menuItems);
+  state.selectedIndex = normalizeSelectableIndex(state.menuItems, preserved >= 0 ? preserved : state.selectedIndex);
 }
 
 export function appendMessage(state, title, lines = [], tone = 'info', options = {}) {
@@ -147,7 +148,3 @@ function applyMenuSearch(items, query) {
   return items.filter((item) => `${item.label ?? ''}\n${item.value ?? ''}\n${item.context ?? ''}\n${item.description ?? ''}\n${item.help ?? ''}\n${item.searchText ?? ''}`.toLowerCase().includes(normalized));
 }
 
-function firstEnabledIndex(items) {
-  const index = items.findIndex((item) => !item.disabled);
-  return index >= 0 ? index : 0;
-}

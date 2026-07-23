@@ -25,6 +25,16 @@ test('built-in interface languages are discoverable and Russian translates share
   assert.equal(translate('Update policy', {}, 'ru'), 'Политика обновления');
 });
 
+test('radio markers are kept outside translation patterns', () => {
+  assert.equal(
+    translate('● Only clean Git-tracked files', {}, 'ru'),
+    '● Только чистые файлы под контролем Git',
+  );
+  assert.equal(translate('○ Only clean Git-tracked files', {}, 'ru'), '○ Только чистые файлы под контролем Git');
+  assert.equal(translate('12 files', {}, 'ru'), 'Файлов: 12');
+  assert.equal(translate('Review source files', {}, 'ru'), 'Review source files');
+});
+
 test('valid custom JSON packs are loaded automatically and invalid packs are ignored', async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'zipflow-language-'));
   await writeFile(path.join(directory, 'pirate.json'), JSON.stringify({

@@ -1,5 +1,6 @@
 import { loadLmStudioModel, unloadLmStudioModel } from '../llm/client.js';
 import { updateSettings } from '../settings/store.js';
+import { moveSelectableIndex, normalizeSelectableIndex, pageSelectableIndex } from './list-navigation.js';
 
 export function openModelConfiguration(controller, model) {
   const { state } = controller;
@@ -27,13 +28,13 @@ export function settingsModelView(state) {
   const modelConfig = state.settingsPanel?.modelConfig;
   if (!modelConfig) return null;
   const parameters = modelParameters(modelConfig);
-  const parameterIndex = clamp(modelConfig.parameterIndex, 0, Math.max(0, parameters.length - 1));
+  const parameterIndex = normalizeSelectableIndex(parameters, modelConfig.parameterIndex);
   modelConfig.parameterIndex = parameterIndex;
   const activeParameter = parameters[parameterIndex] ?? null;
   const choices = modelConfig.focus === 'choices' && activeParameter
     ? parameterChoices(modelConfig, activeParameter)
     : [];
-  modelConfig.choiceIndex = clamp(modelConfig.choiceIndex, 0, Math.max(0, choices.length - 1));
+  modelConfig.choiceIndex = normalizeSelectableIndex(choices, modelConfig.choiceIndex);
   return {
     ...modelConfig,
     parameters,
@@ -55,8 +56,17 @@ export async function handleModelSettingsKey(controller, key) {
   if (key.name === 'up' || key.name === 'down') {
     const delta = key.name === 'up' ? -1 : 1;
     const view = settingsModelView(controller.state);
-    if (config.focus === 'choices') moveModelChoice(config, delta, view.choices.length);
-    else moveModelParameter(config, delta, view.parameters.length);
+    const wrapNavigation = key.navigationWrap !== false;
+    if (config.focus === 'choices') config.choiceIndex = moveSelectableIndex(view.choices, config.choiceIndex, delta, { wrap: wrapNavigation });
+    else config.parameterIndex = moveSelectableIndex(view.parameters, config.parameterIndex, delta, { wrap: wrapNavigation });
+    controller.invalidate();
+    return true;
+  }
+  if (['page-up', 'page-down', 'pageup', 'pagedown'].includes(key.name)) {
+    const direction = key.name === 'page-up' || key.name === 'pageup' ? -1 : 1;
+    const view = settingsModelView(controller.state);
+    if (config.focus === 'choices') config.choiceIndex = pageSelectableIndex(view.choices, config.choiceIndex, direction, 6);
+    else config.parameterIndex = pageSelectableIndex(view.parameters, config.parameterIndex, direction, 6);
     controller.invalidate();
     return true;
   }
@@ -382,18 +392,3 @@ function kvLabel(value) {
   return value === true ? 'GPU memory' : value === false ? 'CPU memory' : 'Automatic';
 }
 
-function moveModelParameter(config, delta, length) {
-  config.parameterIndex = wrap(config.parameterIndex + delta, length);
-}
-
-function moveModelChoice(config, delta, length) {
-  config.choiceIndex = wrap(config.choiceIndex + delta, length);
-}
-
-function wrap(value, length) {
-  return length ? (value + length) % length : 0;
-}
-
-function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
-}

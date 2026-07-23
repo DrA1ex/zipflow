@@ -79,7 +79,7 @@ test('model Save and select loader animates while configuration is being applied
   assert.doesNotMatch(second, /Loading Gemma…\s+×|Loading Gemma ×/);
 });
 
-test('historical replay opens as a dimmed preview and does not start automatically', () => {
+test('historical replay opens as a dimmed preview and does not start automatically', async () => {
   const state = settingsState();
   state.settingsPanel.replayRuns = [{
     id: 'run-1', archivePath: '/tmp/update.zip', replayAvailable: true,
@@ -102,6 +102,11 @@ test('historical replay opens as a dimmed preview and does not start automatical
   const compactModal = modalText.replace(/\s+/g, ' ');
   assert.match(compactModal, /No project files, Git state, backups, source archives, or run history will be/);
   assert.match(compactModal, /changed/);
+
+  const preview = findNode(tree.props.manager.top().node, (node) => node.props?.pointerId === 'zipflow:model-replay-preview');
+  preview.props.onWheel({ deltaY: 1, preventDefault() {}, stopPropagation() {} });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(workspace.previewIndex, 1);
 });
 
 test('historical replay preserves manual scrolling and exposes a latest-output indicator', async () => {
@@ -139,7 +144,7 @@ test('historical replay preserves manual scrolling and exposes a latest-output i
   const before = workspace.scroll;
   wheelRegion.props.onWheel({ deltaY: -1, preventDefault() {}, stopPropagation() {} });
   await new Promise((resolve) => setImmediate(resolve));
-  assert.ok(workspace.scroll < before);
+  assert.equal(workspace.scroll, before - 1);
   const output = stripAnsi(renderToString(tree, { width: 100, height: 24 }));
   assert.match(output, /new replay block/);
 });

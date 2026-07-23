@@ -70,7 +70,7 @@ Rendering does not perform project mutations. Global settings use a stable two-p
 Zipflow delegates generic terminal UI behavior to Terlio instead of assembling terminal geometry itself:
 
 - `WorkspaceShell` and `WorkspacePane` own the application frame; the global key-hint footer is a dedicated untitled bordered `Box`, so Terlio cannot inject a fallback `STATUS` title;
-- `ScrollPane` owns Activity and diff scrolling, selection, and viewport-only rendering for very large line sets; `ui/wheel.js` normalizes every pointer-wheel event to a three-row movement shared by menus, Settings, Activity, diffs, and replay workspaces;
+- `ScrollPane` owns Activity and diff scrolling, selection, and viewport-only rendering for very large line sets; `ui/wheel.js` normalizes every pointer-wheel event to a one-row movement shared by menus, Settings, path suggestions, Help, Activity, diffs, and replay workspaces. Selection lists stop at their boundaries for wheel input while documented keyboard navigation may wrap;
 - `SelectList` owns project actions, settings choices, model lists, and path-completion rows;
 - `SplitPane` owns the persistent two-column settings layout;
 - `BottomOverlay` and `Modal` own completion and editor overlays without shifting the base layout;
@@ -400,7 +400,7 @@ Unit and integration tests use temporary projects and Git repositories. Regressi
 
 ## Release versioning
 
-The current public release is `1.1.1`. The application follows semantic versioning beginning with `1.0.0`. Compatible fixes and small improvements increment patch (`1.0.x`); substantial backward-compatible features increment minor (`1.x.x`); incompatible changes require a major increment. `package.json`, the root package record in `package-lock.json`, and `src/version.js` are kept identical and verified by tests.
+The package version is defined by `package.json` and `src/version.js`. The application follows semantic versioning beginning with `1.0.0`. Compatible fixes and small improvements increment patch (`1.0.x`); substantial backward-compatible features increment minor (`1.x.x`); incompatible changes require a major increment. `package.json`, the root package record in `package-lock.json`, and `src/version.js` are kept identical and verified by tests.
 
 ## LM Studio model identity
 
