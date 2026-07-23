@@ -9,7 +9,8 @@ Settings include:
 - Terlio semantic theme;
 - compact or live running-check output;
 - local LLM provider, authentication, model, load configuration, and languages;
-- archive review and change-delivery behavior;
+- independent LLM tasks for archive review, summaries, failed-check explanations, and commit messages;
+- archive-review methods and change-delivery behavior;
 - source ZIP disposition;
 - archive retention and size limits;
 - backup retention and size limits;
@@ -170,6 +171,15 @@ Language files do not contain executable code. Zipflow reads JSON only, validate
 
 
 
-## Compact storage statistics
+## Settings context and full help
 
-Source archives, backups, and managed-file history keep one compact statistics row in the two-row Settings context dock. The first row remains the selected parameter help; the second shows count and size plus the oldest archive/backup or the history's last-update time. Refresh and cleanup actions update this projection without turning statistics into selectable rows.
+The two-row Settings context dock is intentionally compact. It can combine the selected parameter description, the selected option description, and a short page summary. Press `?` to open the complete structured help for the current selection. The full view keeps the parameter explanation and selected-option explanation as separate sections instead of showing only the last visible footer fragment.
+
+Source archives, backups, and managed-file history add structured statistics to that full help view:
+
+- record count;
+- stored file count where applicable;
+- total size;
+- oldest stored item or last history update.
+
+Refresh and cleanup actions update both the compact projection and the full help without turning statistics into selectable rows.

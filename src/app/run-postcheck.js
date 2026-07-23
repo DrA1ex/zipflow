@@ -7,6 +7,7 @@ import { displayPath } from '../utils/paths.js';
 import { confirmRollback, showRunDetails } from './run-rollback.js';
 import { failRun } from './run-lifecycle.js';
 import { explainCheckFailure } from '../llm/failure.js';
+import { isLlmFailureAnalysisEnabled } from '../llm/tasks.js';
 import { isLocalLlmEnabled } from '../llm/generate.js';
 import { beginLlmProgress } from './llm-progress.js';
 import { saveLlmDiagnostics } from '../llm/diagnostics.js';
@@ -208,7 +209,7 @@ async function activateFailedCheck(controller, itemId) {
 async function maybeExplainFailedCheck(controller, failedCheck) {
   const { state } = controller;
   const settings = activeRunSettings(state);
-  if (!failedCheck || !isLocalLlmEnabled(settings) || settings.llmFailureAnalysis === 'disabled') return null;
+  if (!failedCheck || !isLocalLlmEnabled(settings) || !isLlmFailureAnalysisEnabled(settings)) return null;
   const progress = beginLlmProgress(controller);
   const operation = controller.beginOperation({ kind: 'llm-failure-analysis', label: 'Explaining failed check' });
   state.llmAbortController = { abort: () => operation.abort() };

@@ -5,6 +5,7 @@ import { resolveLocalLlmSession } from '../llm/session.js';
 import { listProjectRuns, saveRunRecord } from '../runs/store.js';
 import { buildRunAnalytics } from '../history/analytics.js';
 import { displayPath } from '../utils/paths.js';
+import { hasLlmChangeTasks, llmTasks } from '../llm/tasks.js';
 import { beginLlmProgress } from './llm-progress.js';
 import { activeRunSettings } from './runtime-settings.js';
 import { showArchiveSafetyReview, showPlanReview } from './run-review.js';
@@ -62,7 +63,7 @@ async function finishLlmReview(controller, llm, generation) {
   };
   state.run.archiveSafety = state.archiveSafety;
   state.run = await saveRunRecord(state.run);
-  emitLlmResult(controller, llm, activeRunSettings(state).llmArchiveReview);
+  emitLlmResult(controller, llm, activeRunSettings(state));
   refreshReviewAfterLlm(controller);
   controller.invalidate();
   return llm;
@@ -77,14 +78,16 @@ function refreshReviewAfterLlm(controller) {
 async function generateLlmSummary(controller, { plan, patch, extracted }) {
   const { state } = controller;
   const settings = activeRunSettings(state);
-  if (!isLocalLlmEnabled(settings)) return { record: null, assessment: null };
-  if (changedCount(plan) === 0 && !['structure', 'sample'].includes(settings.llmArchiveReview)) return { record: null, assessment: null };
-  state.progress = { value: 5, total: 7, detail: `Streaming summary from ${settings.llmModel}` };
+  const tasks = llmTasks(settings);
+  const reviewMode = tasks.archiveReview ? settings.llmArchiveReview : 'disabled';
+  if (!isLocalLlmEnabled(settings) || !hasLlmChangeTasks(settings)) return { record: null, assessment: null };
+  if (changedCount(plan) === 0 && !['structure', 'sample'].includes(reviewMode)) return { record: null, assessment: null };
+  state.progress = { value: 5, total: 7, detail: `Streaming requested LLM output from ${settings.llmModel}` };
   controller.invalidate();
   const llmEstimate = await previousLlmEstimate(state);
   controller.message('Local LLM analysis starting', [
     `Projects: ${projectContextLabel(state.project)}`,
-    `${changedCount(plan)} changed paths · delivery ${deliveryLabel(settings.llmChangeDelivery)}${settings.llmArchiveReview === 'structure' ? ' · project/archive structure guard first' : settings.llmArchiveReview === 'sample' ? ' · bounded structure and patch sample guard first' : ''}${llmEstimate ? ` · historical median ${formatEstimate(llmEstimate)}` : ''}.`,
+    `${changedCount(plan)} changed paths · tasks ${taskLabel(tasks)} · delivery ${deliveryLabel(settings.llmChangeDelivery)}${reviewMode === 'structure' ? ' · project/archive structure guard first' : reviewMode === 'sample' ? ' · bounded structure and patch sample guard first' : ''}${llmEstimate ? ` · historical median ${formatEstimate(llmEstimate)}` : ''}.`,
     'Adaptive delivery uses a full patch, representative sample, or capped batches according to the model context. Ctrl+C cancels this LLM operation.',
   ], 'process');
   const progress = beginLlmProgress(controller, { expectedMs: llmEstimate });
@@ -98,13 +101,13 @@ async function generateLlmSummary(controller, { plan, patch, extracted }) {
     progress.onEvent({ type: 'model-profile', profile: session.profile });
     let guardAssessment = null;
     let guardMode = null;
-    if (settings.llmArchiveReview === 'structure') {
+    if (reviewMode === 'structure') {
       guardMode = 'structure';
       guardAssessment = await reviewArchiveStructure(
         { settings, project: state.project, workflow: state.workflow, extracted, plan },
         { onEvent: progress.onEvent, signal: operation.signal, session },
       );
-    } else if (settings.llmArchiveReview === 'sample') {
+    } else if (reviewMode === 'sample') {
       guardMode = 'sample';
       guardAssessment = await reviewArchiveSample(
         { settings, project: state.project, workflow: state.workflow, extracted, plan, patchContent: patch.content },
@@ -113,7 +116,7 @@ async function generateLlmSummary(controller, { plan, patch, extracted }) {
     }
     if (guardAssessment?.assessment === 'unsuitable') {
       const result = {
-        summary: guardAssessment.reasons,
+        summary: tasks.summary ? guardAssessment.reasons : [],
         commitMessage: '',
         assessment: guardAssessment.assessment,
         confidence: guardAssessment.confidence,
@@ -129,11 +132,16 @@ async function generateLlmSummary(controller, { plan, patch, extracted }) {
         record: llmRecord(state, result, diagnosticsPath, durationMs),
       };
     }
-    const summarySettings = guardAssessment ? { ...settings, llmArchiveReview: 'disabled' } : settings;
-    const result = await generateChangeDescription(
-      { settings: summarySettings, project: state.project, plan, patchContent: patch.content },
-      { onEvent: progress.onEvent, signal: operation.signal, session },
-    );
+    const needsDescription = tasks.summary || tasks.commitMessage || reviewMode === 'patch';
+    const descriptionSettings = guardAssessment
+      ? { ...settings, llmUseArchiveReview: false }
+      : settings;
+    const result = needsDescription
+      ? await generateChangeDescription(
+        { settings: descriptionSettings, project: state.project, plan, patchContent: patch.content },
+        { onEvent: progress.onEvent, signal: operation.signal, session },
+      )
+      : { summary: [], commitMessage: '', diagnostics: {} };
     if (guardAssessment) {
       result.guardAssessment = guardAssessment;
       result.diagnostics = { ...(result.diagnostics ?? {}), [guardMode]: guardAssessment.diagnostics };
@@ -204,7 +212,9 @@ function projectContextLabel(project) {
   return entries.map((entry) => entry.path === '.' ? 'Root' : `${entry.path}/`).join(', ');
 }
 
-function emitLlmResult(controller, llm, reviewMode) {
+function emitLlmResult(controller, llm, settings) {
+  const tasks = llmTasks(settings);
+  const reviewMode = tasks.archiveReview ? settings.llmArchiveReview : 'disabled';
   if (llm.result) {
     const attempt = llm.result.diagnostics?.attempts?.find((item) => typeof item.attempt === 'number');
     if (attempt?.patch?.truncated) controller.message('Additional LLM context reduction', [
@@ -212,7 +222,7 @@ function emitLlmResult(controller, llm, reviewMode) {
       `${attempt.patch.omittedFiles} file${attempt.patch.omittedFiles === 1 ? '' : 's'} without excerpts · ${attempt.patch.omittedHunks} hunk${attempt.patch.omittedHunks === 1 ? '' : 's'} omitted`,
     ], 'warning', { collapsedSummary: 'Local LLM · additional context reduction' });
     const assessment = llm.assessment;
-    if (assessment) {
+    if (tasks.archiveReview && assessment) {
       const reasons = cleanAssessmentReasons(assessment.reasons);
       controller.message('Local LLM archive suitability', [
         `Assessment: ${titleCase(assessment.assessment)}`,
@@ -222,14 +232,9 @@ function emitLlmResult(controller, llm, reviewMode) {
       ], assessment.assessment === 'suitable' ? 'success' : 'warning', {
         collapsedSummary: `Local LLM · ${assessment.assessment} · ${assessment.confidence} confidence`,
       });
-    }
-    else controller.message('Local LLM archive suitability', [
-      reviewMode === 'disabled'
-        ? 'Not requested · Archive review is set to Summary only.'
-        : 'No suitability verdict was returned; deterministic Zipflow safety checks remain active.',
-    ], reviewMode === 'disabled' ? 'info' : 'warning', {
-      collapsedSummary: reviewMode === 'disabled' ? 'Local LLM · summary only' : 'Local LLM · verdict unavailable',
-    });
+    } else if (tasks.archiveReview) controller.message('Local LLM archive suitability', [
+      'No suitability verdict was returned; deterministic Zipflow safety checks remain active.',
+    ], 'warning', { collapsedSummary: 'Local LLM · verdict unavailable' });
     if (llm.result.warning) controller.message('Local LLM fallback used', [llm.result.warning], 'warning', {
       collapsedSummary: 'Local LLM · fallback used',
     });
@@ -248,13 +253,13 @@ function emitLlmResult(controller, llm, reviewMode) {
         ? `Local LLM · ${coverage.reviewedFiles}/${coverage.totalFiles} files with content`
         : `Local LLM · ${deliveryLabel(delivery.resolved)}`,
     });
-    if (llm.result.summary?.length) controller.message('Local LLM summary', llm.result.summary, 'summary', {
+    if (tasks.summary && llm.result.summary?.length) controller.message('Local LLM summary', llm.result.summary, 'summary', {
       collapsedSummary: `Local LLM · ${llm.result.summary.length} summary points`,
     });
   } else if (llm.cancelled) controller.message('Local LLM generation cancelled', [
-    'The update continues with normal commit-message fallbacks.',
+    'The update continues without the cancelled model output.',
   ], 'warning', { collapsedSummary: 'Local LLM · cancelled' });
-  else if (llm.error) controller.message('Local LLM summary was not generated', [
+  else if (llm.error) controller.message('Requested Local LLM output was not generated', [
     llm.error,
     ...(llm.diagnosticsPath ? [`Diagnostics: ${displayPath(llm.diagnosticsPath)}`] : []),
     'The update can continue and project files have not been affected by this error.',
@@ -282,8 +287,9 @@ function llmRecord(state, result, diagnosticsPath, durationMs = 0) {
     model: settings.llmModel,
     language: settings.llmSummaryLanguage || settings.llmLanguage,
     languages: llmLanguages(settings),
-    summary: result.summary,
-    commitMessage: result.commitMessage || null,
+    tasks: llmTasks(settings),
+    summary: llmTasks(settings).summary ? result.summary : [],
+    commitMessage: llmTasks(settings).commitMessage ? result.commitMessage || null : null,
     warning: result.warning || null,
     assessment: result.assessment ?? result.structureAssessment?.assessment ?? null,
     confidence: result.confidence ?? result.structureAssessment?.confidence ?? null,
@@ -341,6 +347,14 @@ async function previousLlmEstimate(state) {
   const settings = activeRunSettings(state);
   const sameModel = analytics.llm.byModel.find((item) => item.name === `${settings.llmProvider} · ${settings.llmModel}`);
   return sameModel?.medianMs || analytics.llm.total.medianMs || 0;
+}
+
+function taskLabel(tasks) {
+  return [
+    tasks.archiveReview ? 'archive review' : null,
+    tasks.summary ? 'summary' : null,
+    tasks.commitMessage ? 'commit message' : null,
+  ].filter(Boolean).join(', ');
 }
 
 function deliveryLabel(value) {

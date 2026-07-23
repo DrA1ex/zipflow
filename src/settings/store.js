@@ -7,14 +7,14 @@ import {
   deleteLlmApiToken, readLlmApiToken, SecureCredentialStoreError, writeLlmApiToken,
 } from '../security/credential-store.js';
 
-export const SETTINGS_VERSION = 17;
+export const SETTINGS_VERSION = 18;
 export const THEME_NAMES = Object.keys(themes);
 export const LLM_PROVIDERS = ['disabled', 'ollama', 'lmstudio'];
 export const LLM_LANGUAGES = ['English', 'Russian', 'German', 'French', 'Spanish', 'Chinese', 'Japanese'];
 export const ARCHIVE_POLICIES = ['keep', 'move', 'delete'];
-export const LLM_ARCHIVE_REVIEW_MODES = ['disabled', 'structure', 'sample', 'patch'];
+export const LLM_ARCHIVE_REVIEW_MODES = ['structure', 'sample', 'patch'];
 export const LLM_CHANGE_DELIVERY_MODES = ['adaptive', 'patch', 'representative', 'capped', 'change-list', 'chunked'];
-export const LLM_FAILURE_ANALYSIS_MODES = ['disabled', 'same-context', 'new-context'];
+export const LLM_FAILURE_ANALYSIS_MODES = ['same-context', 'new-context'];
 export const BACKUP_RETENTION_POLICIES = ['all', 'limits'];
 export const MANAGED_HISTORY_POLICIES = ['record', 'disabled'];
 
@@ -31,9 +31,13 @@ export const DEFAULT_SETTINGS = Object.freeze({
   llmCommitLanguage: 'English',
   llmSelectedInstanceId: '',
   llmApiToken: '',
-  llmArchiveReview: 'disabled',
+  llmUseArchiveReview: false,
+  llmUseSummary: true,
+  llmUseFailedChecks: false,
+  llmUseCommitMessage: true,
+  llmArchiveReview: 'structure',
   llmChangeDelivery: 'adaptive',
-  llmFailureAnalysis: 'disabled',
+  llmFailureAnalysis: 'new-context',
   llmVerboseOutput: false,
   llmDecisionCompatibility: null,
   llmDecisionCompatibilityByModel: {},
@@ -89,8 +93,10 @@ export function saveSettings(settings, { allowClearToken = false } = {}) {
     ]);
     const current = normalizeSettings(stored ?? backup);
     const credential = await resolveCredential(stored ? [stored, credentials] : [backup, credentials]);
-    const incoming = normalizeSettings(settings);
-    const requestedToken = incoming.llmApiToken;
+    const rawIncoming = settings && typeof settings === 'object' ? settings : {};
+    const tokenWasProvided = Object.prototype.hasOwnProperty.call(rawIncoming, 'llmApiToken');
+    const incoming = normalizeSettings({ ...current, ...rawIncoming });
+    const requestedToken = tokenWasProvided ? incoming.llmApiToken : credential.token;
     const credentialChange = await applyCredentialChange({
       requestedToken,
       currentToken: credential.token,
@@ -258,6 +264,30 @@ export function normalizeSettings(settings) {
   value.llmLanguage = value.llmSummaryLanguage;
   if (typeof value.llmSelectedInstanceId !== 'string') value.llmSelectedInstanceId = '';
   if (typeof value.llmApiToken !== 'string') value.llmApiToken = '';
+  const taskSettingIds = ['llmUseArchiveReview', 'llmUseSummary', 'llmUseFailedChecks', 'llmUseCommitMessage'];
+  const hasTaskSettings = taskSettingIds.some((key) => Object.prototype.hasOwnProperty.call(source, key));
+  const sourceVersion = Number(source.version || 0);
+  const migrateLegacyTasks = !hasTaskSettings && (
+    (sourceVersion > 0 && sourceVersion < SETTINGS_VERSION)
+    || Object.prototype.hasOwnProperty.call(source, 'llmArchiveReview')
+    || Object.prototype.hasOwnProperty.call(source, 'llmFailureAnalysis')
+  );
+  const legacyArchiveReview = Object.prototype.hasOwnProperty.call(source, 'llmArchiveReview')
+    ? source.llmArchiveReview : 'disabled';
+  const legacyFailureAnalysis = Object.prototype.hasOwnProperty.call(source, 'llmFailureAnalysis')
+    ? source.llmFailureAnalysis : 'disabled';
+  value.llmUseArchiveReview = hasTaskSettings
+    ? value.llmUseArchiveReview === true
+    : migrateLegacyTasks ? legacyArchiveReview !== 'disabled' : DEFAULT_SETTINGS.llmUseArchiveReview;
+  value.llmUseSummary = hasTaskSettings
+    ? value.llmUseSummary !== false
+    : migrateLegacyTasks ? true : DEFAULT_SETTINGS.llmUseSummary;
+  value.llmUseFailedChecks = hasTaskSettings
+    ? value.llmUseFailedChecks === true
+    : migrateLegacyTasks ? legacyFailureAnalysis !== 'disabled' : DEFAULT_SETTINGS.llmUseFailedChecks;
+  value.llmUseCommitMessage = hasTaskSettings
+    ? value.llmUseCommitMessage !== false
+    : migrateLegacyTasks ? true : DEFAULT_SETTINGS.llmUseCommitMessage;
   if (!LLM_ARCHIVE_REVIEW_MODES.includes(value.llmArchiveReview)) value.llmArchiveReview = DEFAULT_SETTINGS.llmArchiveReview;
   if (!LLM_CHANGE_DELIVERY_MODES.includes(value.llmChangeDelivery)) value.llmChangeDelivery = DEFAULT_SETTINGS.llmChangeDelivery;
   if (!LLM_FAILURE_ANALYSIS_MODES.includes(value.llmFailureAnalysis)) value.llmFailureAnalysis = DEFAULT_SETTINGS.llmFailureAnalysis;

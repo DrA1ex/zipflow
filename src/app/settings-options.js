@@ -5,6 +5,7 @@ import { formatByteSize } from '../utils/size.js';
 import { modelConfigSummary } from './settings-model.js';
 import { modelTestDescription, modelTestValue } from './settings-model-check.js';
 import { translateForState as t } from '../i18n/index.js';
+import { hasLlmChangeTasks, llmTasks } from '../llm/tasks.js';
 
 export function settingsDefinitions(state) {
   const definitions = [
@@ -31,6 +32,7 @@ export function settingsParameters(state, definition) {
     'Compact shows status only; last-line also shows the latest command output line.',
   )];
   if (definition.id === 'localLlm') {
+    if (state.settingsPanel?.subpage === 'llmTasks') return llmTaskParameters(state);
     if (state.settingsPanel?.subpage === 'llmLanguages') return llmLanguageParameters(state);
     if (state.settingsPanel?.subpage === 'llmModelTests') return llmModelTestParameters(state);
     if (state.settingsPanel?.subpage === 'llmModelReplay') return llmModelReplayParameters(state);
@@ -70,10 +72,9 @@ export function settingsChoices(state, parameter) {
     return LLM_LANGUAGES.map((value) => option(parameter, value, value));
   }
   if (parameter.settingId === 'llmArchiveReview') return [
-    option(parameter, 'disabled', 'Summary only', 'Generate summary and commit message without an archive suitability verdict.'),
-    option(parameter, 'structure', 'Structure guard', 'Compare the project and archive trees before the patch summary request.'),
-    option(parameter, 'sample', 'Sample guard', 'Check both project/archive structure and representative patch excerpts from up to five priority files.'),
-    option(parameter, 'patch', 'Deep patch review', 'Assess archive suitability together with summary and commit message from changes.patch.'),
+    option(parameter, 'structure', 'Structure guard', 'Compare the project and archive trees before other requested LLM outputs.'),
+    option(parameter, 'sample', 'Sample guard', 'Check project/archive structure and representative patch excerpts from up to five priority files.'),
+    option(parameter, 'patch', 'Deep patch review', 'Assess archive suitability from the delivered change representation.'),
   ];
   if (parameter.settingId === 'llmChangeDelivery') return [
     option(parameter, 'adaptive', 'Adaptive', 'Use a full patch when it fits, a representative sample for medium changes, and capped batches for large changes.'),
@@ -84,8 +85,7 @@ export function settingsChoices(state, parameter) {
     option(parameter, 'chunked', 'File-by-file chunks', 'Analyze small groups of file patches, then synthesize one final answer.'),
   ];
   if (parameter.settingId === 'llmFailureAnalysis') return [
-    option(parameter, 'disabled', 'Disabled', 'Do not send failed check output to the local model.'),
-    option(parameter, 'same-context', 'Continue change context', 'Explain the failure using the previous change review summary as context.'),
+    option(parameter, 'same-context', 'Continue change context', 'Explain the failure using the previous change analysis as context when one exists.'),
     option(parameter, 'new-context', 'New context', 'Explain only the failed command and its output in a fresh request.'),
   ];
   if (parameter.settingId === 'llmVerboseOutput') return [
@@ -119,6 +119,7 @@ export function settingsChoices(state, parameter) {
 }
 
 export function settingsPageTitle(state, definition) {
+  if (definition.id === 'localLlm' && state.settingsPanel?.subpage === 'llmTasks') return 'LLM tasks';
   if (definition.id === 'localLlm' && state.settingsPanel?.subpage === 'llmLanguages') return 'LLM languages';
   if (definition.id === 'localLlm' && state.settingsPanel?.subpage === 'llmModelTests') return 'Model tests';
   if (definition.id === 'localLlm' && state.settingsPanel?.subpage === 'llmModelReplay') {
@@ -144,6 +145,8 @@ function localLlmParameters(state) {
   const disabled = state.settings.llmProvider === 'disabled';
   const models = state.settingsPanel?.models ?? [];
   const selected = models.find((item) => item.id === state.settings.llmModel || item.key === state.settings.llmModel);
+  const tasks = llmTasks(state.settings);
+  const changeTasksDisabled = !hasLlmChangeTasks(state.settings);
   return [
     choiceParameter('llmProvider', 'Provider', providerLabel(state.settings.llmProvider), 'Choose the local server Zipflow should contact.'),
     {
@@ -152,25 +155,31 @@ function localLlmParameters(state) {
       disabledReason: 'Enable Ollama or LM Studio first.',
     },
     {
+      id: 'llmTasks', type: 'subpage', label: 'LLM tasks',
+      value: llmTasksSummary(state.settings),
+      description: 'Choose which results Zipflow should request from the local model.',
+      disabled, disabledReason: 'Enable a local LLM provider first.',
+    },
+    {
       id: 'llmLanguages', type: 'subpage', label: 'Languages',
       value: languageSummary(state.settings),
       description: 'Configure the language of model instructions, summaries, and generated commit messages independently.',
       disabled, disabledReason: 'Enable a local LLM provider first.',
     },
     {
-      ...choiceParameter('llmArchiveReview', 'Archive review', archiveReviewLabel(state.settings.llmArchiveReview), 'Optional LLM safety assessment; deterministic Zipflow checks always remain authoritative.'),
-      disabled,
-      disabledReason: 'Enable a local LLM provider first.',
+      ...choiceParameter('llmArchiveReview', 'Archive review method', archiveReviewLabel(state.settings.llmArchiveReview), 'Choose how archive suitability is assessed when that LLM task is enabled.'),
+      disabled: disabled || !tasks.archiveReview,
+      disabledReason: disabled ? 'Enable a local LLM provider first.' : 'Enable Archive suitability review in LLM tasks first.',
     },
     {
-      ...choiceParameter('llmChangeDelivery', 'Change delivery', changeDeliveryLabel(state.settings.llmChangeDelivery), 'Choose how source changes are represented and budgeted for the model.'),
-      disabled,
-      disabledReason: 'Enable a local LLM provider first.',
+      ...choiceParameter('llmChangeDelivery', 'Change delivery', changeDeliveryLabel(state.settings.llmChangeDelivery), 'Choose how source changes are represented and budgeted for archive review, summaries, and commit messages.'),
+      disabled: disabled || changeTasksDisabled,
+      disabledReason: disabled ? 'Enable a local LLM provider first.' : 'Enable at least one change-analysis task first.',
     },
     {
-      ...choiceParameter('llmFailureAnalysis', 'Failed checks', failureAnalysisLabel(state.settings.llmFailureAnalysis), 'Optionally ask the model to explain failed checks after they run.'),
-      disabled,
-      disabledReason: 'Enable a local LLM provider first.',
+      ...choiceParameter('llmFailureAnalysis', 'Failed-check context', failureAnalysisLabel(state.settings.llmFailureAnalysis), 'Choose whether failed checks reuse previous change context or start a fresh request.'),
+      disabled: disabled || !tasks.failedChecks,
+      disabledReason: disabled ? 'Enable a local LLM provider first.' : 'Enable Failed-check explanations in LLM tasks first.',
     },
     {
       ...choiceParameter('llmVerboseOutput', 'Raw model responses', verboseOutputLabel(state.settings.llmVerboseOutput), 'Control whether completed raw model output remains in Activity after Zipflow parses it.'),
@@ -194,6 +203,33 @@ function localLlmParameters(state) {
         : !state.settings.llmModel ? 'Choose a model first.' : 'The selected model test is already running.',
     },
   ];
+}
+
+function llmTaskParameters(state) {
+  const tasks = llmTasks(state.settings);
+  return [
+    toggleParameter('llmUseArchiveReview', 'Archive suitability review', tasks.archiveReview,
+      'Ask the model whether the archive changes plausibly belong to this workspace. Deterministic Zipflow checks remain authoritative.'),
+    toggleParameter('llmUseSummary', 'Change summary', tasks.summary,
+      'Generate a concise human-readable summary of the applied source changes.'),
+    toggleParameter('llmUseFailedChecks', 'Failed-check explanations', tasks.failedChecks,
+      'Offer a model explanation when a configured check fails.'),
+    toggleParameter('llmUseCommitMessage', 'Commit message', tasks.commitMessage,
+      'Generate a Git commit-message candidate without requiring any other LLM output.'),
+    { id: 'llmTasksBack', type: 'action', action: 'subpage-back', label: 'Back to Local LLM', value: '',
+      description: 'Return to the Local LLM settings page.' },
+  ];
+}
+
+function llmTasksSummary(settings) {
+  const tasks = llmTasks(settings);
+  const labels = [
+    tasks.archiveReview ? 'Archive review' : null,
+    tasks.summary ? 'Summary' : null,
+    tasks.failedChecks ? 'Failed checks' : null,
+    tasks.commitMessage ? 'Commit' : null,
+  ].filter(Boolean);
+  return labels.length ? labels.join(' · ') : 'None selected';
 }
 
 function llmLanguageParameters(state) {
@@ -339,6 +375,41 @@ function managedHistoryParameters(state) {
   ];
 }
 
+
+export function settingsPageHelp(state, definition) {
+  const loading = Boolean(state.settingsPanel?.loadingStorage);
+  if (definition.id === 'sourceArchive') {
+    const archives = state.settingsPanel?.storageStats?.archives ?? {};
+    if (loading) return [t(state, 'Storage statistics'), t(state, 'Scanning source archive storage…')];
+    return [
+      t(state, 'Storage statistics'),
+      t(state, 'Archives: {count}', { count: archives.count ?? 0 }),
+      t(state, 'Total size: {size}', { size: formatByteSize(archives.totalBytes ?? 0) }),
+      t(state, 'Oldest archive: {oldest}', { oldest: dateLabel(state, archives.oldestAt) }),
+    ];
+  }
+  if (definition.id === 'backups') {
+    const backups = state.settingsPanel?.storageStats?.backups ?? {};
+    if (loading) return [t(state, 'Storage statistics'), t(state, 'Scanning backup storage…')];
+    return [
+      t(state, 'Storage statistics'),
+      t(state, 'Backups: {count}', { count: backups.count ?? 0 }),
+      t(state, 'Stored files: {count}', { count: backups.fileCount ?? 0 }),
+      t(state, 'Total size: {size}', { size: formatByteSize(backups.totalBytes ?? 0) }),
+      t(state, 'Oldest backup: {oldest}', { oldest: dateLabel(state, backups.oldestAt) }),
+    ];
+  }
+  if (definition.id === 'managedHistory') {
+    const history = state.settingsPanel?.managedHistory ?? { paths: [], updatedAt: null };
+    return [
+      t(state, 'Managed-file statistics'),
+      t(state, 'Recorded paths: {count}', { count: history.paths?.length ?? 0 }),
+      t(state, 'Last updated: {updated}', { updated: dateLabel(state, history.updatedAt) }),
+    ];
+  }
+  return [];
+}
+
 export function settingsPageSummary(state, definition) {
   const loading = Boolean(state.settingsPanel?.loadingStorage);
   if (definition.id === 'sourceArchive') {
@@ -368,6 +439,10 @@ export function settingsPageSummary(state, definition) {
     })];
   }
   return [];
+}
+
+function toggleParameter(settingId, label, selected, description) {
+  return { id: settingId, type: 'toggle', action: 'toggle-setting', settingId, selected, label, value: '', description };
 }
 
 function actionRow(id, label, value, description, extra = {}) {
@@ -488,7 +563,7 @@ function archiveReviewLabel(value) {
   if (value === 'structure') return 'Structure guard';
   if (value === 'sample') return 'Sample guard';
   if (value === 'patch') return 'Deep patch review';
-  return 'Summary only';
+  return 'Structure guard';
 }
 
 
@@ -503,8 +578,7 @@ function changeDeliveryLabel(value) {
 
 function failureAnalysisLabel(value) {
   if (value === 'same-context') return 'Continue change context';
-  if (value === 'new-context') return 'New context';
-  return 'Disabled';
+  return 'New context';
 }
 
 function verboseOutputLabel(value) {

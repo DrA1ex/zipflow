@@ -38,7 +38,7 @@ test('active runs use an immutable settings snapshot while global settings can c
   const state = createInitialState();
   state.settings = {
     ...DEFAULT_SETTINGS,
-    llmProvider: 'ollama', llmModel: 'model-a', llmArchiveReview: 'patch', llmApiToken: 'secret',
+    llmProvider: 'ollama', llmModel: 'model-a', llmUseArchiveReview: true, llmArchiveReview: 'patch', llmApiToken: 'secret',
   };
   state.run = { id: 'run-1', status: 'planned' };
 
@@ -171,7 +171,7 @@ test('active-run settings guidance is confined to the footer while Settings is o
   const state = createInitialState();
   state.project = projectFixture();
   state.run = { id: 'run-1', status: 'planned' };
-  state.settings = { ...DEFAULT_SETTINGS, llmProvider: 'ollama', llmModel: 'model-a', llmArchiveReview: 'structure' };
+  state.settings = { ...DEFAULT_SETTINGS, llmProvider: 'ollama', llmModel: 'model-a', llmUseArchiveReview: true, llmUseSummary: false, llmUseCommitMessage: false, llmArchiveReview: 'structure' };
   captureRunSettings(state);
   state.screen = 'settings';
   state.status = 'Global settings';

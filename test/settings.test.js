@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { renderToString } from 'terlio.js';
+import { createOverlayManager, renderToString } from 'terlio.js';
 import { tempDir } from '../test-support/helpers.js';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { DEFAULT_SETTINGS, LLM_LANGUAGES, loadSettings, normalizeSettings, saveSettings, settingsBackupPath, settingsPath } from '../src/settings/store.js';
@@ -63,7 +63,8 @@ async function chooseValue(controller, id) {
 test('global settings store theme, LLM authorization, and source archive defaults', async () => withSettingsHome(async () => {
   await saveSettings({
     theme: 'matrix', checkOutput: 'compact', llmProvider: 'ollama', llmModel: 'qwen-coder',
-    llmLanguage: 'Russian', llmApiToken: 'secret', llmArchiveReview: 'patch',
+    llmLanguage: 'Russian', llmApiToken: 'secret', llmUseArchiveReview: true, llmUseSummary: false,
+    llmUseFailedChecks: true, llmUseCommitMessage: true, llmArchiveReview: 'patch',
     llmChangeDelivery: 'chunked', llmFailureAnalysis: 'same-context', archivePolicy: 'move',
     archiveDirectory: '~/custom-archives', archiveRetentionDays: 45, archiveMaxBytes: 500_000_000,
   });
@@ -75,6 +76,10 @@ test('global settings store theme, LLM authorization, and source archive default
   assert.equal(settings.llmModel, 'qwen-coder');
   assert.equal(settings.llmLanguage, 'Russian');
   assert.equal(settings.llmApiToken, 'secret');
+  assert.equal(settings.llmUseArchiveReview, true);
+  assert.equal(settings.llmUseSummary, false);
+  assert.equal(settings.llmUseFailedChecks, true);
+  assert.equal(settings.llmUseCommitMessage, true);
   assert.equal(settings.llmArchiveReview, 'patch');
   assert.equal(settings.llmChangeDelivery, 'chunked');
   assert.equal(settings.llmFailureAnalysis, 'same-context');
@@ -89,6 +94,11 @@ test('new settings default to keeping source ZIPs for 30 days and 1 GB when arch
   assert.equal(DEFAULT_SETTINGS.archiveDirectory, '~/zipflow-archive');
   assert.equal(DEFAULT_SETTINGS.archiveRetentionDays, 30);
   assert.equal(DEFAULT_SETTINGS.archiveMaxBytes, 1_000_000_000);
+  const settings = normalizeSettings();
+  assert.equal(settings.llmUseArchiveReview, false);
+  assert.equal(settings.llmUseSummary, true);
+  assert.equal(settings.llmUseFailedChecks, false);
+  assert.equal(settings.llmUseCommitMessage, true);
 });
 
 test('settings keep categories on the left and the selected category page on the right', () => {
@@ -325,7 +335,7 @@ test('Ukrainian is not offered and legacy Ukrainian settings migrate to English'
 
 test('archive review mode is selected from the Local LLM page and preserves the originating parameter', async () => withSettingsHome(async () => {
   const { state, controller } = await settingsController({
-    llmProvider: 'lmstudio', llmModel: 'gemma', llmArchiveReview: 'structure',
+    llmProvider: 'lmstudio', llmModel: 'gemma', llmUseArchiveReview: true, llmArchiveReview: 'structure',
   });
   state.settingsPanel.modelsProvider = 'lmstudio';
   state.settingsPanel.models = [{ id: 'gemma', key: 'gemma', label: 'gemma', loaded: true }];
@@ -342,7 +352,7 @@ test('archive review mode is selected from the Local LLM page and preserves the 
 test('Local LLM settings expose delivery and failed-check analysis choices', async () => withSettingsHome(async () => {
   const { state, controller } = await settingsController({
     llmProvider: 'ollama', llmModel: 'qwen', llmChangeDelivery: 'chunked',
-    llmFailureAnalysis: 'same-context', llmVerboseOutput: true,
+    llmUseFailedChecks: true, llmFailureAnalysis: 'same-context', llmVerboseOutput: true,
   });
   await selectCategory(controller, 'localLlm');
   let view = settingsViewModel(state);
@@ -363,7 +373,7 @@ test('Local LLM settings expose delivery and failed-check analysis choices', asy
   view = await openParameter(controller, 'llmFailureAnalysis');
   assert.equal(view.choices[view.choiceIndex].id, 'llmFailureAnalysis:same-context');
   assert.deepEqual(view.choices.map((item) => item.id), [
-    'llmFailureAnalysis:disabled', 'llmFailureAnalysis:same-context', 'llmFailureAnalysis:new-context',
+    'llmFailureAnalysis:same-context', 'llmFailureAnalysis:new-context',
   ]);
   await handleSettingsKey(controller, { name: 'escape' });
 
@@ -373,6 +383,7 @@ test('Local LLM settings expose delivery and failed-check analysis choices', asy
     'llmVerboseOutput:false', 'llmVerboseOutput:true',
   ]);
 }));
+
 
 
 test('1.0 settings migration preserves LLM credentials and archive storage choices', () => {

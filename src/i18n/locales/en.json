@@ -1022,7 +1022,35 @@
     "Recent trend": "Recent trend",
     "Delivery": "Delivery",
     "stable recently": "stable recently",
-    "not enough history": "not enough history"
+    "not enough history": "not enough history",
+    "LLM tasks": "LLM tasks",
+    "Choose which results Zipflow should request from the local model.": "Choose which results Zipflow should request from the local model.",
+    "Compare the project and archive trees before other requested LLM outputs.": "Compare the project and archive trees before other requested LLM outputs.",
+    "Check project/archive structure and representative patch excerpts from up to five priority files.": "Check project/archive structure and representative patch excerpts from up to five priority files.",
+    "Assess archive suitability from the delivered change representation.": "Assess archive suitability from the delivered change representation.",
+    "Explain the failure using the previous change analysis as context when one exists.": "Explain the failure using the previous change analysis as context when one exists.",
+    "Archive review method": "Archive review method",
+    "Choose how archive suitability is assessed when that LLM task is enabled.": "Choose how archive suitability is assessed when that LLM task is enabled.",
+    "Enable Archive suitability review in LLM tasks first.": "Enable Archive suitability review in LLM tasks first.",
+    "Choose how source changes are represented and budgeted for archive review, summaries, and commit messages.": "Choose how source changes are represented and budgeted for archive review, summaries, and commit messages.",
+    "Enable at least one change-analysis task first.": "Enable at least one change-analysis task first.",
+    "Failed-check context": "Failed-check context",
+    "Choose whether failed checks reuse previous change context or start a fresh request.": "Choose whether failed checks reuse previous change context or start a fresh request.",
+    "Enable Failed-check explanations in LLM tasks first.": "Enable Failed-check explanations in LLM tasks first.",
+    "Archive suitability review": "Archive suitability review",
+    "Ask the model whether the archive changes plausibly belong to this workspace. Deterministic Zipflow checks remain authoritative.": "Ask the model whether the archive changes plausibly belong to this workspace. Deterministic Zipflow checks remain authoritative.",
+    "Change summary": "Change summary",
+    "Generate a concise human-readable summary of the applied source changes.": "Generate a concise human-readable summary of the applied source changes.",
+    "Failed-check explanations": "Failed-check explanations",
+    "Offer a model explanation when a configured check fails.": "Offer a model explanation when a configured check fails.",
+    "Generate a Git commit-message candidate without requiring any other LLM output.": "Generate a Git commit-message candidate without requiring any other LLM output.",
+    "Summary": "Summary",
+    "None selected": "None selected",
+    "Storage statistics": "Storage statistics",
+    "Managed-file statistics": "Managed-file statistics",
+    "Requested LLM output is running in the background and does not block Apply.": "Requested LLM output is running in the background and does not block Apply.",
+    "The update continues without the cancelled model output.": "The update continues without the cancelled model output.",
+    "Requested Local LLM output was not generated": "Requested Local LLM output was not generated"
   },
   "patterns": [
     {
@@ -1356,6 +1384,38 @@
     {
       "source": "{percent} faster recently",
       "target": "{percent} faster recently"
+    },
+    {
+      "source": "Archives: {count}",
+      "target": "Archives: {count}"
+    },
+    {
+      "source": "Total size: {size}",
+      "target": "Total size: {size}"
+    },
+    {
+      "source": "Oldest archive: {oldest}",
+      "target": "Oldest archive: {oldest}"
+    },
+    {
+      "source": "Backups: {count}",
+      "target": "Backups: {count}"
+    },
+    {
+      "source": "Stored files: {count}",
+      "target": "Stored files: {count}"
+    },
+    {
+      "source": "Oldest backup: {oldest}",
+      "target": "Oldest backup: {oldest}"
+    },
+    {
+      "source": "Recorded paths: {count}",
+      "target": "Recorded paths: {count}"
+    },
+    {
+      "source": "Last updated: {updated}",
+      "target": "Last updated: {updated}"
     }
   ]
 }

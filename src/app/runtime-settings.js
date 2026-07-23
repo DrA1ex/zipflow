@@ -1,3 +1,5 @@
+import { llmTasks } from '../llm/tasks.js';
+
 const RUN_SETTING_KEYS = Object.freeze([
   'checkOutput',
   'llmProvider',
@@ -8,6 +10,10 @@ const RUN_SETTING_KEYS = Object.freeze([
   'llmCommitLanguage',
   'llmSelectedInstanceId',
   'llmApiToken',
+  'llmUseArchiveReview',
+  'llmUseSummary',
+  'llmUseFailedChecks',
+  'llmUseCommitMessage',
   'llmArchiveReview',
   'llmChangeDelivery',
   'llmFailureAnalysis',
@@ -50,7 +56,7 @@ export function runSettingsStatus(state) {
   const provider = settings.llmProvider === 'disabled'
     ? 'LLM off'
     : `${providerLabel(settings.llmProvider)}/${settings.llmModel || 'no model'}`;
-  return `Current ${provider} · ${compactReviewLabel(settings.llmArchiveReview)} · edits → next run`;
+  return `Current ${provider} · ${compactTaskLabel(settings)} · edits → next run`;
 }
 
 function sanitizeRunSettings(settings) {
@@ -63,10 +69,21 @@ function providerLabel(value) {
   return value === 'lmstudio' ? 'LM Studio' : value === 'ollama' ? 'Ollama' : 'Local LLM';
 }
 
+function compactTaskLabel(settings) {
+  if (settings.llmProvider === 'disabled') return 'LLM tasks off';
+  const tasks = llmTasks(settings);
+  const labels = [
+    tasks.archiveReview ? compactReviewLabel(settings.llmArchiveReview) : null,
+    tasks.summary ? 'Summary' : null,
+    tasks.failedChecks ? 'Failed checks' : null,
+    tasks.commitMessage ? 'Commit' : null,
+  ].filter(Boolean);
+  return labels.length ? labels.join('+') : 'No LLM tasks';
+}
+
 function compactReviewLabel(value) {
   if (value === 'structure') return 'Structure';
   if (value === 'sample') return 'Sample guard';
   if (value === 'patch') return 'Deep review';
-  return 'Summary';
+  return 'Review';
 }
-

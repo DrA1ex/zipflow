@@ -4,6 +4,7 @@ import { readArchiveMetadata } from '../archive/metadata.js';
 import { evaluateArchiveRisks } from '../archive/risk.js';
 import { createPlanPatch } from '../patch/create.js';
 import { isLocalLlmEnabled } from '../llm/generate.js';
+import { hasLlmChangeTasks, isLlmArchiveReviewEnabled } from '../llm/tasks.js';
 import { updateManagedHistory } from '../history/managed.js';
 import { buildUpdatePlan } from '../plan/build.js';
 import { applyUpdatePlan } from '../apply/apply.js';
@@ -265,7 +266,7 @@ async function continueArchiveInspection(controller, { archivePath, archiveHash,
     if (!hasChanges) return completeNoChangeRun(controller);
 
     const settings = activeRunSettings(state);
-    const shouldRunLlm = isLocalLlmEnabled(settings) && hasChanges;
+    const shouldRunLlm = isLocalLlmEnabled(settings) && hasLlmChangeTasks(settings) && hasChanges;
     if (shouldRunLlm) startLlmReview(controller, { plan: resolvedPlan, patch, extracted });
 
     if (requiresSafetyReview(state.archiveSafety)) return showArchiveSafetyReview(controller);
@@ -312,7 +313,7 @@ export async function startApply(controller, { checkpointCreated = false } = {})
     kind: 'apply', label: 'Applying update', critical: true,
   });
   try {
-    if (state.llmReviewPending && activeRunSettings(state).llmArchiveReview !== 'disabled') return showPlanReview(controller);
+    if (state.llmReviewPending && isLlmArchiveReviewEnabled(activeRunSettings(state))) return showPlanReview(controller);
     if (requiresSafetyReview(state.archiveSafety) && !state.archiveSafety.acknowledged) return showArchiveSafetyReview(controller);
     if (!checkpointCreated && state.workflow.git.checkpoint === 'ask' && archiveConflictPaths(state).length) return showConflictCheckpoint(controller);
     if (!checkpointCreated && state.workflow.git.checkpoint === 'auto' && archiveConflictPaths(state).length) await createCheckpoint(controller, { operation });

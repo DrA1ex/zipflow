@@ -9,25 +9,27 @@ import {
   extractUnstructuredResponse, parseChangeResponse, readableResponseInstructions,
 } from './response.js';
 import { commitLanguage, promptLanguage, promptLanguageDirective, summaryLanguage } from './language.js';
+import { llmTasks } from './tasks.js';
 
-const RESPONSE_SCHEMA = {
-  type: 'object', additionalProperties: false,
-  properties: {
-    summary: { type: 'array', minItems: 1, maxItems: 5, items: { type: 'string' } },
-    commitMessage: { type: 'string', minLength: 1 },
-  },
-  required: ['summary', 'commitMessage'],
-};
-const REVIEW_RESPONSE_SCHEMA = {
-  ...RESPONSE_SCHEMA,
-  properties: {
-    ...RESPONSE_SCHEMA.properties,
-    assessment: { type: 'string', enum: ['suitable', 'suspicious', 'unsuitable'] },
-    confidence: { type: 'string', enum: ['low', 'medium', 'high'] },
-    reasons: { type: 'array', minItems: 1, maxItems: 5, items: { type: 'string' } },
-  },
-  required: [...RESPONSE_SCHEMA.required, 'assessment', 'confidence', 'reasons'],
-};
+function responseSchema(tasks) {
+  const properties = {};
+  const required = [];
+  if (tasks.summary) {
+    properties.summary = { type: 'array', minItems: 1, maxItems: 5, items: { type: 'string' } };
+    required.push('summary');
+  }
+  if (tasks.commitMessage) {
+    properties.commitMessage = { type: 'string', minLength: 1 };
+    required.push('commitMessage');
+  }
+  if (tasks.archiveReview) {
+    properties.assessment = { type: 'string', enum: ['suitable', 'suspicious', 'unsuitable'] };
+    properties.confidence = { type: 'string', enum: ['low', 'medium', 'high'] };
+    properties.reasons = { type: 'array', minItems: 1, maxItems: 5, items: { type: 'string' } };
+    required.push('assessment', 'confidence', 'reasons');
+  }
+  return { type: 'object', additionalProperties: false, properties, required };
+}
 
 const MAX_REPAIR_DRAFT_CHARS = 40_000;
 const GENERATION_ATTEMPTS = 3;
@@ -42,9 +44,15 @@ export async function generateChangeDescription({ settings, project, plan, patch
   const languages = {
     prompt: promptLanguage(settings), summary: summaryLanguage(settings), commit: commitLanguage(settings),
   };
-  const reviewArchive = ['sample', 'patch'].includes(settings.llmArchiveReview);
-  const responseSchema = reviewArchive ? REVIEW_RESPONSE_SCHEMA : RESPONSE_SCHEMA;
-  const system = buildSystemPrompt(languages, reviewArchive);
+  const selectedTasks = llmTasks(settings);
+  const tasks = {
+    archiveReview: selectedTasks.archiveReview && settings.llmArchiveReview === 'patch',
+    summary: selectedTasks.summary,
+    commitMessage: selectedTasks.commitMessage,
+  };
+  if (!tasks.archiveReview && !tasks.summary && !tasks.commitMessage) return null;
+  const outputSchema = responseSchema(tasks);
+  const system = buildSystemPrompt(languages, tasks);
   const fixedUser = buildUserPrompt(project, plan, { kind: 'change-list', content: createChangeList(plan) });
   let session = options.session;
   if (!session) {
@@ -66,7 +74,7 @@ export async function generateChangeDescription({ settings, project, plan, patch
     fileCount: changedCount(plan),
   });
   notify({ type: 'delivery-mode', requestedMode, deliveryMode });
-  const context = { settings, project, plan, patchContent, profile, budget, system, reviewArchive, deliveryMode };
+  const context = { settings, project, plan, patchContent, profile, budget, system, tasks, deliveryMode };
   const generation = deliveryMode === 'chunked'
     ? await generateChunked(context, options, notify)
     : deliveryMode === 'capped'
@@ -78,7 +86,7 @@ export async function generateChangeDescription({ settings, project, plan, patch
           : await generateFromPatch(context, options, notify);
 
   const completion = generation.completion;
-  const direct = tryReadable(completion.content, reviewArchive) ?? tryReadable(completion.reasoning, reviewArchive);
+  const direct = tryReadable(completion.content, tasks) ?? tryReadable(completion.reasoning, tasks);
   if (direct) return resultWithDiagnostics(direct, completion, {
     profile, budget, delivery: generation.delivery, attempts: generation.attempts, repaired: false,
   });
@@ -90,13 +98,13 @@ export async function generateChangeDescription({ settings, project, plan, patch
       const repaired = await requestCompletion({
         settings, profile, maxTokens: 512,
         contextLength: Math.min(budget.effectiveContextTokens, 8_192),
-        responseSchema,
+        responseSchema: outputSchema,
         messages: [
-          { role: 'system', content: repairPrompt(languages, reviewArchive) },
+          { role: 'system', content: repairPrompt(languages, tasks) },
           { role: 'user', content: `DRAFT START\n${draft}\nDRAFT END` },
         ],
       }, options, (event) => notify({ ...event, stage: 'repair', hiddenOutput: true }));
-      const parsed = tryReadable(repaired.content, reviewArchive) ?? tryReadable(repaired.reasoning, reviewArchive);
+      const parsed = tryReadable(repaired.content, tasks) ?? tryReadable(repaired.reasoning, tasks);
       if (parsed) return resultWithDiagnostics(parsed, repaired, {
         profile, budget, delivery: generation.delivery, attempts: generation.attempts,
         repaired: true, originalFinishReason: completion.finishReason,
@@ -108,12 +116,10 @@ export async function generateChangeDescription({ settings, project, plan, patch
     }
   }
 
-  const partial = extractUnstructuredResponse(completion.content || completion.reasoning);
-  if (partial.summary.length) return {
+  const partial = extractUnstructuredResponse(completion.content || completion.reasoning, taskRequirements(tasks));
+  if (hasRequestedOutput(partial, tasks)) return {
     ...partial,
-    warning: partial.commitMessage
-      ? 'The local model returned an unexpected text format; Zipflow extracted its visible summary and commit message.'
-      : 'The local model returned an unexpected text format; Zipflow extracted the summary and will use a commit-message fallback.',
+    warning: 'The local model returned an unexpected text format; Zipflow extracted the requested visible output.',
     diagnostics: {
       profile, budget, delivery: generation.delivery, attempts: generation.attempts,
       finishReason: completion.finishReason, chunks: completion.chunks, repaired: false, partial: true,
@@ -121,7 +127,7 @@ export async function generateChangeDescription({ settings, project, plan, patch
     raw: completionDiagnostics(completion, true),
   };
 
-  const error = new Error(noOutputMessage(completion));
+  const error = new Error(noOutputMessage(completion, tasks));
   error.code = 'no_usable_output';
   error.diagnostics = {
     profile, budget, delivery: generation.delivery, attempts: generation.attempts,
@@ -284,18 +290,21 @@ async function requestChunkBatch(context, batch, total, options, notify) {
   throw lastError;
 }
 
-function buildSystemPrompt(languages, reviewArchive = false) {
+function buildSystemPrompt(languages, tasks) {
   return [
     promptLanguageDirective(languages.prompt),
     'You analyze source-code patches and other source-code change representations for a developer workflow tool.',
     'Be factual and concise. Mention behavior, architecture, tests, or risks only when supported by the supplied information.',
     'Do not invent test results, issue numbers, or motivations.',
-    ...(reviewArchive ? [
+    ...(tasks.archiveReview ? [
       'Assess whether the archive changes plausibly belong to this project and return assessment suitable, suspicious, or unsuitable.',
       'Use unsuitable only for strong evidence of a wrong archive. Use suspicious for ambiguous, destructive, or unexpectedly broad changes.',
       'This assessment is advisory and never replaces deterministic safety checks.',
     ] : []),
-    readableResponseInstructions({ summary: languages.summary, commit: languages.commit }, { assessment: reviewArchive }),
+    readableResponseInstructions(
+      { summary: languages.summary, commit: languages.commit },
+      { assessment: tasks.archiveReview, requireSummary: tasks.summary, requireCommitMessage: tasks.commitMessage },
+    ),
   ].join('\n\n');
 }
 
@@ -335,16 +344,22 @@ function chunkPrompt(languages) {
   ].join('\n');
 }
 
-function repairPrompt(languages, reviewArchive = false) {
+function repairPrompt(languages, tasks) {
+  const fields = [
+    tasks.summary ? 'summary' : null,
+    tasks.commitMessage ? 'commitMessage' : null,
+    ...(tasks.archiveReview ? ['assessment', 'confidence', 'reasons'] : []),
+  ].filter(Boolean);
   return [
     promptLanguageDirective(languages.prompt),
-    reviewArchive
-      ? 'Convert the supplied draft into one JSON object with exactly summary, commitMessage, assessment, confidence, and reasons.'
-      : 'Convert the supplied draft into one JSON object with exactly summary and commitMessage.',
+    `Convert the supplied draft into one JSON object with exactly ${fields.join(', ')}.`,
     'Return JSON only. Do not add analysis, Markdown, or extra keys.',
-    `Write summary and reasons in ${languages.summary}. Write commitMessage in ${languages.commit}.`,
-    'Keep the summary factual and concise. The commit message must be ready for git commit.',
-    ...(reviewArchive ? ['Preserve the verdict using assessment suitable, suspicious, or unsuitable, confidence low/medium/high, and 1-5 reasons.'] : []),
+    ...(tasks.summary && tasks.archiveReview ? [`Write summary and reasons in ${languages.summary}.`]
+      : tasks.summary ? [`Write summary in ${languages.summary}.`]
+        : tasks.archiveReview ? [`Write reasons in ${languages.summary}.`] : []),
+    ...(tasks.commitMessage ? [`Write commitMessage in ${languages.commit}. The commit message must be ready for git commit.`] : []),
+    ...(tasks.summary ? ['Keep the summary factual and concise.'] : []),
+    ...(tasks.archiveReview ? ['Preserve the verdict using assessment suitable, suspicious, or unsuitable, confidence low/medium/high, and 1-5 reasons.'] : []),
   ].join(' ');
 }
 
@@ -362,16 +377,16 @@ function requestCompletion({ settings, profile, messages, maxTokens, contextLeng
   }, { ...options, onEvent });
 }
 
-export function parseResponse(content, { requireAssessment = false } = {}) {
-  return parseChangeResponse(content, { requireAssessment });
+export function parseResponse(content, options = {}) {
+  return parseChangeResponse(content, options);
 }
 
 export function extractUnstructured(content) {
   return extractUnstructuredResponse(content);
 }
 
-function tryReadable(content, requireAssessment = false) {
-  try { return parseChangeResponse(content, { requireAssessment }); } catch { return null; }
+function tryReadable(content, tasks) {
+  try { return parseChangeResponse(content, taskRequirements(tasks)); } catch { return null; }
 }
 
 function resultWithDiagnostics(value, completion, extra) {
@@ -386,8 +401,8 @@ function resultWithDiagnostics(value, completion, extra) {
 function buildContextText(value, delivery) {
   return [
     `Delivery: ${delivery?.resolved ?? 'unknown'}`,
-    'Summary:', ...(value.summary ?? []).map((line) => `- ${line}`),
-    `Commit message: ${value.commitMessage ?? ''}`,
+    ...(value.summary?.length ? ['Summary:', ...value.summary.map((line) => `- ${line}`)] : []),
+    ...(value.commitMessage ? [`Commit message: ${value.commitMessage}`] : []),
     ...(value.assessment ? [`Assessment: ${value.assessment} (${value.confidence ?? 'low'})`, ...(value.reasons ?? []).map((line) => `- ${line}`)] : []),
   ].join('\n');
 }
@@ -411,10 +426,30 @@ function attachDiagnostics(error, diagnostics) {
   if (error && typeof error === 'object') error.diagnostics = { ...(error.diagnostics ?? {}), ...diagnostics };
 }
 
-function noOutputMessage(completion) {
+function noOutputMessage(completion, tasks) {
+  const requested = requestedOutputLabel(tasks);
   if (!completion.content && !completion.reasoning) return 'The local model completed without returning text. Zipflow saved the raw response diagnostics.';
-  if (completion.finishReason === 'length') return 'The local model reached its output limit without producing a usable summary or commit message.';
-  return 'The local model returned text, but it did not contain a usable summary or commit message.';
+  if (completion.finishReason === 'length') return `The local model reached its output limit without producing usable ${requested}.`;
+  return `The local model returned text, but it did not contain usable ${requested}.`;
+}
+
+function taskRequirements(tasks) {
+  return {
+    requireAssessment: tasks.archiveReview,
+    requireSummary: tasks.summary,
+    requireCommitMessage: tasks.commitMessage,
+  };
+}
+
+function hasRequestedOutput(value, tasks) {
+  if (tasks.summary && !value.summary?.length) return false;
+  if (tasks.commitMessage && !value.commitMessage) return false;
+  return tasks.summary || tasks.commitMessage;
+}
+
+function requestedOutputLabel(tasks) {
+  const values = [tasks.archiveReview ? 'archive assessment' : null, tasks.summary ? 'summary' : null, tasks.commitMessage ? 'commit message' : null].filter(Boolean);
+  return values.length === 1 ? values[0] : values.join(', ');
 }
 
 function changedCount(plan) {

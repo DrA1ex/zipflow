@@ -4,6 +4,7 @@ import { runDeploy } from '../deploy/runner.js';
 import { collectExportPaths } from '../export/candidates.js';
 import { explainCheckFailure } from '../llm/failure.js';
 import { isLocalLlmEnabled } from '../llm/generate.js';
+import { isLlmFailureAnalysisEnabled } from '../llm/tasks.js';
 import { saveLlmDiagnostics } from '../llm/diagnostics.js';
 import { createRunId } from '../utils/id.js';
 import { displayPath } from '../utils/paths.js';
@@ -213,7 +214,7 @@ function updateCheckRuntime(controller, event) {
 }
 
 function canExplain(state) {
-  return isLocalLlmEnabled(state.settings) && state.settings.llmFailureAnalysis !== 'disabled';
+  return isLocalLlmEnabled(state.settings) && isLlmFailureAnalysisEnabled(state.settings);
 }
 
 function deployAsCheck(result) {

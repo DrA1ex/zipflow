@@ -28,7 +28,7 @@ import {
   canSearchSettingsChoices, filterSettingsChoices, handleSettingsChoiceSearchKey,
 } from './settings-choice-search.js';
 import {
-  settingsChoices, settingsDefinitions, settingsEditorValue, settingsFieldDefinition, settingsPageTitle, settingsParameters,
+  settingsChoices, settingsDefinitions, settingsEditorValue, settingsFieldDefinition, settingsPageHelp, settingsPageTitle, settingsParameters,
 } from './settings-options.js';
 import {
   clamp, currentChoiceIndex, currentChoices, currentDefinition, currentParameterIndex, directSettingParameter,
@@ -197,19 +197,39 @@ function showSettingsHelp(controller) {
   const panel = state.settingsPanel;
   const definition = currentDefinition(state);
   let title = definition.label;
-  let item = definition;
-  if (panel.focus === 'parameters') item = panelParameter(state) ?? definition;
-  else if (panel.focus === 'choices') {
+  const sections = [];
+  const addSection = (...values) => {
+    const lines = values.flat().map((value) => String(value ?? '').trim()).filter(Boolean);
+    const unique = lines.filter((line, index) => lines.indexOf(line) === index);
+    if (unique.length) sections.push(unique);
+  };
+  if (panel.focus === 'parameters') {
+    const parameter = panelParameter(state) ?? definition;
+    title = parameter.label ?? definition.label;
+    addSection(parameter.description, parameter.help);
+    if (parameter.disabledReason) addSection(parameter.disabledReason);
+  } else if (panel.focus === 'choices') {
     const parameter = panelParameter(state);
     const choices = currentChoices(state);
-    item = choices[currentChoiceIndex(state, choices, parameter)] ?? parameter ?? definition;
+    const choice = choices[currentChoiceIndex(state, choices, parameter)] ?? null;
     title = parameter?.label ?? definition.label;
-  } else if (panel.focus?.startsWith('model-config')) item = settingsModelView(state)?.activeParameter ?? definition;
-  const summary = item?.disabledReason || item?.description || definition.description || 'No additional help is available.';
-  return openHelpOverlay(controller, {
-    title: `Help · ${title}`,
-    lines: [summary, ...(item?.help && item.help !== summary ? ['', item.help] : [])],
-  });
+    addSection(parameter?.description, parameter?.help);
+    if (parameter?.disabledReason) addSection(parameter.disabledReason);
+    addSection(choice?.description, choice?.help);
+    if (choice?.disabledReason) addSection(choice.disabledReason);
+  } else if (panel.focus?.startsWith('model-config')) {
+    const item = settingsModelView(state)?.activeParameter ?? definition;
+    title = item.label ?? definition.label;
+    addSection(item.description, item.help);
+    if (item.disabledReason) addSection(item.disabledReason);
+  } else {
+    addSection(definition.description, definition.help);
+  }
+  addSection(settingsPageHelp(state, definition));
+  const lines = sections.length
+    ? sections.flatMap((section, index) => [...(index ? [''] : []), ...section])
+    : ['No additional help is available.'];
+  return openHelpOverlay(controller, { title: `Help · ${title}`, lines });
 }
 
 export async function selectSetting(controller, index) {
@@ -284,6 +304,12 @@ function toggleSettingsPane(controller) {
   controller.invalidate();
   return true;
 }
+function subpageOriginParameterId(subpage) {
+  if (subpage === 'llmTasks') return 'llmTasks';
+  if (subpage === 'llmLanguages') return 'llmLanguages';
+  return 'llmModelTests';
+}
+
 async function handleBack(controller) {
   const panel = controller.state.settingsPanel;
   if (panel.focus === 'choices') {
@@ -302,7 +328,7 @@ async function handleBack(controller) {
         panel.parameterIndices[currentDefinition(controller.state).id] = previousIndex;
         controller.state.status = 'Model tests';
       } else {
-        const previousId = panel.subpage === 'llmLanguages' ? 'llmLanguages' : 'llmModelTests';
+        const previousId = subpageOriginParameterId(panel.subpage);
         panel.subpage = null;
         restoreParameter(controller.state, previousId);
         controller.state.status = currentDefinition(controller.state).label;
@@ -343,8 +369,12 @@ async function activateParameter(controller) {
   const parameter = panelParameter(state);
   if (!parameter || parameter.disabled || parameter.blocked) return true;
   rememberParameter(state, parameter.id);
-  if (parameter.type === 'action') {
-    if (parameter.action === 'storage-refresh') await refreshSettingsStorage(controller);
+  if (parameter.type === 'action' || parameter.type === 'toggle') {
+    if (parameter.action === 'toggle-setting') {
+      state.settings = await updateSettings({ [parameter.settingId]: !parameter.selected }, { baseSettings: state.settings });
+      state.status = parameter.label;
+      controller.invalidate();
+    } else if (parameter.action === 'storage-refresh') await refreshSettingsStorage(controller);
     else if (parameter.action === 'model-test-connection') await testSelectedModel(controller);
     else if (parameter.action === 'model-test-replay') {
       state.status = 'Loading historical updates';
@@ -375,7 +405,7 @@ async function activateParameter(controller) {
       state.status = 'Model tests';
       controller.invalidate();
     } else if (parameter.action === 'subpage-back') {
-      const previousId = state.settingsPanel.subpage === 'llmLanguages' ? 'llmLanguages' : 'llmModelTests';
+      const previousId = subpageOriginParameterId(state.settingsPanel.subpage);
       state.settingsPanel.subpage = null;
       restoreParameter(state, previousId);
       state.status = currentDefinition(state).label;

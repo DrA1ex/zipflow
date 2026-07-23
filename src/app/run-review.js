@@ -1,3 +1,4 @@
+import { isLlmArchiveReviewEnabled } from '../llm/tasks.js';
 import { loadPlanItemDiff } from '../diff/file.js';
 import { loadStoredFileDiff } from '../diff/stored-patch.js';
 import { rememberDiffMode } from '../settings/recent.js';
@@ -155,7 +156,7 @@ export function showArchiveSafetyReview(controller) {
 
 export function showPlanReview(controller) {
   const { plan, llmReviewPending } = controller.state;
-  const gated = llmReviewPending && controller.state.runSettings?.llmArchiveReview !== 'disabled';
+  const gated = llmReviewPending && isLlmArchiveReviewEnabled(controller.state.runSettings);
   const items = [
     { id: 'apply-plan', label: gated ? 'Apply update · waiting for LLM review' : 'Apply update', description: plan.conflicts.length ? 'Uses the conflict decisions shown above' : 'Backup is created before any local file changes', disabled: gated },
     { id: 'view-plan', label: 'Review changes', description: 'Open file groups and inspect unified or side-by-side diffs' },
@@ -165,7 +166,7 @@ export function showPlanReview(controller) {
   items.push({ id: 'cancel-run', label: 'Cancel update', description: 'Return without changing the project' });
   const selection = planSelectionSummary(plan, controller.state.decisions);
   const intro = [compactPlanLine(plan), compactPlanMeta(plan), ...(selection.excluded ? [`Selection: ${selection.selected} apply · ${selection.excluded} keep local`] : []), ...planWarnings(plan, controller.state.archiveSafety)];
-  if (llmReviewPending) intro.push(gated ? 'LLM review is running. Files and diffs remain available while Apply waits for the verdict.' : 'LLM summary is running in the background and does not block Apply.');
+  if (llmReviewPending) intro.push(gated ? 'LLM review is running. Files and diffs remain available while Apply waits for the verdict.' : 'Requested LLM output is running in the background and does not block Apply.');
   controller.showMenu('plan-review', items, 'Review update plan', 0, intro);
 }
 
@@ -203,7 +204,7 @@ function showPlanCategories(controller) {
     return [{ id: `plan-category:${id}`, label: `${label} · ${selectable ? `${selected}/${count}` : count} ›`, description }];
   });
   items.push(
-    { id: 'apply-plan', label: controller.state.llmReviewPending && controller.state.runSettings?.llmArchiveReview !== 'disabled' ? 'Apply update · waiting for LLM review' : 'Apply update', disabled: controller.state.llmReviewPending && controller.state.runSettings?.llmArchiveReview !== 'disabled' },
+    { id: 'apply-plan', label: controller.state.llmReviewPending && isLlmArchiveReviewEnabled(controller.state.runSettings) ? 'Apply update · waiting for LLM review' : 'Apply update', disabled: controller.state.llmReviewPending && isLlmArchiveReviewEnabled(controller.state.runSettings) },
     { id: 'back-to-plan', label: 'Back to summary' },
   );
   controller.showMenu('plan-details', items, 'Review changed files', null, [compactPlanLine(plan), 'Choose a group. Enter on a changed file opens its diff.']);
@@ -231,7 +232,7 @@ function showPlanFiles(controller, category, selectedIndex = null) {
   );
   items.push(
     { id: 'back-plan-categories', label: 'Back to groups' },
-    { id: 'apply-plan', label: controller.state.llmReviewPending && controller.state.runSettings?.llmArchiveReview !== 'disabled' ? 'Apply update · waiting for LLM review' : 'Apply selected changes', disabled: controller.state.llmReviewPending && controller.state.runSettings?.llmArchiveReview !== 'disabled' },
+    { id: 'apply-plan', label: controller.state.llmReviewPending && isLlmArchiveReviewEnabled(controller.state.runSettings) ? 'Apply update · waiting for LLM review' : 'Apply selected changes', disabled: controller.state.llmReviewPending && isLlmArchiveReviewEnabled(controller.state.runSettings) },
   );
   const selectedCount = selectable ? entries.filter((item) => isPlanItemSelected(controller.state, item)).length : entries.length;
   controller.showMenu('plan-files', items, `${group[1]} files`, selectedIndex, [`${group[1]} · ${selectedCount} of ${entries.length} selected`, group[2]]);

@@ -4,6 +4,7 @@ import { resolveLocalLlmSession } from '../llm/session.js';
 import { requestAutonomyDecision } from '../autonomy/decision-engine.js';
 import { updateSettings } from '../settings/store.js';
 import { canonicalModelId, modelIdentityKey } from '../llm/model-identity.js';
+import { llmTasks } from '../llm/tasks.js';
 
 export async function testSelectedModel(controller) {
   const { state } = controller;
@@ -24,7 +25,12 @@ export async function testSelectedModel(controller) {
   try {
     const session = await resolveLocalLlmSession(settings, { signal: operation.signal });
     let streamSupported = false;
-    const review = settings.llmArchiveReview !== 'disabled';
+    const selectedTasks = llmTasks(settings);
+    const protocolTasks = {
+      archiveReview: selectedTasks.archiveReview,
+      summary: selectedTasks.summary || (!selectedTasks.archiveReview && !selectedTasks.commitMessage),
+      commitMessage: selectedTasks.commitMessage,
+    };
     const completion = await createLocalCompletion({
       provider: settings.llmProvider,
       model: session.profile.requestModel || settings.llmModel,
@@ -34,16 +40,14 @@ export async function testSelectedModel(controller) {
           role: 'system',
           content: [
             'This is a compatibility test for Zipflow. Return only the requested plain-text fields.',
-            'SUMMARY:',
-            '- Model connection works.',
-            'COMMIT MESSAGE:',
-            'Test local model compatibility',
-            ...(review ? ['ASSESSMENT:', 'suitable', 'CONFIDENCE:', 'high', 'REASONS:', '- Test response follows the Zipflow protocol.'] : []),
+            ...(protocolTasks.summary ? ['SUMMARY:', '- Model connection works.'] : []),
+            ...(protocolTasks.commitMessage ? ['COMMIT MESSAGE:', 'Test local model compatibility'] : []),
+            ...(protocolTasks.archiveReview ? ['ASSESSMENT:', 'suitable', 'CONFIDENCE:', 'high', 'REASONS:', '- Test response follows the Zipflow protocol.'] : []),
           ].join('\n'),
         },
         { role: 'user', content: 'Return the exact field structure now. Do not add Markdown fences.' },
       ],
-      maxTokens: review ? 160 : 96,
+      maxTokens: protocolTasks.archiveReview ? 160 : 96,
       apiToken: session.apiToken,
       contextLength: Math.min(session.profile.contextLength || 16_384, 16_384),
       reasoningOffSupported: session.profile.reasoningOffSupported,
@@ -51,7 +55,11 @@ export async function testSelectedModel(controller) {
       signal: operation.signal,
       onEvent: (event) => { if (event.type === 'stream-open' || event.type === 'chunk') streamSupported = true; },
     });
-    parseResponse(completion.content || completion.reasoning, { requireAssessment: review });
+    parseResponse(completion.content || completion.reasoning, {
+      requireAssessment: protocolTasks.archiveReview,
+      requireSummary: protocolTasks.summary,
+      requireCommitMessage: protocolTasks.commitMessage,
+    });
     const autonomousDecision = await requestAutonomyDecision({
       settings,
       mode: 'guarded',
@@ -90,7 +98,7 @@ export async function testSelectedModel(controller) {
       contextLength: session.profile.contextLength,
       maxContextLength: session.profile.maxContextLength,
       contextSource: session.profile.source,
-      reviewProtocol: review, autonomousDecisionProtocol: true,
+      reviewProtocol: protocolTasks.archiveReview, autonomousDecisionProtocol: true,
     };
     state.status = `Model test passed · ${formatDuration(durationMs)}`;
     controller.toast('Model test passed', 'success', 3, `${streamSupported ? 'Streaming supported' : 'Response received'} · ${formatContext(session.profile.contextLength)}`);

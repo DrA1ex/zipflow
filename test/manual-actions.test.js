@@ -50,7 +50,7 @@ test('manual failed tests offer LLM explanation only as an explicit action', asy
   }];
   const state = createInitialState();
   Object.assign(state, { project, workflow });
-  Object.assign(state.settings, { llmProvider: 'lmstudio', llmModel: 'fixture-model', llmFailureAnalysis: 'new-context' });
+  Object.assign(state.settings, { llmProvider: 'lmstudio', llmModel: 'fixture-model', llmUseFailedChecks: true, llmFailureAnalysis: 'new-context' });
   const controller = new ZipflowController(state);
   controller.invalidate = () => {};
 

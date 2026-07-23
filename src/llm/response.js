@@ -1,13 +1,14 @@
-export function parseChangeResponse(content, { requireAssessment = false } = {}) {
+export function parseChangeResponse(content, options = {}) {
+  const requirements = responseRequirements(options);
   const source = stripFences(content);
   const json = tryJson(source);
-  if (json) return normalizeObject(json, requireAssessment);
+  if (json) return normalizeObject(json, requirements);
   const sections = parseSections(source);
   const summary = normalizeSummary(sections.summary);
   const commitMessage = normalizeCommitMessage(sections.commitMessage);
-  if (!summary.length || !commitMessage) throw new Error('Local LLM response is missing summary or commit message.');
+  validateRequestedOutput({ summary, commitMessage }, requirements);
   const assessment = normalizeAssessment(sections);
-  if (requireAssessment && !assessment) throw new Error('Local LLM response is missing archive assessment fields.');
+  if (requirements.assessment && !assessment) throw new Error('Local LLM response is missing archive assessment fields.');
   return { summary, commitMessage, ...(assessment ?? {}) };
 }
 
@@ -18,14 +19,17 @@ export function parseAssessmentResponse(content) {
   return normalizeAssessment(parseSections(source));
 }
 
-export function extractUnstructuredResponse(content) {
+export function extractUnstructuredResponse(content, options = {}) {
+  const requirements = responseRequirements(options);
   const lines = String(content ?? '').split(/\r?\n/).map(cleanLine).filter(Boolean);
   const summary = [];
   let commitMessage = '';
+  let inCommitSection = false;
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
     if (/^(summary|summary \(.+\)|сводка|краткое описание)\s*:?$/i.test(line)) continue;
     if (/^(commit message|сообщение коммита)(\s*\(.+\))?\s*:?$/i.test(line)) {
+      inCommitSection = true;
       commitMessage = findCommitLine(lines.slice(index + 1));
       break;
     }
@@ -33,42 +37,74 @@ export function extractUnstructuredResponse(content) {
       commitMessage ||= line.replace(/^(subject|тема)\s*:\s*/i, '').trim();
       continue;
     }
-    if (summary.length < 5 && isUsefulSummaryLine(line)) summary.push(line);
+    if (requirements.summary && summary.length < 5 && isUsefulSummaryLine(line)) summary.push(line);
+  }
+  if (requirements.commit && !commitMessage && !requirements.summary && !inCommitSection) {
+    commitMessage = lines.find((line) => line.length <= 200 && !looksLikeHeading(line)) ?? '';
   }
   return { summary: [...new Set(summary)].slice(0, 5), commitMessage: normalizeCommitMessage(commitMessage) };
 }
 
-export function readableResponseInstructions(languageOrOptions, { assessment = false } = {}) {
+export function readableResponseInstructions(languageOrOptions, options = {}) {
+  const requirements = responseRequirements(options);
   const languages = typeof languageOrOptions === 'string'
     ? { summary: languageOrOptions, commit: languageOrOptions }
     : { summary: languageOrOptions?.summary ?? 'English', commit: languageOrOptions?.commit ?? 'English' };
-  return [
-    'Return a short plain-text response using the exact section headings below.',
-    'Do not return JSON, Markdown fences, tables, or hidden reasoning.',
-    'Preserve normal line breaks.',
-    'SUMMARY:',
-    '- one to five factual bullet points',
+  const sections = [];
+  if (requirements.summary) sections.push('SUMMARY:', '- one to five factual bullet points');
+  if (requirements.commit) sections.push(
     'COMMIT MESSAGE:',
     'an imperative Git commit subject, optionally followed by a blank line and concise body',
-    ...(assessment ? [
-      'ASSESSMENT:',
-      'suitable, suspicious, or unsuitable',
-      'CONFIDENCE:',
-      'low, medium, or high',
-      'REASONS:',
-      '- one to five concise reasons',
-    ] : []),
-    `Write summary and reasons in ${languages.summary}. Write commitMessage in ${languages.commit}. Keep enum values in English.`,
+  );
+  if (requirements.assessment) sections.push(
+    'ASSESSMENT:',
+    'suitable, suspicious, or unsuitable',
+    'CONFIDENCE:',
+    'low, medium, or high',
+    'REASONS:',
+    '- one to five concise reasons',
+  );
+  const languageLines = [];
+  if (requirements.summary && requirements.assessment) languageLines.push(`Write summaries and reasons in ${languages.summary}.`);
+  else if (requirements.summary) languageLines.push(`Write the summary in ${languages.summary}.`);
+  else if (requirements.assessment) languageLines.push(`Write the reasons in ${languages.summary}.`);
+  if (requirements.commit) languageLines.push(`Write the commit message in ${languages.commit}.`);
+  if (requirements.assessment) languageLines.push('Keep enum values in English.');
+  return [
+    'Return a short plain-text response using only the exact section headings requested below.',
+    'Do not return JSON, Markdown fences, tables, or hidden reasoning.',
+    'Preserve normal line breaks.',
+    ...sections,
+    ...languageLines,
   ].join('\n');
 }
 
-function normalizeObject(parsed, requireAssessment) {
+function normalizeObject(parsed, requirements) {
   const summary = normalizeSummary(parsed.summary ?? parsed.changeSummary ?? parsed.change_summary);
   const commitMessage = normalizeCommitMessage(parsed.commitMessage ?? parsed.commit_message ?? parsed.commit ?? parsed.message);
-  if (!summary.length || !commitMessage) throw new Error('Local LLM response is missing summary or commit message.');
+  validateRequestedOutput({ summary, commitMessage }, requirements);
   const assessment = normalizeAssessment(parsed);
-  if (requireAssessment && !assessment) throw new Error('Local LLM response is missing archive assessment fields.');
+  if (requirements.assessment && !assessment) throw new Error('Local LLM response is missing archive assessment fields.');
   return { summary, commitMessage, ...(assessment ?? {}) };
+}
+
+function validateRequestedOutput(value, requirements) {
+  const missing = [];
+  if (requirements.summary && !value.summary.length) missing.push('summary');
+  if (requirements.commit && !value.commitMessage) missing.push('commit message');
+  if (missing.length) throw new Error(`Local LLM response is missing ${joinMissing(missing)}.`);
+}
+
+function responseRequirements(options = {}) {
+  return {
+    summary: options.requireSummary !== false,
+    commit: options.requireCommitMessage !== false,
+    assessment: options.requireAssessment === true || options.assessment === true,
+  };
+}
+
+function joinMissing(values) {
+  return values.length === 1 ? values[0] : `${values.slice(0, -1).join(', ')} or ${values.at(-1)}`;
 }
 
 function parseSections(source) {
@@ -173,6 +209,10 @@ function isUsefulSummaryLine(line) {
   if (/^(commit message|subject|body|сообщение коммита|тема|тело)\s*:?/i.test(line)) return false;
   if (/^(summary|сводка)\s*:?$/i.test(line)) return false;
   return true;
+}
+
+function looksLikeHeading(line) {
+  return /^(summary|commit message|assessment|confidence|reasons)\s*:?$/i.test(line);
 }
 
 function looksLikeJson(value) {

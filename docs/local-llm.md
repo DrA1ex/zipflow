@@ -9,28 +9,28 @@ LM Studio: http://127.0.0.1:1234
 
 The provider, optional bearer token, selected model, and output languages are configured in global settings. Bearer tokens are stored in macOS Keychain or the Linux system keyring rather than `~/.zipflow` JSON files. On Linux, persistence requires `secret-tool` and an active Secret Service provider; when secure storage is unavailable, Zipflow refuses to save a new token instead of falling back to plaintext.
 
-## What the model can do
+## Choose the LLM tasks
 
-A local model can:
+The **LLM tasks** page contains independent checkboxes. Enable only the outputs you want:
 
-- assess archive suitability;
-- summarize source changes;
-- propose a commit message;
-- explain failed checks or deployment output;
-- resolve bounded autopilot decisions after passing a separate compatibility test.
+- **Archive suitability review** — ask whether the archive plausibly belongs to the current workspace;
+- **Change summary** — generate a concise human-readable description of the source changes;
+- **Failed-check explanations** — offer an LLM explanation after a configured check fails;
+- **Commit message** — generate a Git commit-message candidate.
+
+The tasks do not depend on each other. For example, Zipflow can request only a commit message without generating a summary or archive verdict. Turning every task off keeps the provider and model configuration but prevents ordinary workflow LLM requests. Autopilot model decisions remain a separate capability and compatibility check.
 
 Ordinary summaries and verdicts are advisory. Local LLM failures do not block manual archive application.
 
-## Archive review levels
+## Archive review methods
 
-The **Archive review** setting controls suitability assessment:
+When **Archive suitability review** is enabled, **Archive review method** controls the evidence used for its verdict:
 
-- **Summary only** — summary and commit message without a verdict;
 - **Structure guard** — compare current and archive trees;
 - **Sample guard** — add the complete changed-path manifest and representative excerpts from up to five priority files;
-- **Deep patch review** — assess the selected change representation and return verdict, reasons, summary, and commit message.
+- **Deep patch review** — assess the selected change representation.
 
-A strongly unsuitable structure verdict stops further patch summarization for that request and explains why the archive appears unrelated. It does not replace deterministic validation.
+Summary and commit-message fields are requested only when their corresponding tasks are enabled. A strongly unsuitable structure verdict stops later change-output generation for that request and explains why the archive appears unrelated. It does not replace deterministic validation.
 
 ## Change delivery modes
 
@@ -49,11 +49,10 @@ The complete `changes.patch` remains stored in the run even when the model recei
 
 ## Failed checks
 
-Failure analysis can:
+Enable **Failed-check explanations** in **LLM tasks** to make the action available after a check failure. The independent **Failed-check context** setting chooses whether Zipflow:
 
-- remain disabled;
-- use a fresh model context;
-- continue from the compact context of the preceding change review.
+- uses a fresh model context; or
+- continues from the compact context of the preceding change review.
 
 Same-context analysis sends the prior result with the failed command and output rather than resending the complete patch.
 
@@ -90,7 +89,7 @@ Ollama uses native metadata endpoints to discover model and context information,
 
 ## Output parsing and diagnostics
 
-Primary review generation uses a readable section protocol containing summary, commit message, and optional assessment.
+Primary generation uses a readable section protocol containing only the outputs selected in **LLM tasks**. A commit-only request, for example, asks for and validates only `COMMIT MESSAGE`.
 
 When a model ignores the requested format or spends its output budget on reasoning, Zipflow can perform a hidden compact repair request. If only a useful summary can be recovered, the summary is kept and another commit-message source is used.
 

@@ -233,6 +233,7 @@ function parameterLabel(state, item, theme, animationFrame) {
   if (item.loading) return spinnerLabel(animationFrame, item.label);
   if (item.type === 'section') return color(theme, 'accent', `── ${item.label} ──`);
   if (item.type === 'stat') return `${color(theme, 'textMuted', item.label)}: ${item.value}`;
+  if (item.type === 'toggle') return `${item.selected ? '[x]' : '[ ]'} ${item.label}`;
   const label = item.value ? `${item.label}: ${item.value}` : item.label;
   return ['choice', 'input', 'subpage'].includes(item.type) ? `${label} ›` : label;
 }

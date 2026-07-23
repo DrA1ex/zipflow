@@ -33,7 +33,7 @@ test('same-context failure analysis includes the previous change review', async 
   const result = await explainCheckFailure({
     settings: {
       llmProvider: 'lmstudio', llmModel: 'fixture-loaded', llmLanguage: 'English',
-      llmFailureAnalysis: 'same-context', llmApiToken: '',
+      llmUseFailedChecks: true, llmFailureAnalysis: 'same-context', llmApiToken: '',
     },
     project: { name: 'fixture' },
     run: { llm: { contextText: 'Summary:\n- Changed configuration defaults.' } },
@@ -58,7 +58,7 @@ test('new-context failure analysis sends only the failed command context', async
   const result = await explainCheckFailure({
     settings: {
       llmProvider: 'lmstudio', llmModel: 'fixture-loaded', llmLanguage: 'English',
-      llmFailureAnalysis: 'new-context', llmApiToken: '',
+      llmUseFailedChecks: true, llmFailureAnalysis: 'new-context', llmApiToken: '',
     },
     project: { name: 'fixture' },
     run: { llm: { contextText: 'Must not be sent' } },

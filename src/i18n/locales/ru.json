@@ -1022,7 +1022,35 @@
     "Recent trend": "Последняя динамика",
     "Delivery": "Передача данных модели",
     "stable recently": "в последнее время стабильно",
-    "not enough history": "недостаточно истории"
+    "not enough history": "недостаточно истории",
+    "LLM tasks": "Задачи LLM",
+    "Choose which results Zipflow should request from the local model.": "Выберите, какие результаты Zipflow должен запрашивать у локальной модели.",
+    "Compare the project and archive trees before other requested LLM outputs.": "Сравнить деревья проекта и архива перед формированием остальных выбранных результатов LLM.",
+    "Check project/archive structure and representative patch excerpts from up to five priority files.": "Проверить структуру проекта и архива, а также показательные фрагменты изменений не более чем из пяти приоритетных файлов.",
+    "Assess archive suitability from the delivered change representation.": "Оценить соответствие архива по переданному представлению изменений.",
+    "Explain the failure using the previous change analysis as context when one exists.": "Объяснить ошибку с использованием предыдущего анализа изменений, если он доступен.",
+    "Archive review method": "Способ проверки архива",
+    "Choose how archive suitability is assessed when that LLM task is enabled.": "Выберите способ оценки соответствия архива, когда эта задача LLM включена.",
+    "Enable Archive suitability review in LLM tasks first.": "Сначала включите «Проверка соответствия архива» в задачах LLM.",
+    "Choose how source changes are represented and budgeted for archive review, summaries, and commit messages.": "Выберите способ представления и ограничения объёма изменений для проверки архива, сводок и сообщений коммита.",
+    "Enable at least one change-analysis task first.": "Сначала включите хотя бы одну задачу анализа изменений.",
+    "Failed-check context": "Контекст ошибок проверок",
+    "Choose whether failed checks reuse previous change context or start a fresh request.": "Выберите, использовать ли для ошибок проверок предыдущий контекст изменений или новый запрос.",
+    "Enable Failed-check explanations in LLM tasks first.": "Сначала включите «Объяснение ошибок проверок» в задачах LLM.",
+    "Archive suitability review": "Проверка соответствия архива",
+    "Ask the model whether the archive changes plausibly belong to this workspace. Deterministic Zipflow checks remain authoritative.": "Попросить модель оценить, относятся ли изменения архива к этой рабочей области. Детерминированные проверки Zipflow остаются приоритетными.",
+    "Change summary": "Сводка изменений",
+    "Generate a concise human-readable summary of the applied source changes.": "Создавать краткую и понятную сводку применённых изменений исходного кода.",
+    "Failed-check explanations": "Объяснение ошибок проверок",
+    "Offer a model explanation when a configured check fails.": "Предлагать объяснение модели, когда настроенная проверка завершается ошибкой.",
+    "Generate a Git commit-message candidate without requiring any other LLM output.": "Создавать вариант сообщения Git-коммита независимо от остальных результатов LLM.",
+    "Summary": "Сводка",
+    "None selected": "Ничего не выбрано",
+    "Storage statistics": "Статистика хранилища",
+    "Managed-file statistics": "Статистика управляемых файлов",
+    "Requested LLM output is running in the background and does not block Apply.": "Запрошенный результат LLM создаётся в фоне и не блокирует применение.",
+    "The update continues without the cancelled model output.": "Обновление продолжается без отменённого результата модели.",
+    "Requested Local LLM output was not generated": "Запрошенный результат локальной LLM не создан"
   },
   "patterns": [
     {
@@ -1356,6 +1384,38 @@
     {
       "source": "{percent} faster recently",
       "target": "В последнее время быстрее на {percent}"
+    },
+    {
+      "source": "Archives: {count}",
+      "target": "Архивов: {count}"
+    },
+    {
+      "source": "Total size: {size}",
+      "target": "Общий размер: {size}"
+    },
+    {
+      "source": "Oldest archive: {oldest}",
+      "target": "Самый старый архив: {oldest}"
+    },
+    {
+      "source": "Backups: {count}",
+      "target": "Резервных копий: {count}"
+    },
+    {
+      "source": "Stored files: {count}",
+      "target": "Сохранённых файлов: {count}"
+    },
+    {
+      "source": "Oldest backup: {oldest}",
+      "target": "Самая старая резервная копия: {oldest}"
+    },
+    {
+      "source": "Recorded paths: {count}",
+      "target": "Записанных путей: {count}"
+    },
+    {
+      "source": "Last updated: {updated}",
+      "target": "Последнее обновление: {updated}"
     }
   ]
 }

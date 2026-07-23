@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createLocalCompletion, listLocalModels } from '../src/llm/client.js';
 import { extractUnstructured, generateChangeDescription, parseResponse } from '../src/llm/generate.js';
+import { readableResponseInstructions } from '../src/llm/response.js';
 
 function jsonResponse(value, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
@@ -105,12 +106,72 @@ test('LM Studio generation uses native streaming settings and a safe context len
   assert.deepEqual(result.summary, ['Добавлена проверка конфигурации.']);
   assert.equal(result.commitMessage, 'Add configuration validation');
   assert.match(chatBody.system_prompt, /Интерпретируй и выполняй следующие инструкции/);
-  assert.match(chatBody.system_prompt, /Write summary and reasons in Russian[\s\S]*Write commitMessage in English/);
+  assert.match(chatBody.system_prompt, /Write the summary in Russian[\s\S]*Write the commit message in English/);
   assert.match(chatBody.input, /Project: fixture/);
   assert.equal(chatBody.stream, true);
   assert.equal(chatBody.reasoning, 'off');
   assert.equal(chatBody.model, 'gemma-loaded');
   assert.equal(chatBody.context_length, undefined, 'reusing a loaded instance must not request a second context allocation');
+});
+
+
+test('LLM task selection can request only a commit message without a summary or archive verdict', async () => {
+  let chatBody;
+  const fetchImpl = async (url, options) => {
+    if (url.endsWith('/api/v1/models')) return jsonResponse(lmModels(32_000));
+    chatBody = JSON.parse(options.body);
+    return nativeCompletion([
+      'COMMIT MESSAGE:',
+      'Add configurable LLM tasks',
+    ].join('\n'));
+  };
+
+  const result = await generateChangeDescription({
+    settings: {
+      llmProvider: 'lmstudio', llmModel: 'gemma-loaded', llmPromptLanguage: 'English',
+      llmSummaryLanguage: 'English', llmCommitLanguage: 'English', llmApiToken: '',
+      llmUseArchiveReview: false, llmUseSummary: false, llmUseCommitMessage: true,
+      llmArchiveReview: 'structure', llmChangeDelivery: 'adaptive',
+    },
+    project: { name: 'fixture', labels: ['Node.js'] },
+    plan: { counts: { created: 0, updated: 1, deleted: 0 } },
+    patchContent: 'diff --git a/a.js b/a.js\n@@ -1 +1 @@\n-old\n+new\n',
+  }, { fetchImpl });
+
+  assert.deepEqual(result.summary, []);
+  assert.equal(result.commitMessage, 'Add configurable LLM tasks');
+  assert.match(chatBody.system_prompt, /COMMIT MESSAGE:/);
+  assert.doesNotMatch(chatBody.system_prompt, /SUMMARY:/);
+  assert.doesNotMatch(chatBody.system_prompt, /ASSESSMENT:/);
+});
+
+test('response parsing validates only the outputs requested by the active LLM tasks', () => {
+  assert.deepEqual(parseResponse('SUMMARY:\n- Updated settings', {
+    requireSummary: true, requireCommitMessage: false,
+  }), { summary: ['Updated settings'], commitMessage: '' });
+  assert.deepEqual(parseResponse('COMMIT MESSAGE:\nUpdate settings', {
+    requireSummary: false, requireCommitMessage: true,
+  }), { summary: [], commitMessage: 'Update settings' });
+  assert.throws(() => parseResponse('SUMMARY:\n- Updated settings', {
+    requireSummary: false, requireCommitMessage: true,
+  }), /missing commit message/);
+});
+
+test('task-specific response instructions omit outputs that were not selected', () => {
+  const archiveOnly = readableResponseInstructions({ summary: 'Russian', commit: 'English' }, {
+    assessment: true, requireSummary: false, requireCommitMessage: false,
+  });
+  assert.match(archiveOnly, /ASSESSMENT:/);
+  assert.match(archiveOnly, /Write the reasons in Russian/);
+  assert.doesNotMatch(archiveOnly, /SUMMARY:|COMMIT MESSAGE:|Write the summary/);
+
+  assert.deepEqual(parseResponse([
+    'ASSESSMENT:', 'suitable', 'CONFIDENCE:', 'high', 'REASONS:', '- Paths match the project.',
+  ].join('\n'), {
+    requireAssessment: true, requireSummary: false, requireCommitMessage: false,
+  }), {
+    summary: [], commitMessage: '', assessment: 'suitable', confidence: 'high', reasons: ['Paths match the project.'],
+  });
 });
 
 test('LM Studio native stream exposes model loading, prompt progress, reasoning, and answer chunks', async () => {

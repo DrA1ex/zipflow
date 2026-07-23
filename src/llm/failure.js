@@ -1,11 +1,12 @@
 import { createLocalCompletion } from './client.js';
 import { getLocalModelProfile } from './model-info.js';
 import { promptLanguage, promptLanguageDirective, summaryLanguage } from './language.js';
+import { isLlmFailureAnalysisEnabled } from './tasks.js';
 
 const MAX_FAILURE_OUTPUT_CHARS = 24_000;
 
 export async function explainCheckFailure({ settings, project, run, failedCheck }, options = {}) {
-  if (!failedCheck || settings.llmFailureAnalysis === 'disabled') return null;
+  if (!failedCheck || !isLlmFailureAnalysisEnabled(settings)) return null;
   const notify = options.onEvent ?? (() => {});
   notify({ type: 'phase', phase: 'failure-model-info', label: 'Preparing local LLM error explanation' });
   const profile = await getLocalModelProfile(settings.llmProvider, settings.llmModel, {
