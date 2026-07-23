@@ -1015,7 +1015,14 @@
     "The token is stored in macOS Keychain or the Linux system keyring, never in Zipflow JSON files.": "Токен хранится в Связке ключей macOS или системном хранилище ключей Linux, но никогда не записывается в JSON-файлы Zipflow.",
     "On Linux, persistent storage requires secret-tool and an active Secret Service provider.": "В Linux для постоянного хранения требуются secret-tool и активный провайдер Secret Service.",
     "The directory is created after validation if it does not exist.": "Каталог будет создан после проверки, если он не существует.",
-    "Tab completes directory names.": "Tab дополняет имена каталогов."
+    "Tab completes directory names.": "Tab дополняет имена каталогов.",
+    "Overview": "Обзор",
+    "Timing": "Время выполнения",
+    "Reliability": "Надёжность",
+    "Recent trend": "Последняя динамика",
+    "Delivery": "Передача данных модели",
+    "stable recently": "в последнее время стабильно",
+    "not enough history": "недостаточно истории"
   },
   "patterns": [
     {
@@ -1301,6 +1308,54 @@
     {
       "source": "{start}-{end} of {total} · N/P hunk · J/K file · M mode · Esc back",
       "target": "{start}–{end} из {total} · N/P — фрагмент · J/K — файл · M — режим · Esc — назад"
+    },
+    {
+      "source": "Recorded runs: {count}",
+      "target": "Записано запусков: {count}"
+    },
+    {
+      "source": "Recorded samples: {count}",
+      "target": "Записано измерений: {count}"
+    },
+    {
+      "source": "Recorded requests: {count}",
+      "target": "Записано запросов: {count}"
+    },
+    {
+      "source": "Median: {duration}",
+      "target": "Медиана: {duration}"
+    },
+    {
+      "source": "Average: {duration}",
+      "target": "Среднее: {duration}"
+    },
+    {
+      "source": "Fastest: {duration}",
+      "target": "Минимум: {duration}"
+    },
+    {
+      "source": "Slowest: {duration}",
+      "target": "Максимум: {duration}"
+    },
+    {
+      "source": "Success rate: {percent}",
+      "target": "Успешность: {percent}"
+    },
+    {
+      "source": "Reduced inputs: {count}",
+      "target": "Сокращённых входных данных: {count}"
+    },
+    {
+      "source": "Average attempts: {attempts}",
+      "target": "Среднее число попыток: {attempts}"
+    },
+    {
+      "source": "{percent} slower recently",
+      "target": "В последнее время медленнее на {percent}"
+    },
+    {
+      "source": "{percent} faster recently",
+      "target": "В последнее время быстрее на {percent}"
     }
   ]
 }

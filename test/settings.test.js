@@ -12,6 +12,7 @@ import {
   handleSettingsKey, openSettings, selectChoice, selectParameter, selectSetting, settingsViewModel, submitSettingsEditor,
 } from '../src/app/settings-panel.js';
 import { exists } from '../src/utils/fs.js';
+import { localizeUiItem } from '../src/i18n/index.js';
 
 async function withSettingsHome(run) {
   const previous = process.env.ZIPFLOW_HOME;
@@ -417,3 +418,23 @@ test('completed raw LLM responses are hidden by default', () => {
   assert.equal(DEFAULT_SETTINGS.llmVerboseOutput, false);
   assert.equal(normalizeSettings({ version: 16 }).llmVerboseOutput, false);
 });
+
+
+test('raw response radio choices preserve boolean values and can be selected both ways', async () => withSettingsHome(async () => {
+  const { state, controller } = await settingsController({
+    llmProvider: 'ollama', llmModel: 'qwen', llmVerboseOutput: false,
+  });
+  await selectCategory(controller, 'localLlm');
+  let view = await openParameter(controller, 'llmVerboseOutput');
+  assert.equal(view.choices[view.choiceIndex].id, 'llmVerboseOutput:false');
+  assert.equal(localizeUiItem(state, view.choices[0]).value, false);
+  assert.equal(localizeUiItem(state, view.choices[1]).value, true);
+
+  await chooseValue(controller, 'llmVerboseOutput:true');
+  assert.equal(state.settings.llmVerboseOutput, true);
+
+  view = await openParameter(controller, 'llmVerboseOutput');
+  assert.equal(view.choices[view.choiceIndex].id, 'llmVerboseOutput:true');
+  await chooseValue(controller, 'llmVerboseOutput:false');
+  assert.equal(state.settings.llmVerboseOutput, false);
+}));

@@ -64,13 +64,22 @@ export function localizeUiItem(state, item) {
   if (!item || typeof item !== 'object') return item;
   return {
     ...item,
-    label: translateForState(state, item.label ?? ''),
-    value: translateForState(state, item.value ?? ''),
-    description: translateForState(state, item.description ?? ''),
-    context: translateForState(state, item.context ?? ''),
-    disabledReason: translateForState(state, item.disabledReason ?? ''),
-    help: translateForState(state, item.help ?? ''),
+    label: localizeUiValue(state, item.label),
+    value: localizeUiValue(state, item.value),
+    description: localizeUiValue(state, item.description),
+    context: localizeUiValue(state, item.context),
+    disabledReason: localizeUiValue(state, item.disabledReason),
+    help: localizeUiValue(state, item.help),
+    helpTitle: localizeUiValue(state, item.helpTitle),
+    helpLines: Array.isArray(item.helpLines)
+      ? item.helpLines.map((line) => localizeUiValue(state, line))
+      : item.helpLines,
   };
+}
+
+function localizeUiValue(state, value) {
+  if (value === null || value === undefined) return '';
+  return typeof value === 'string' ? translateForState(state, value) : value;
 }
 
 export function validateLanguagePack(value, { source = 'language pack' } = {}) {

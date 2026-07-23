@@ -110,21 +110,45 @@ export async function showRunAnalytics(controller) {
     id: 'analytics:checks-total',
     label: `Checks overall · ${analytics.checks.total.count} runs`,
     description: metricDescription(analytics.checks.total),
+    helpTitle: 'Performance analytics',
+    helpLines: metricHelpLines(analytics.checks.total, { sampleLabel: 'Recorded runs' }),
   });
   for (const check of analytics.checks.byName) items.push({
     id: `analytics:check:${check.name}`,
     label: check.name,
     description: `${metricDescription(check)} · ${check.count} samples`,
+    helpTitle: 'Performance analytics',
+    helpLines: metricHelpLines(check, { sampleLabel: 'Recorded samples' }),
   });
   if (analytics.llm.total.count) items.push({
     id: 'analytics:llm-total',
     label: `Local LLM overall · ${analytics.llm.total.count} runs`,
     description: `${metricDescription(analytics.llm.total)} · ${analytics.llm.truncated} reduced inputs · ${analytics.llm.averageAttempts.toFixed(1)} avg attempts`,
+    helpTitle: 'Performance analytics',
+    helpLines: metricHelpLines(analytics.llm.total, {
+      sampleLabel: 'Recorded requests',
+      extra: [
+        '',
+        'Delivery',
+        `Reduced inputs: ${analytics.llm.truncated}`,
+        `Average attempts: ${analytics.llm.averageAttempts.toFixed(1)}`,
+      ],
+    }),
   });
   for (const model of analytics.llm.byModel) items.push({
     id: `analytics:llm:${model.name}`,
     label: model.name,
     description: `${metricDescription(model)} · ${model.count} samples`,
+    helpTitle: 'Performance analytics',
+    helpLines: metricHelpLines(model, {
+      sampleLabel: 'Recorded requests',
+      extra: [
+        '',
+        'Delivery',
+        `Reduced inputs: ${model.truncated}`,
+        `Average attempts: ${model.averageAttempts.toFixed(1)}`,
+      ],
+    }),
   });
   if (!items.length) items.push({ id: 'analytics-empty', label: 'No timing data recorded yet', description: 'Complete checks or a local LLM request to build history.' });
   items.push({ id: 'analytics-back', label: 'Back to run history' });
@@ -132,6 +156,27 @@ export async function showRunAnalytics(controller) {
     `${runs.length} recent runs inspected`,
     'Medians resist occasional slow starts; trend compares the three newest samples with the previous three.',
   ]);
+}
+
+
+function metricHelpLines(metric, { sampleLabel = 'Samples', extra = [] } = {}) {
+  return [
+    'Overview',
+    `${sampleLabel}: ${metric.count}`,
+    '',
+    'Timing',
+    `Median: ${formatDuration(metric.medianMs)}`,
+    `Average: ${formatDuration(metric.averageMs)}`,
+    `Fastest: ${formatDuration(metric.minMs)}`,
+    `Slowest: ${formatDuration(metric.maxMs)}`,
+    '',
+    'Reliability',
+    `Success rate: ${Math.round(metric.successRate * 100)}%`,
+    '',
+    'Recent trend',
+    metric.trend,
+    ...extra,
+  ];
 }
 
 function metricDescription(metric) {

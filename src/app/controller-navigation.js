@@ -8,8 +8,13 @@ export function showContextHelp(controller) {
   const title = selected?.label || state.editorContext?.label || state.status || 'Help';
   const summary = selected?.context || selected?.disabledReason || selected?.description || state.editorContext?.context
     || state.editorContext?.instructions?.join(' ') || 'No additional help is available.';
-  const details = selected?.help && selected.help !== summary ? ['', selected.help] : [];
-  return openHelpOverlay(controller, { title: `Help · ${title.replace(/\s*›\s*$/, '')}`, lines: [summary, ...details] });
+  const structured = Array.isArray(selected?.helpLines) ? selected.helpLines : null;
+  const details = structured?.length
+    ? structured
+    : selected?.help && selected.help !== summary ? ['', selected.help] : [];
+  const overlayTitle = selected?.helpTitle || `Help · ${title.replace(/\s*›\s*$/, '')}`;
+  const lines = structured?.length ? details : [summary, ...details];
+  return openHelpOverlay(controller, { title: overlayTitle, lines });
 }
 
 export function beginMenuSearch(controller) {

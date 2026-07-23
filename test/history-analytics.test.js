@@ -39,6 +39,8 @@ test('history analytics calculate per-check and per-model medians, success, retr
 
   const model = analytics.llm.byModel.find((item) => item.name === 'lmstudio · gemma');
   assert.equal(model.count, 6);
+  assert.equal(model.truncated, 1);
+  assert.equal(model.averageAttempts, 7 / 6);
   assert.equal(analytics.llm.truncated, 1);
   assert.equal(analytics.llm.averageAttempts, 7 / 6);
   assert.equal(analytics.llm.total.successRate, 5 / 6);

@@ -249,6 +249,43 @@ test('context help prefers short context and keeps detailed help available', () 
   assert.match(rendered, /Long detailed explanation/);
 });
 
+
+test('context help renders structured performance statistics instead of the short menu hint', () => {
+  const { state, controller } = controllerFixture();
+  setScreen(state, 'run-analytics', {
+    items: [{
+      id: 'analytics:checks-total',
+      label: 'Checks overall · 12 runs',
+      description: 'median 3.2s · average 3.8s',
+      helpTitle: 'Performance analytics',
+      helpLines: [
+        'Overview',
+        'Recorded runs: 12',
+        '',
+        'Timing',
+        'Median: 3.2s',
+        'Average: 3.8s',
+        '',
+        'Reliability',
+        'Success rate: 92%',
+      ],
+    }],
+    selectedIndex: 0,
+  });
+
+  state.overlays = createOverlayManager();
+  controller.showContextHelp();
+
+  const rendered = stripAnsi(renderToString(renderZipflow({ state, width: 76, height: 24 }), { width: 76, height: 24 }));
+  assert.match(rendered, /Performance analytics/);
+  assert.match(rendered, /Overview/);
+  assert.match(rendered, /Recorded runs: 12/);
+  assert.match(rendered, /Timing/);
+  assert.match(rendered, /Median: 3.2s/);
+  assert.match(rendered, /Success rate: 92%/);
+  assert.doesNotMatch(rendered, /Help · Checks overall/);
+});
+
 function stripAnsi(value) {
   return String(value ?? '').replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, '');
 }

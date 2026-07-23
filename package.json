@@ -1,7 +1,7 @@
 {
   "name": "zipflow",
-  "version": "1.2.2",
-  "description": "Interactive terminal workflow for safely applying source archives",
+  "version": "1.2.3",
+  "description": "Interactive terminal workflow for safely reviewing and applying source-code ZIP updates",
   "type": "module",
   "bin": {
     "zipflow": "./bin/zipflow.js"
@@ -10,7 +10,9 @@
     "start": "node ./bin/zipflow.js",
     "check": "node ./scripts/check-source.js && node ./scripts/check-i18n.js",
     "test": "node --test",
-    "verify": "npm run check && npm test"
+    "verify": "npm run check && npm test",
+    "release:check": "npm run verify && npm pack --dry-run",
+    "prepublishOnly": "npm run verify"
   },
   "engines": {
     "node": ">=20"
@@ -28,7 +30,24 @@
     "src",
     "docs",
     "README.md",
-    "ARCHITECTURE.md",
     "LICENSE"
-  ]
+  ],
+  "keywords": [
+    "zip",
+    "archive",
+    "workflow",
+    "terminal",
+    "cli",
+    "code-review",
+    "rollback",
+    "deployment"
+  ],
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
 }

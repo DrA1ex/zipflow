@@ -47,7 +47,13 @@ npm unlink --global zipflow
 npm run verify
 ```
 
-`npm run verify` performs source checks and runs the automated test suite.
+`npm run verify` performs source checks and runs the automated test suite. `npm publish` also runs this verification through `prepublishOnly`.
+
+For the complete release gate, including inspection of the files npm would publish, run:
+
+```bash
+npm run release:check
+```
 
 The source checker enforces the JavaScript file-size policy: 1,000 lines is the hard limit and 500 lines is the preferred limit. It also verifies `en.json` as the complete canonical interface catalog, rejects built-in translations with unknown English keys, and audits static UI strings for missing English entries.
 
@@ -68,7 +74,7 @@ Before publishing, inspect exactly what npm will include:
 npm pack --dry-run
 ```
 
-The published package includes the executable, source files, `docs/`, README, architecture document, and license.
+The published package includes only the executable, runtime source files, `docs/`, README, and license. Tests, local state, development archives, and `package-lock.json` are not part of the npm tarball.
 
 Create a local package tarball for installation testing:
 
@@ -83,8 +89,8 @@ Run `zipflow` from a separate test project to verify that documentation packagin
 
 Zipflow follows semantic versioning from `1.0.0` onward:
 
-- compatible fixes and small improvements increment `1.0.x`;
-- substantial backward-compatible features increment `1.x.x`;
+- compatible fixes and small improvements increment the patch version;
+- substantial backward-compatible features increment the minor version;
 - breaking changes increment the major version.
 
 The version in these locations must match:
@@ -103,21 +109,30 @@ npm version major
 
 ## Publishing
 
+Confirm the active npm account and make sure the package name is still available before the first publication:
+
+```bash
+npm whoami
+npm view zipflow version
+```
+
+For a new unclaimed package, `npm view` normally returns a not-found error. For later releases, it should show the currently published version, which must differ from the local version.
+
 Verify the version, test suite, package contents, and locally installed tarball before publishing:
 
 ```bash
-npm run verify
-npm pack --dry-run
+npm run release:check
 npm pack
 npm install --global ./zipflow-<version>.tgz
-npm publish --access public
+zipflow
+npm publish
 ```
 
-The package declares public access through `publishConfig`, but keeping `--access public` in the release command makes intent explicit.
+`zipflow` is an unscoped public package. `publishConfig` fixes public access and the official npm registry, while `prepublishOnly` reruns the full verification immediately before publication. Inspect the tarball and test the globally installed command from a separate directory before publishing.
 
 ## Project structure
 
-See [Architecture](../ARCHITECTURE.md) for layer ownership, lifecycle boundaries, extension points, safety rules, autonomous-decision boundaries, and testing strategy.
+See [Architecture](architecture.md) for layer ownership, lifecycle boundaries, extension points, safety rules, autonomous-decision boundaries, and testing strategy.
 
 All project Markdown documentation is written in English.
 

@@ -1,268 +1,103 @@
 # Zipflow
 
-Zipflow is an interactive terminal application for safely applying ZIP archives with source-code updates to local projects.
+Zipflow is an interactive terminal application for safely reviewing and applying source-code updates delivered as ZIP archives.
 
-It is built for development workflows where each iteration arrives as an archive and must be reviewed, merged into the current working tree, validated, optionally committed, deployed, and sometimes rolled back.
+It inspects an archive before touching the project, shows the planned file changes, handles conflicts, creates recoverable backups, runs project checks, and can optionally commit or deploy the result.
 
-Zipflow has one command:
+## Install
 
-```bash
-zipflow
-```
-
-Project setup, archive review, conflict resolution, checks, commits, deployment, history, export, autopilot, and rollback are all handled inside the interactive interface.
-
-## Highlights
-
-- Reviews an archive before changing the project.
-- Shows created, updated, deleted, preserved, ignored, and conflicting paths.
-- Supports overlay archives and full-project snapshots.
-- Applies changes as a recoverable transaction with path-specific backups.
-- Revalidates project paths during planning, backup, apply, and rollback.
-- Detects conflicts only on paths changed by both the archive and the local working tree.
-- Detects one-level subprojects and runs project-aware checks or deployment commands from their own directories.
-- Creates optional checkpoint and result commits without staging unrelated work.
-- Can summarize changes, explain failures, and make bounded workflow decisions through Ollama or LM Studio.
-- Supports Manual, Guarded autopilot, and explicitly dangerous Full autopilot decision modes.
-- Keeps run history, reports, stored patches, decision records, and rollback metadata.
-- Creates project ZIP archives with a reviewable file selection.
-
-## Requirements
-
-- Node.js 20 or newer
-- macOS or Linux
-- A terminal with TTY support
-- Git is recommended, but not required
-- Persistent LLM tokens on Linux require `secret-tool` and an active Secret Service provider
-
-## Installation
-
-### Install from npm
-
-Install Zipflow globally so the `zipflow` command is available from any project directory:
+Zipflow requires Node.js 20 or newer on macOS or Linux.
 
 ```bash
 npm install --global zipflow
 ```
 
-Update to the latest published version:
-
-```bash
-npm install --global zipflow@latest
-```
-
-Remove it:
-
-```bash
-npm uninstall --global zipflow
-```
-
-### Link a local source checkout
-
-Use `npm link` when developing Zipflow or running an unpublished checkout:
-
-```bash
-cd /path/to/zipflow
-npm install
-npm link
-```
-
-The global `zipflow` command now points to that checkout:
+Then run it from a project directory:
 
 ```bash
 cd /path/to/project
 zipflow
 ```
 
-Remove the global link when it is no longer needed:
-
-```bash
-npm unlink --global zipflow
-```
-
 ## Quick start
 
-Open the project you want to update and start Zipflow:
+On the first run, Zipflow:
 
-```bash
-cd ~/dev/my-project
-zipflow
-```
+1. Detects the project and immediate subprojects.
+2. Suggests tests, checks, and deployment commands.
+3. Lets you review the workflow before saving it.
 
-On the first launch, Zipflow detects the workspace root and scans immediate subdirectories for additional projects, discovers suitable checks and deployment commands for the selected projects, and opens a setup wizard. Recommended choices are preselected and nothing is saved until the final confirmation.
+For each update:
 
-For later runs, Zipflow opens directly in archive-waiting mode:
-
-1. Drag a ZIP file into the terminal or enter its path. On an empty archive field, press `Enter` twice to scan the last-used archive folder for ZIPs from the previous 24 hours whose internal paths match the current project.
-2. Review the detected archive root, changed paths, warnings, conflicts, and diffs.
-3. Resolve decisions manually or let an enabled bounded autopilot handle supported checkpoints.
-4. Apply the update as a recoverable transaction.
-5. Run configured checks, optionally commit and deploy, then keep or roll back the result.
-
-The main run progression is:
+1. Enter or drag the ZIP path into the terminal.
+2. Review the archive root, warnings, changed files, conflicts, and diff.
+3. Apply the update as a recoverable transaction.
+4. Run the configured checks.
+5. Optionally create a Git commit and run deployment.
+6. Keep the result or roll it back from history.
 
 ```text
-Archive -> Review -> Apply -> Checks -> Finish
+Archive → Review → Apply → Checks → Finish
 ```
 
-See [Getting started](docs/getting-started.md) for first-run setup, Git initialization, the project menu, and daily use.
+## Main features
 
-## Archive modes
+- Overlay updates and full-project snapshots.
+- Archive validation and project-path confinement.
+- File-level conflict review and diff inspection.
+- Automatic restoration when application fails partway through.
+- Stored backups and guarded rollback.
+- Node.js, Python, CMake/C++, Go, SwiftPM, and Xcode detection.
+- Multi-project workspaces with commands executed from their configured subdirectories.
+- Custom checks and deployment commands using `web/ :: npm test` syntax.
+- Optional local LLM integration through Ollama or LM Studio.
+- Manual, Guarded autopilot, and Full autopilot decision modes.
+- Run history, performance analytics, reports, stored patches, and ZIP export.
+- English and Russian interface coverage, with additional built-in and custom language packs.
 
-**Overlay archive** is the default. Files present in the archive are created or updated, while files missing from the archive remain untouched.
-
-**Full project snapshot** treats the archive as the managed project contents. Missing files may be deleted according to the configured policy. Protected, ignored, sensitive, untracked, or unmanaged paths remain preserved unless an explicit advanced policy allows otherwise.
-
-See [Archive workflows](docs/archive-workflows.md) for root detection, archive metadata, snapshot policies, duplicate handling, and review behavior.
-
-## Safety model
-
-Zipflow treats every input archive as untrusted. Before changing the project, it validates the ZIP structure, extracts into an isolated directory, compares content by hash, records a patch, checks local conflicts, verifies that the plan is still current, and creates a backup of every affected path.
-
-Archive validation rejects traversal and ambiguous paths, encrypted or special entries, `.git` contents, duplicate and Unicode-equivalent paths, file/directory conflicts, excessive expansion, and suspicious compression ratios. Existing project paths are revalidated during every filesystem phase so a path replaced by a symbolic link after review is not followed outside the project.
-
-If applying changes fails after files were touched, Zipflow restores the affected paths automatically. A later rollback is allowed only while those paths still match the state produced by the run, so newer work is not overwritten silently.
-
-The `.git/` and `.zipflow/` trees are always protected. Permanent local-safety exclusions include `.env`, `.env.*`, `.venv/**`, and `.DS_Store`. Snapshot deletion also preserves credentials, private keys, certificate containers, secret-bearing configuration, and local databases.
-
-See [Safety, conflicts, and rollback](docs/safety.md) for the complete behavior.
-
-## Decision modes and autopilot
-
-Each project workflow has a decision mode:
-
-- **Manual** asks the user at every unresolved checkpoint.
-- **Guarded autopilot** allows a compatible local model to resolve routine, reversible decisions and pauses for meaningful risk, incomplete evidence, low confidence, staged user work, or state drift.
-- **Full autopilot · Dangerous** can additionally choose supported high-risk actions such as keeping and committing failed updates, resolving eligible conflicts, rewriting eligible unpublished Zipflow commits, or running configured deployment after failed checks.
-
-Autopilot never receives unrestricted shell control. Zipflow supplies a finite action allowlist at each decision gate, records the decision and evidence, checks confidence and project state, and falls back to deterministic or manual handling when the result is invalid or unsafe.
-
-Before enabling it on a live project, open **Settings → Local LLM → Test selected model → Simulate autopilot from history**. Zipflow reconstructs decision gates from a stored run and compares what the current model would do in Guarded and Full modes. The simulation is read-only and never changes files, Git, backups, archives, or history.
-
-See [Decision modes and autopilot](docs/autopilot.md) before enabling autonomous decisions.
-
-## Supported projects
-
-Zipflow detects and proposes checks for the workspace root and selected subprojects:
-
-- Node.js and TypeScript
-- Python
-- CMake and C++
-- Go
-- Swift Package Manager
-- macOS Xcode projects
-
-It also inspects project scripts for test, check, deploy, release, and publish commands. Every detected command can be reviewed, replaced, or supplemented with a custom command.
-
-See [Project detection and checks](docs/project-detection.md) and [Multi-project workspaces](docs/multi-project-workspaces.md).
-
-## Local LLM integration
-
-Zipflow can use a local Ollama or LM Studio model to:
-
-- assess whether an archive appears suitable for the current project;
-- summarize source changes;
-- propose a commit message;
-- explain failed checks or deployment output;
-- resolve explicitly supported autopilot checkpoints.
-
-Model output never replaces deterministic archive validation, path confinement, Git conflict detection, backups, tests, or transactional restoration. Ordinary local-model failures do not block manual archive application. Fenced code and standalone JSON from local-model streams, saved raw responses, and historical replay are rendered through Terlio syntax highlighting.
-
-See [Local LLM integration](docs/local-llm.md) for providers, model loading, delivery modes, prompt budgeting, replay, diagnostics, and autonomy compatibility.
-
-## Project actions
-
-Press `Esc` from the archive prompt to open the project menu. Depending on the configured workflow, it provides:
-
-- **Change workflow**
-- **Repeat last archive**
-- **Run history**
-- **Run tests**
-- **Run deployment**
-- **Create ZIP**
-- **Exit**
-
-Global settings are available with `Ctrl+B`. **Change workflow** can edit individual sections or choose **Start over** to build a replacement from fresh project recommendations. The saved workflow and its selected projects remain active until the replacement reaches Review and save; leaving setup earlier restores the saved configuration. Workflow setup and Change Workflow use compact one-row choices; descriptions stay in the fixed context dock. Every mouse-wheel event moves the active menu, Settings list, path suggestion list, help view, Activity view, diff, or replay workspace by exactly one row. Wheel navigation stops at list boundaries; keyboard navigation may wrap where documented. Arrows, Page Up/Page Down, Home, End, and `/` search remain available for longer navigation. Transient notifications use an adaptive overlay capped at 90 columns; longer text wraps vertically instead of clipping. Archive inspection and other determinate work use Terlio progress bars on a dedicated line below the current detail.
-
-Create ZIP safety review keeps small flagged sets readable: up to five files are shown as full project-relative paths, and larger trees collapse directory chains that contain only one flagged file. Credential-like source filenames such as `credential-store.js` are not treated as secret files by name alone; JSON-like and extensionless credential files remain review candidates.
-
-## Essential controls
+## Useful controls
 
 ```text
 ↑ / ↓       move through choices
 Shift+↑/↓   reorder checks during workflow setup
-Space       toggle or select the current option
-Enter       open, continue, or submit; twice on an empty archive field scans the remembered folder
-Ctrl+Enter  insert a newline in commit text; multiline paste never submits
-Esc         go back or open the project menu
-Tab         complete paths or switch Settings panes; does nothing on an empty archive path
+Space       toggle or select
+Enter       open or confirm
+Esc         go back; from the archive prompt, open the project menu
+Tab         complete paths or switch Settings panes
 Shift+Tab   return to the parent directory during path completion
-Page Up     move or scroll one page upward
-Page Down   move or scroll one page downward
-Home        move to the first item where supported
-End         move to the last item or latest Activity entry
-Ctrl+B      open or close global settings
+/           search the active list
+?           open contextual help or structured statistics
+Ctrl+B      open global settings
 Ctrl+T      toggle native terminal text selection
-G           reveal the current run report where available
 Ctrl+C      cancel an active operation; exit while idle
 ```
 
-Context-sensitive help is available with `?`. Diff review and text editors expose additional shortcuts when active. Paste is delivered as one editor action, and submit/activation is serialized so duplicate input cannot start overlapping Git commands.
-
-See [Interface and controls](docs/controls.md) for operation-aware cancellation and the complete reference.
-
-
-## Interface languages
-
-The first global setting is **Language**. English remains the default. Zipflow includes English, Russian, German, French, Italian, and Spanish interface packs. **System language** selects a matching installed pack from the operating-system locale and falls back to English.
-
-Custom packs are ordinary JSON files placed in:
-
-```text
-~/.zipflow/languages/
-```
-
-They are validated against `docs/i18n/language.schema.json`. A custom pack may translate only the strings it needs; missing entries fall back to English. Use **Refresh languages** in the language picker or restart Zipflow after adding or replacing a file. See [Interface localization](docs/i18n/README.md). `src/i18n/locales/en.json` is the canonical complete catalog: every built-in translation key and audited static UI string must exist there, and `npm run check` rejects catalog drift. The Russian catalog additionally remains fully covered by the static-interface regression suite. When multiple translation patterns overlap, the most specific pattern wins.
-
-Menu rows contain only the action or setting name. Their translated explanation is rendered once in the context summary below the list, so long help text never changes row height or breaks scrolling. The built-in Russian pack covers the shared menus, workflow setup, settings summaries, validation reasons, replay controls, and common progress states.
-
-## Data and storage
-
-Zipflow stores its settings, workflows, reports, patches, backups, managed-file history, and autonomy records under:
-
-```text
-~/.zipflow/
-```
-
-Set `ZIPFLOW_HOME` to use another location, including an isolated directory for tests.
-
-Settings are written with a recoverable `settings.backup.json`, but LLM bearer tokens are excluded from both JSON files. Tokens are stored in macOS Keychain or the Linux system keyring. Zipflow never creates a plaintext or locally decryptable fallback credential file. Source archives are left in place by default; settings can instead move successfully applied archives to managed storage or delete them after completion. Backup and archive retention are configured separately.
-
-See [Settings, history, and storage](docs/settings-and-storage.md).
+Press `Esc` from the archive prompt to open project actions such as Change workflow, Run history, Run tests, Run deployment, Create ZIP, and Exit.
 
 ## Documentation
+
+Start with the [documentation index](docs/README.md).
 
 - [Getting started](docs/getting-started.md)
 - [Archive workflows](docs/archive-workflows.md)
 - [Safety, conflicts, and rollback](docs/safety.md)
-- [Decision modes and autopilot](docs/autopilot.md)
 - [Project detection and checks](docs/project-detection.md)
 - [Multi-project workspaces](docs/multi-project-workspaces.md)
 - [Local LLM integration](docs/local-llm.md)
+- [Decision modes and autopilot](docs/autopilot.md)
 - [Settings, history, and storage](docs/settings-and-storage.md)
-- [Interface localization](docs/i18n/README.md)
 - [Interface and controls](docs/controls.md)
-- [Development and publishing](docs/development.md)
-- [Architecture](ARCHITECTURE.md)
+- [Interface localization](docs/i18n/README.md)
 
 ## Development
 
 ```bash
 npm install
 npm run verify
+npm run release:check
 ```
 
-`npm run verify` performs source checks and runs the automated test suite. See [Development and publishing](docs/development.md) for linking, package inspection, release versioning, and publication.
+See [Development and publishing](docs/development.md) for local linking, verification, package inspection, versioning, and npm publication.
 
 ## License
 

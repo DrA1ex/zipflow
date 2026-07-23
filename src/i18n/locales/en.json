@@ -1015,7 +1015,14 @@
     "The token is stored in macOS Keychain or the Linux system keyring, never in Zipflow JSON files.": "The token is stored in macOS Keychain or the Linux system keyring, never in Zipflow JSON files.",
     "On Linux, persistent storage requires secret-tool and an active Secret Service provider.": "On Linux, persistent storage requires secret-tool and an active Secret Service provider.",
     "The directory is created after validation if it does not exist.": "The directory is created after validation if it does not exist.",
-    "Tab completes directory names.": "Tab completes directory names."
+    "Tab completes directory names.": "Tab completes directory names.",
+    "Overview": "Overview",
+    "Timing": "Timing",
+    "Reliability": "Reliability",
+    "Recent trend": "Recent trend",
+    "Delivery": "Delivery",
+    "stable recently": "stable recently",
+    "not enough history": "not enough history"
   },
   "patterns": [
     {
@@ -1301,6 +1308,54 @@
     {
       "source": "↓ {count} new Activity entry · click or press End",
       "target": "↓ {count} new Activity entry · click or press End"
+    },
+    {
+      "source": "Recorded runs: {count}",
+      "target": "Recorded runs: {count}"
+    },
+    {
+      "source": "Recorded samples: {count}",
+      "target": "Recorded samples: {count}"
+    },
+    {
+      "source": "Recorded requests: {count}",
+      "target": "Recorded requests: {count}"
+    },
+    {
+      "source": "Median: {duration}",
+      "target": "Median: {duration}"
+    },
+    {
+      "source": "Average: {duration}",
+      "target": "Average: {duration}"
+    },
+    {
+      "source": "Fastest: {duration}",
+      "target": "Fastest: {duration}"
+    },
+    {
+      "source": "Slowest: {duration}",
+      "target": "Slowest: {duration}"
+    },
+    {
+      "source": "Success rate: {percent}",
+      "target": "Success rate: {percent}"
+    },
+    {
+      "source": "Reduced inputs: {count}",
+      "target": "Reduced inputs: {count}"
+    },
+    {
+      "source": "Average attempts: {attempts}",
+      "target": "Average attempts: {attempts}"
+    },
+    {
+      "source": "{percent} slower recently",
+      "target": "{percent} slower recently"
+    },
+    {
+      "source": "{percent} faster recently",
+      "target": "{percent} faster recently"
     }
   ]
 }

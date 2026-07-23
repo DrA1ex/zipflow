@@ -105,6 +105,20 @@ This provides an auditable result without performing no-op work.
 
 ## Performance analytics
 
+Run history includes a compact performance analytics list for checks and local LLM requests. The list keeps each row short; press `?` on a selected metric to open its structured statistics.
+
+The detail view includes:
+
+- recorded run, sample, or request count;
+- median and average duration;
+- fastest and slowest duration;
+- success rate;
+- recent trend compared with the previous sample window;
+- reduced-input count and average attempts for local LLM metrics.
+
+The structured view is scrollable and localized. It is separate from ordinary contextual help so large statistics are not compressed into the footer.
+
+
 History analytics aggregates recent runs and reports:
 
 - median and average durations;

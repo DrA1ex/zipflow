@@ -49,8 +49,14 @@ function llmAnalytics(runs) {
     total: summarize(values),
     truncated: values.filter((item) => item.truncated).length,
     averageAttempts: values.length ? values.reduce((sum, item) => sum + item.attempts, 0) / values.length : 0,
-    byModel: [...groups.entries()].map(([name, group]) => ({ name, ...summarize(group) }))
-      .sort((left, right) => right.count - left.count),
+    byModel: [...groups.entries()].map(([name, group]) => ({
+      name,
+      ...summarize(group),
+      truncated: group.filter((item) => item.truncated).length,
+      averageAttempts: group.length
+        ? group.reduce((sum, item) => sum + item.attempts, 0) / group.length
+        : 0,
+    })).sort((left, right) => right.count - left.count),
   };
 }
 
