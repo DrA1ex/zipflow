@@ -7,6 +7,7 @@ import { decideDeployment, handleDeploymentFailureAutonomy } from './run-autonom
 import { completeRun, showCompleted } from './run-completion.js';
 import { autopilotPaused } from './autonomy-flow.js';
 import { captureRunExecutionState } from './run-state-integrity.js';
+import { commandLocationLabel } from '../project/command-spec.js';
 
 export async function continueToDeploy(controller) {
   const { state } = controller;
@@ -18,7 +19,7 @@ export async function continueToDeploy(controller) {
     failedChecks,
     run: (_decision, executionState) => startDeploy(controller, { expectedState: executionState }),
     skip: async () => {
-      state.run.deploy = { skipped: true, policy, commandText: state.workflow.deploy.commandText, autonomous: true };
+      state.run.deploy = { skipped: true, policy, commandText: state.workflow.deploy.commandText, cwd: state.workflow.deploy.cwd || '.', autonomous: true };
       state.run = await saveRunRecord(state.run);
       return completeRun(controller, finalStatus);
     },
@@ -34,7 +35,7 @@ export function showDeployPrompt(controller) {
   const failedChecks = hasFailedChecks(controller.state);
   controller.showMenu('deploy-prompt', [
     ...(autopilotPaused(controller.state) ? [{ id: 'resume-autopilot', label: 'Resume autopilot', description: 'Ask the local model to decide deployment again.' }] : []),
-    { id: 'run-deploy', label: 'Run deployment', description: deploy.commandText },
+    { id: 'run-deploy', label: 'Run deployment', description: `${commandLocationLabel(deploy.cwd)} · ${deploy.commandText}` },
     { id: 'skip-deploy', label: 'Finish without deployment', description: 'Keep the recorded local update without running the configured deployment command.' },
   ], failedChecks ? 'Deployment after failed checks' : 'Checks passed · deployment is ready', 0,
   failedChecks ? ['Required checks failed. Full autopilot or an explicit manual choice may still run the configured deployment.'] : []);
@@ -46,7 +47,7 @@ export async function startDeploy(controller, { fromCompleted = false, expectedS
   const deploy = state.workflow.deploy;
   const beforeState = expectedState ?? await captureRunExecutionState(state);
   state.screen = 'deploy-running';
-  state.deployRuntime = { commandText: deploy.commandText, lastLine: '', fromCompleted };
+  state.deployRuntime = { commandText: deploy.commandText, cwd: deploy.cwd || '.', lastLine: '', fromCompleted };
   state.status = 'Deploying';
   controller.invalidate();
   try {
@@ -65,6 +66,7 @@ export async function startDeploy(controller, { fromCompleted = false, expectedS
     state.run = await saveRunRecord(state.run);
     if (!result.ok) {
       controller.message('Deployment failed', [
+        `Directory: ${commandLocationLabel(deploy.cwd)}`,
         deploy.commandText,
         lastNonEmptyLine(`${result.stdout}\n${result.stderr}`) || 'No output',
       ], 'error', { collapsedSummary: `Deployment · failed · ${deploy.commandText}` });
@@ -78,7 +80,7 @@ export async function startDeploy(controller, { fromCompleted = false, expectedS
         return showDeployFailed(controller);
       });
     }
-    controller.message('Deployment completed', [deploy.commandText], 'success', { collapsedSummary: `Deployment · completed · ${deploy.commandText}` });
+    controller.message('Deployment completed', [`${commandLocationLabel(deploy.cwd)} · ${deploy.commandText}`], 'success', { collapsedSummary: `Deployment · completed · ${deploy.commandText}` });
     return operation.handoff(() => (
       fromCompleted
         ? showCompleted(controller)
@@ -105,7 +107,7 @@ export async function activateDeployFailure(controller, itemId) {
 
 export function skipDeploymentFromPrompt(controller) {
   const { state } = controller;
-  state.run.deploy = { skipped: true, policy: state.workflow.deploy.policy, commandText: state.workflow.deploy.commandText };
+  state.run.deploy = { skipped: true, policy: state.workflow.deploy.policy, commandText: state.workflow.deploy.commandText, cwd: state.workflow.deploy.cwd || '.' };
   return completeRun(controller, hasFailedChecks(state) ? 'completed_with_errors' : 'completed');
 }
 
@@ -124,6 +126,7 @@ async function showDeployCancelled(controller) {
   controller.state.run.deploy = {
     cancelled: true, ok: false, policy: controller.state.workflow.deploy.policy,
     commandText: controller.state.workflow.deploy.commandText,
+    cwd: controller.state.workflow.deploy.cwd || '.',
   };
   controller.state.run = await saveRunRecord(controller.state.run);
   controller.showMenu('deploy-cancelled', [

@@ -2,11 +2,12 @@ import path from 'node:path';
 import { copyTextToClipboard, handleInputEditorKey } from 'terlio.js';
 import { runReportPath } from '../runs/store.js';
 import { revealFile } from '../utils/reveal.js';
-import { discoverProject } from '../project/detect.js';
+import { configureWorkspaceProjects, discoverProject } from '../project/detect.js';
 import { ensureZipflowHome, getZipflowHome, loadWorkflow } from '../workflow/store.js';
 import { loadSettings } from '../settings/store.js';
 import { displayPath } from '../utils/paths.js';
 import { ZIPFLOW_VERSION } from '../version.js';
+import { commandLocationLabel } from '../project/command-spec.js';
 import { appendMessage, setScreen } from './state.js';
 import {
   activateSetup, backSetup, beginSetup, handleSetupShortcut, handlesSetupScreen, submitSetupEditor,
@@ -67,6 +68,9 @@ export class ZipflowController {
       this.state.i18n = await configureI18n(this.state.settings.interfaceLanguage);
       this.state.project = await discoverProject(process.cwd());
       this.state.workflow = await loadWorkflow(this.state.project.root);
+      if (this.state.workflow) {
+        this.state.project = await configureWorkspaceProjects(this.state.project, this.state.workflow.projects);
+      }
       this.message('Project detected', projectSummary(this.state.project, this.state.workflow), 'project');
       if (this.state.workflow) {
         if (await offerInterruptedRunRecovery(this)) return;
@@ -286,7 +290,7 @@ export class ZipflowController {
       return this.showMenu('home', [
         { id: 'start-update', label: 'Start an update', description: 'Choose a ZIP archive and use the saved workflow' },
         ...(checks.length ? [{ id: 'run-tests', label: 'Run tests', description: `Run ${checks.length} configured check${checks.length === 1 ? '' : 's'} against the current project` }] : []),
-        ...(deployConfigured ? [{ id: 'run-deploy-now', label: 'Run deployment', description: workflow.deploy.commandText }] : []),
+        ...(deployConfigured ? [{ id: 'run-deploy-now', label: 'Run deployment', description: `${commandLocationLabel(workflow.deploy.cwd)} · ${workflow.deploy.commandText}` }] : []),
         { id: 'change-workflow', label: 'Change workflow', description: 'Review and update the workflow; nothing changes until you confirm the final step' },
         { id: 'create-zip', label: 'Create ZIP', description: 'Export tracked, non-ignored, selected, or all project files' },
         { id: 'repeat-last', label: 'Repeat last archive', description: workflow.lastRunId ? 'Rebuild the previous archive plan against the current project' : 'No previous archive', disabled: !workflow.lastRunId },
@@ -295,7 +299,7 @@ export class ZipflowController {
       ], 'Ready');
     }
     return this.showMenu('new-project', [
-      { id: 'setup-project', label: 'Set up this project', description: `${displayPath(project.root)} · ${project.labels.join(' · ') || 'Custom project'}` },
+      { id: 'setup-project', label: 'Set up this project', description: `${displayPath(project.root)} · ${(project.workspaceLabels ?? project.labels ?? []).join(' · ') || 'Custom project'}${project.projects?.length > 1 ? ` · ${project.projects.length} projects` : ''}` },
       { id: 'choose-directory', label: 'Choose another directory', description: 'Tab completes directory names' },
       { id: 'create-zip', label: 'Create ZIP', description: 'Export files before configuring an update workflow' },
       { id: 'exit', label: 'Exit' },

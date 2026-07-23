@@ -12,6 +12,7 @@ import { beginLlmProgress } from './llm-progress.js';
 import { saveLlmDiagnostics } from '../llm/diagnostics.js';
 import { activeRunSettings } from './runtime-settings.js';
 import { handleFailedChecksAutonomy } from './run-autonomy.js';
+import { commandLocationLabel } from '../project/command-spec.js';
 import { autopilotPaused, resumeAutopilot } from './autonomy-flow.js';
 import {
   activateCommitChoice, continueAfterChecks, offerCommitAfterFailedChecks,
@@ -117,6 +118,7 @@ async function handleFailedChecks(controller, checksResult) {
   const failed = checksResult.results.find((item) => !item.ok);
   controller.message('Checks failed', [
     failed?.name ?? 'Required check',
+    `Directory: ${commandLocationLabel(failed?.cwd)}`,
     lastNonEmptyLine(`${failed?.stdout ?? ''}\n${failed?.stderr ?? ''}`) || 'No output',
   ], 'error', { collapsedSummary: `Checks failed · ${failed?.name ?? 'Required check'}` });
   await maybeExplainFailedCheck(controller, failed);

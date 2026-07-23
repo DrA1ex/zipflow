@@ -7,6 +7,7 @@ import { releaseRunResources } from './run-lifecycle.js';
 import { activeRunSettings, clearRunSettings } from './runtime-settings.js';
 import { pruneBackupStorage } from '../apply/backup-storage.js';
 import { markBackupsRemoved } from '../runs/backup-status.js';
+import { commandLocationLabel } from '../project/command-spec.js';
 
 
 export async function completeNoChangeRun(controller, { reason = 'archive-match' } = {}) {
@@ -100,7 +101,7 @@ export function showCompleted(controller) {
     { id: 'view-report', label: 'View run details', description: 'Open the stored decisions, checks, commit, deployment, and report path' },
   ];
   if (state.workflow.deploy?.policy === 'on-demand' && !state.run.deploy?.ok) {
-    items.push({ id: 'run-deploy', label: 'Run deployment', description: state.workflow.deploy.commandText });
+    items.push({ id: 'run-deploy', label: 'Run deployment', description: `${commandLocationLabel(state.workflow.deploy.cwd)} · ${state.workflow.deploy.commandText}` });
   }
   if (state.run.applied?.backupPath && state.run.applied?.backupAvailable !== false && (!state.run.rollback || state.run.rollback.status !== 'completed')) {
     items.push({ id: 'rollback', label: 'Roll back this update', description: 'Restore the exact local state from before this run' });

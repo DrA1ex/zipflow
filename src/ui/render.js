@@ -35,6 +35,7 @@ import { selectRowIndex, selectRows } from './select-rows.js';
 import { translateForState as t } from '../i18n/index.js';
 import { wheelScrollDelta } from './wheel.js';
 import { overlayManagerWithoutToasts, renderZipflowToasts } from './toast-overlay.js';
+import { commandLocationLabel } from '../project/command-spec.js';
 
 export function renderZipflow({ state, width, height, animationFrame = 0 }) {
   const theme = themes[state.settings?.theme] ?? themes.ocean;
@@ -321,7 +322,7 @@ function renderChecksRunning(state, height, theme) {
     const token = status === 'PASS' ? 'success' : status === 'FAIL' ? 'danger' : status === 'RUN' ? 'accent' : 'textMuted';
     const estimate = runtime.estimates?.[check.name];
     const duration = result ? ` ${formatDuration(result.durationMs)}` : estimate ? ` ~${formatDuration(estimate)}` : '';
-    return `${color(theme, token, status.padEnd(5))} ${check.name}${duration}`;
+    return `${color(theme, token, status.padEnd(5))} ${commandLocationLabel(check.cwd)} · ${check.name}${duration}`;
   });
   if (state.settings.checkOutput === 'last-line' && runtime.lastLine) lines.push('', runtime.lastLine);
   return runtimePane(` ${t(state, 'Running checks')} `, lines, height, theme);
@@ -331,7 +332,8 @@ function renderDeployRunning(state, height, theme) {
   const runtime = state.deployRuntime ?? {};
   const lines = [
     `${color(theme, 'accent', 'RUN  ')} ${t(state, 'Deploy command')}`,
-    runtime.commandText ? `      ${runtime.commandText}` : '',
+    `      ${t(state, 'Directory')}: ${commandLocationLabel(runtime.cwd)}`,
+    runtime.commandText ? `      ${t(state, 'Command')}: ${runtime.commandText}` : '',
   ].filter(Boolean);
   if (state.settings.checkOutput === 'last-line' && runtime.lastLine) lines.push('', runtime.lastLine);
   return runtimePane(` ${t(state, 'Deploying')} `, lines, height, theme);
@@ -407,7 +409,7 @@ function formatDiffLine(line, mode, theme) {
 function screenTitle(state) {
   const titles = {
     boot: 'Starting', home: 'Project', 'new-project': 'Project', 'setup-project': 'Project setup', 'setup-sections': 'Workflow sections',
-    'project-path-input': 'Choose project', 'setup-checks': 'Checks', 'custom-check-command': 'Custom check command',
+    'project-path-input': 'Choose project', 'project-entry-path': 'Add project', 'setup-project-confirm': 'Add project', 'setup-project-type': 'Project type', 'setup-checks': 'Checks', 'custom-check-command': 'Custom check command',
     'custom-check-name': 'Custom check name', 'setup-policy': 'Update policy', 'setup-archive-mode': 'Archive mode',
     'setup-deletion-scope': 'Snapshot deletion', 'setup-git-checkpoint': 'Git checkpoint',
     'setup-git-result': 'Result commit', 'setup-git-message': 'Commit message source', 'commit-template': 'Commit template',
@@ -442,7 +444,7 @@ function footerHints(state) {
   if (state.menuSearch?.active) return ['Type to filter', 'Enter keep', 'Esc clear/close'];
   if (isEditorScreen(state.screen)) {
     if (state.screen === 'commit-message') return ['Enter commit', 'Ctrl+Enter new line', 'Esc back'];
-    if (['archive-input', 'project-path-input', 'export-path'].includes(state.screen)) return ['Tab complete', '↑/↓ choose', 'Enter confirm', 'Esc back'];
+    if (['archive-input', 'project-path-input', 'project-entry-path', 'custom-check-command', 'deploy-command', 'export-path'].includes(state.screen)) return ['Tab complete', '↑/↓ choose', 'Enter confirm', 'Esc back'];
     return ['Enter confirm', 'Esc back'];
   }
   const report = state.run?.id ? ['G report'] : [];
@@ -481,7 +483,7 @@ function preferredPromptHeight(state, width = 80, mainHeight = 20) {
 
 function isEditorScreen(screen) {
   return [
-    'project-path-input', 'archive-input', 'custom-check-command', 'custom-check-name',
+    'project-path-input', 'project-entry-path', 'archive-input', 'custom-check-command', 'custom-check-name',
     'commit-message', 'commit-template', 'deploy-command', 'export-path', 'initial-commit-message',
   ].includes(screen);
 }

@@ -1,6 +1,6 @@
 # Project detection and checks
 
-Zipflow inspects the current project and proposes checks appropriate for the detected technologies. Every proposed command can be reviewed before the workflow is saved.
+Zipflow inspects the workspace root and immediate child directories, then proposes checks appropriate for every selected detected project. Every proposed command can be reviewed before the workflow is saved.
 
 ## Node.js and TypeScript
 
@@ -32,7 +32,7 @@ Zipflow inspects the project's `scripts` directory as well as package-manager sc
 
 Check-like scripts are offered in the checks step. Deploy, release, and publish scripts are prioritized as deployment choices. Other runnable scripts remain available as optional commands.
 
-A custom command can always be added.
+A custom command can always be added. Use `web/ :: npm test` to run it from a subdirectory; a command without `::` runs from the workspace root.
 
 ## Custom checks
 
@@ -63,3 +63,7 @@ A workflow can configure one deployment command with one of these policies:
 Deployment stdout, stderr, exit code, and duration are saved in the run report.
 
 The command is fixed by the workflow. Autopilot can decide whether to run or retry that command at supported gates, but cannot invent or edit it.
+
+## Multi-project selection
+
+Automatic project discovery is one level deep and skips known dependency, environment, cache, output, and library directories. The setup wizard lists detected projects, permits root-only mode, and supports deeper manual project paths with directory completion. See [Multi-project workspaces](multi-project-workspaces.md) for the complete interface and command format.

@@ -51,9 +51,11 @@ const TECHNOLOGY_GROUPS = {
 
 export function recommendedGitignoreGroups(project) {
   const groups = [...COMMON_GROUPS];
-  const ids = new Set(project.technologies?.map((item) => item.id) ?? []);
+  const technologies = project.workspaceTechnologies ?? project.technologies ?? [];
+  const labels = project.workspaceLabels ?? project.labels ?? [];
+  const ids = new Set(technologies.map((item) => item.id));
   if (ids.has('node')) groups.push(TECHNOLOGY_GROUPS.node);
-  if (ids.has('node') && project.labels?.some((label) => /typescript/i.test(label))) groups.push(TECHNOLOGY_GROUPS.typescript);
+  if (ids.has('node') && labels.some((label) => /typescript/i.test(label))) groups.push(TECHNOLOGY_GROUPS.typescript);
   if (ids.has('python')) groups.push(TECHNOLOGY_GROUPS.python);
   if (ids.has('cmake')) groups.push(TECHNOLOGY_GROUPS.cmake);
   if (ids.has('go')) groups.push(TECHNOLOGY_GROUPS.go);

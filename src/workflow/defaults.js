@@ -1,6 +1,6 @@
 import { defaultAutonomy, normalizeAutonomy } from '../autonomy/policies.js';
 
-export const WORKFLOW_VERSION = 7;
+export const WORKFLOW_VERSION = 8;
 
 export const DEFAULT_EXCLUDES = [
   '.git/**',
@@ -53,8 +53,9 @@ export function createRecommendedWorkflow(project) {
     version: WORKFLOW_VERSION,
     name: project.name,
     projectPath: project.root,
-    projectTypes: project.technologies.map((item) => item.id),
-    projectLabels: project.labels,
+    projectTypes: (project.workspaceTechnologies ?? project.technologies ?? []).map((item) => item.id),
+    projectLabels: project.workspaceLabels ?? project.labels ?? [],
+    projects: workflowProjects(project),
     archive: {
       mode: 'overlay',
       stripSingleRootDirectory: true,
@@ -117,6 +118,42 @@ export function normalizeWorkflow(workflow) {
     timeoutMs: 900_000,
     ...(normalized.deploy ?? {}),
   };
-  normalized.checks = Array.isArray(normalized.checks) ? normalized.checks : [];
+  normalized.deploy.cwd = normalized.deploy.cwd || '.';
+  normalized.checks = Array.isArray(normalized.checks)
+    ? normalized.checks.map((check) => ({ ...check, cwd: check.cwd || '.', projectPath: check.projectPath || check.cwd || '.' }))
+    : [];
+  normalized.projects = normalizeProjects(normalized);
   return normalized;
+}
+
+function workflowProjects(project) {
+  const entries = Array.isArray(project.projects) && project.projects.length
+    ? project.projects.filter((entry) => entry.selected !== false)
+    : [{ path: '.', technologies: project.technologies ?? [], labels: project.labels ?? [], source: 'detected' }];
+  return entries.map((entry) => ({
+    path: entry.path || '.',
+    typeIds: (entry.technologies ?? []).map((item) => item.id),
+    labels: [...(entry.labels ?? [])],
+    source: entry.source ?? 'detected',
+    selected: true,
+  }));
+}
+
+function normalizeProjects(workflow) {
+  if (Array.isArray(workflow.projects) && workflow.projects.length) {
+    return workflow.projects.map((entry) => ({
+      path: entry.path || '.',
+      typeIds: Array.isArray(entry.typeIds) ? entry.typeIds : [],
+      labels: Array.isArray(entry.labels) ? entry.labels : [],
+      source: entry.source ?? 'detected',
+      selected: entry.selected !== false,
+    }));
+  }
+  return [{
+    path: '.',
+    typeIds: Array.isArray(workflow.projectTypes) ? workflow.projectTypes : [],
+    labels: Array.isArray(workflow.projectLabels) ? workflow.projectLabels : [],
+    source: 'legacy',
+    selected: true,
+  }];
 }

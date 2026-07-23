@@ -1,5 +1,5 @@
-import path from 'node:path';
 import { runProcess, runShell } from '../utils/process.js';
+import { resolveCommandCwd } from '../project/command-spec.js';
 
 export async function runChecks({ workflow, projectPath, changedPaths, onUpdate = null, signal = null }) {
   const checks = workflow.checks.filter((check) => check.selected);
@@ -8,8 +8,29 @@ export async function runChecks({ workflow, projectPath, changedPaths, onUpdate 
     const check = checks[index];
     onUpdate?.({ type: 'started', check, index, total: checks.length, results });
     if (signal?.aborted) throw Object.assign(new Error('Operation cancelled.'), { code: 'cancelled' });
-    const result = await runCheck(check, { projectPath, changedPaths, signal, onOutput: (event) => onUpdate?.({ type: 'output', check, index, event, results }) });
-    const normalized = { ...result, id: check.id, name: check.name, required: check.required !== false, type: check.type };
+    let result;
+    try {
+      const cwd = await resolveCommandCwd(projectPath, check.cwd || '.');
+      result = await runCheck(check, {
+        projectPath,
+        cwd,
+        cwdRelative: check.cwd || '.',
+        changedPaths,
+        signal,
+        onOutput: (event) => onUpdate?.({ type: 'output', check, index, event, results }),
+      });
+    } catch (error) {
+      result = failureResult(error.message);
+    }
+    const normalized = {
+      ...result,
+      id: check.id,
+      name: check.name,
+      required: check.required !== false,
+      type: check.type,
+      cwd: check.cwd || '.',
+      commandText: check.commandText ?? check.description ?? check.command?.join(' ') ?? '',
+    };
     results.push(normalized);
     onUpdate?.({ type: 'finished', check, index, total: checks.length, result: normalized, results });
     if (!normalized.ok && normalized.required) break;
@@ -36,17 +57,17 @@ async function runCheck(check, context) {
 }
 
 async function runNodeSyntax(check, context) {
-  const files = context.changedPaths.filter((file) => /\.(cjs|mjs|js)$/.test(file));
+  const files = changedPathsForCwd(context.changedPaths, context.cwdRelative).filter((file) => /\.(cjs|mjs|js)$/.test(file));
   return runPerFile(files, (file) => runProcess(process.execPath, ['--check', file], commandOptions(check, context)), 'No changed JavaScript files.');
 }
 
 async function runPythonSyntax(check, context) {
-  const files = context.changedPaths.filter((file) => file.endsWith('.py'));
+  const files = changedPathsForCwd(context.changedPaths, context.cwdRelative).filter((file) => file.endsWith('.py'));
   return runPerFile(files, (file) => runProcess(check.interpreter || 'python3', ['-m', 'py_compile', file], commandOptions(check, context)), 'No changed Python files.');
 }
 
 async function runGoFormat(check, context) {
-  const files = context.changedPaths.filter((file) => file.endsWith('.go'));
+  const files = changedPathsForCwd(context.changedPaths, context.cwdRelative).filter((file) => file.endsWith('.go'));
   if (!files.length) return successResult('No changed Go files.');
   const result = await runProcess('gofmt', ['-d', ...files], commandOptions(check, context));
   if (result.ok && result.stdout.trim()) return { ...result, ok: false, code: 1, stderr: 'gofmt found formatting differences.\n' };
@@ -66,9 +87,17 @@ async function runPerFile(files, execute, emptyMessage) {
   return { ...successResult(`${files.length} files checked.`), durationMs, stdout: outputs.join('') };
 }
 
+function changedPathsForCwd(changedPaths, cwdRelative) {
+  const normalizedCwd = String(cwdRelative ?? '.').replaceAll('\\', '/').replace(/^\.\//, '').replace(/\/+$/, '') || '.';
+  const normalizedPaths = (changedPaths ?? []).map((file) => String(file).replaceAll('\\', '/').replace(/^\.\//, ''));
+  if (normalizedCwd === '.') return normalizedPaths;
+  const prefix = `${normalizedCwd}/`;
+  return normalizedPaths.filter((file) => file.startsWith(prefix)).map((file) => file.slice(prefix.length));
+}
+
 function commandOptions(check, context) {
   return {
-    cwd: path.resolve(context.projectPath, check.cwd || '.'),
+    cwd: context.cwd,
     timeoutMs: check.timeoutMs || 600_000,
     onOutput: context.onOutput,
     signal: context.signal,

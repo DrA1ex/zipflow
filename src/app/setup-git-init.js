@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { exists } from '../utils/fs.js';
-import { discoverProject } from '../project/detect.js';
+import { configureWorkspaceProjects, discoverProject } from '../project/detect.js';
 import { addRecommendedGitignore, recommendedGitignoreGroups } from '../git/ignore.js';
 import { createInitialCommit, initializeRepository } from '../git/repository.js';
 import { showChecksStep } from './setup-checks.js';
@@ -65,7 +65,10 @@ async function activateInit(controller, itemId) {
     controller.message('Git initialization failed', [result.reason], 'error');
     return showGitBootstrap(controller);
   }
-  controller.state.project = await discoverProject(controller.state.project.root);
+  controller.state.project = await configureWorkspaceProjects(
+    await discoverProject(controller.state.project.root),
+    controller.state.draft.projects,
+  );
   controller.state.draft.projectPath = controller.state.project.root;
   controller.message('Git repository initialized', [controller.state.project.root], 'success');
   return showGitignoreStep(controller);

@@ -96,7 +96,7 @@ Path suggestions appear in an overlay without moving the surrounding layout.
 - Press `Enter` again to confirm the completed path.
 - Existing directories can expose **Use this directory** in directory pickers.
 
-Archive and output-path editors share this behavior. Output paths add `.zip` when missing and ask separately before overwriting an existing destination.
+Archive and output-path editors share this behavior. Project-path editors complete workspace-relative directories. In custom check and deployment editors, completion applies before `::`; selecting `web/` inserts `web/ :: ` so the shell command can be entered immediately afterward. Output paths add `.zip` when missing and ask separately before overwriting an existing destination.
 
 ## Diff review
 

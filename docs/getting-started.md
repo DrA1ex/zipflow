@@ -42,12 +42,12 @@ There are no command submodes. Setup, archive application, checks, commits, depl
 
 ## First launch
 
-Zipflow resolves the canonical project root and scans the project before presenting a setup wizard. The detected information is written to Activity as a framed **Project detected** block rather than consuming permanent action-pane space.
+Zipflow resolves the canonical workspace root, scans it and its immediate child directories for projects, and then presents a setup wizard. The detected information is written to Activity as a framed **Project detected** block rather than consuming permanent action-pane space.
 
 The wizard lets you review:
 
-- detected technologies;
-- automatically discovered checks;
+- detected root and subprojects;
+- automatically discovered checks with their working directories;
 - custom validation commands;
 - archive interpretation and snapshot deletion rules;
 - conflict and checkpoint behavior;
@@ -58,6 +58,8 @@ The wizard lets you review:
 Recommended choices begin selected. The workflow is saved only after final confirmation. Reopening setup leaves the currently saved workflow active until its replacement is confirmed and written successfully.
 
 Global settings are loaded before the interactive runtime begins accepting input. This avoids a startup window in which defaults could overwrite persisted model, credential, storage, or retention configuration.
+
+A manually added project can be deeper than the automatic one-level scan. Checks and deployment commands accept `path/ :: command`; for example, `web/ :: npm test` runs from `web/`.
 
 ## Projects without Git
 

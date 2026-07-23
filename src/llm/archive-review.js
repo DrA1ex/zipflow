@@ -271,7 +271,7 @@ function systemPrompt(promptLang, outputLanguage) {
 function userPrompt(project, plan, treeText) {
   return [
     `Expected project: ${project.name}`,
-    `Detected technologies: ${(project.labels ?? []).join(', ') || 'unknown'}`,
+    `Detected technologies: ${(project.workspaceLabels ?? project.labels ?? []).join(', ') || 'unknown'}`,
     `Planned changes: created=${plan.counts.created}, updated=${plan.counts.updated}, deleted=${plan.counts.deleted}, unchanged=${plan.counts.unchanged}`,
     '', treeText,
   ].join('\n');

@@ -289,7 +289,8 @@ function archiveDispositionSummary(value) {
 function deploySummary(deploy) {
   if (!deploy) return 'not run';
   if (deploy.skipped) return 'skipped';
-  return deploy.ok ? `passed (${deploy.commandText})` : `failed (${deploy.commandText})`;
+  const location = deploy.cwd === '.' ? 'Root' : `${deploy.cwd}/`;
+  return deploy.ok ? `passed (${location} · ${deploy.commandText})` : `failed (${location} · ${deploy.commandText})`;
 }
 
 function decisionSummary(run) {

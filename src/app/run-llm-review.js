@@ -83,6 +83,7 @@ async function generateLlmSummary(controller, { plan, patch, extracted }) {
   controller.invalidate();
   const llmEstimate = await previousLlmEstimate(state);
   controller.message('Local LLM analysis starting', [
+    `Projects: ${projectContextLabel(state.project)}`,
     `${changedCount(plan)} changed paths · delivery ${deliveryLabel(settings.llmChangeDelivery)}${settings.llmArchiveReview === 'structure' ? ' · project/archive structure guard first' : settings.llmArchiveReview === 'sample' ? ' · bounded structure and patch sample guard first' : ''}${llmEstimate ? ` · historical median ${formatEstimate(llmEstimate)}` : ''}.`,
     'Adaptive delivery uses a full patch, representative sample, or capped batches according to the model context. Ctrl+C cancels this LLM operation.',
   ], 'process');
@@ -194,6 +195,13 @@ async function generateLlmSummary(controller, { plan, patch, extracted }) {
     progress.stop();
     operation.finish();
   }
+}
+
+
+function projectContextLabel(project) {
+  const entries = project.activeProjects ?? project.projects?.filter((entry) => entry.selected !== false) ?? [];
+  if (!entries.length) return 'Workspace root';
+  return entries.map((entry) => entry.path === '.' ? 'Root' : `${entry.path}/`).join(', ');
 }
 
 function emitLlmResult(controller, llm, reviewMode) {

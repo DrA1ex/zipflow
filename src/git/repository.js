@@ -1,17 +1,9 @@
 import path from 'node:path';
 import { runProcess } from '../utils/process.js';
 import { isProtectedProjectPath } from '../archive/protected.js';
-import { canonicalPath } from '../utils/paths.js';
+import { findGitRoot } from './root.js';
+export { findGitRoot } from './root.js';
 
-export async function findGitRoot(startPath) {
-  try {
-    const result = await runGit(startPath, ['rev-parse', '--show-toplevel'], { allowFailure: true });
-    return result.ok ? canonicalPath(result.stdout.trim()) : null;
-  } catch (error) {
-    if (error.code === 'ENOENT') return null;
-    throw error;
-  }
-}
 
 export async function initializeRepository(projectPath) {
   const result = await runGit(projectPath, ['init'], { allowFailure: true });

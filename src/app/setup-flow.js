@@ -1,4 +1,8 @@
 import { discoverProject } from '../project/detect.js';
+import {
+  activateProjectConfirm, activateProjectStructure, backProjectSetup, handlesProjectSetupScreen,
+  hydrateConfiguredProjects, showProjectStructureStep, submitProjectSetupEditor, syncDraftProjects,
+} from './setup-projects.js';
 import { applyPolicyProfile, createRecommendedWorkflow } from '../workflow/defaults.js';
 import { saveWorkflow } from '../workflow/store.js';
 import { upsertMessage } from './state.js';
@@ -18,7 +22,9 @@ import { activateAutonomy, autonomyReviewLines, showAutonomyStep } from './setup
 export async function beginSetup(controller, { fresh = false } = {}) {
   const { state } = controller;
   state.setupEditing = Boolean(state.workflow && !fresh);
+  await hydrateConfiguredProjects(controller);
   state.draft = fresh || !state.workflow ? createRecommendedWorkflow(state.project) : structuredClone(state.workflow);
+  syncDraftProjects(controller);
   controller.message(fresh ? 'Starting a new workflow' : 'Reviewing workflow', [
     'Zipflow inspected the project and prepared a recommended workflow.',
     'The next steps let you confirm which checks run, how archives replace files, and what Git or deployment actions happen after a successful update.',
@@ -26,11 +32,11 @@ export async function beginSetup(controller, { fresh = false } = {}) {
     'Nothing replaces the saved workflow until you review and confirm the final summary.',
   ]);
   if (state.setupEditing) showWorkflowSections(controller);
-  else showProjectStep(controller);
+  else showProjectStructureStep(controller);
 }
 
 export function handlesSetupScreen(screen) {
-  return handlesGitBootstrapScreen(screen) || screen.startsWith('setup-') || screen.startsWith('custom-check') || [
+  return handlesGitBootstrapScreen(screen) || handlesProjectSetupScreen(screen) || screen.startsWith('setup-') || screen.startsWith('custom-check') || [
     'project-path-input', 'commit-template', 'deploy-command',
   ].includes(screen);
 }
@@ -40,6 +46,7 @@ export async function activateSetup(controller, itemId) {
   if (handlesGitBootstrapScreen(screen)) return activateGitBootstrap(controller, itemId);
   if (screen === 'setup-sections') return activateWorkflowSection(controller, itemId);
   if (screen === 'setup-project') return activateProject(controller, itemId);
+  if (screen === 'setup-project-confirm' || screen === 'setup-project-type') return activateProjectConfirm(controller, itemId);
   if (screen === 'setup-checks') return activateChecks(controller, itemId, () => finishSetupSection(controller, () => showPolicyStep(controller)));
   if (screen === 'setup-policy') return activatePolicy(controller, itemId);
   if (screen === 'setup-autonomy' || screen === 'setup-autonomy-confirm') return activateAutonomy(controller, itemId, () => finishSetupSection(controller, () => showArchiveModeStep(controller)));
@@ -57,8 +64,9 @@ export async function submitSetupEditor(controller) {
   const { state } = controller;
   const purpose = state.editorContext?.purpose;
   if (purpose === 'setup-project-path') return submitProjectPath(controller);
+  if (purpose === 'setup-project-entry-path') return submitProjectSetupEditor(controller);
   if (await submitGitBootstrapEditor(controller)) return;
-  if (submitCustomCheckEditor(controller)) return;
+  if (await submitCustomCheckEditor(controller)) return;
   if (purpose === 'commit-template') {
     const template = state.editor.value.trim();
     if (!template) return controller.setStatus('Enter a commit message template.');
@@ -66,7 +74,7 @@ export async function submitSetupEditor(controller) {
     controller.message('Commit template saved', [template], 'success');
     return finishSetupSection(controller, () => showDeployPolicyStep(controller));
   }
-  if (purpose === 'deploy-command') return submitDeployEditor(controller, () => finishSetupSection(controller, () => showReviewStep(controller)));
+  if (purpose === 'deploy-command') return await submitDeployEditor(controller, () => finishSetupSection(controller, () => showReviewStep(controller)));
 }
 
 export function handleSetupShortcut(controller, key) {
@@ -75,14 +83,15 @@ export function handleSetupShortcut(controller, key) {
 
 export function backSetup(controller) {
   const screen = controller.state.screen;
+  if (backProjectSetup(controller)) return;
   if (handlesGitBootstrapScreen(screen)) {
     const handled = backGitBootstrap(controller);
     if (handled !== false) return handled;
-    return showProjectStep(controller);
+    return showProjectStructureStep(controller);
   }
   if (screen === 'setup-sections') return controller.showHome();
   if (screen === 'setup-project') return isEditingSection(controller, 'project') ? showWorkflowSections(controller) : controller.showHome();
-  if (screen === 'setup-checks') return isEditingSection(controller, 'checks') ? showWorkflowSections(controller) : showProjectStep(controller);
+  if (screen === 'setup-checks') return isEditingSection(controller, 'checks') ? showWorkflowSections(controller) : showProjectStructureStep(controller);
   if (screen === 'setup-policy') return isEditingSection(controller, 'policy') ? showWorkflowSections(controller) : showChecksStep(controller);
   if (screen === 'setup-autonomy') return isEditingSection(controller, 'autonomy') ? showWorkflowSections(controller) : showPolicyStep(controller);
   if (screen === 'setup-autonomy-confirm') return showAutonomyStep(controller);
@@ -95,22 +104,22 @@ export function backSetup(controller) {
   if (screen === 'setup-deploy-command') return showDeployPolicyStep(controller);
   if (screen === 'setup-review') return controller.state.setupEditing ? showWorkflowSections(controller, 'review') : showDeployPolicyStep(controller);
   if (screen.startsWith('custom-check')) return showChecksStep(controller);
-  if (screen === 'project-path-input') return showProjectStep(controller);
+  if (screen === 'project-path-input') return showProjectStructureStep(controller);
   if (screen === 'commit-template') return showMessageStrategyStep(controller);
   if (screen === 'deploy-command') return showDeployCommandStep(controller);
 }
 
-function activateProject(controller, itemId) {
-  if (itemId === 'use-project') {
-    if (isEditingSection(controller, 'project')) return showWorkflowSections(controller);
-    return controller.state.project.git ? showChecksStep(controller) : showGitBootstrap(controller);
-  }
+async function activateProject(controller, itemId) {
   if (itemId === 'choose-project') return controller.showEditor('project-path-input', {
     label: 'Project directory',
     placeholder: controller.state.project.root,
     purpose: 'setup-project-path',
     instructions: ['Enter the project directory. Tab completes directory names.'],
   }, controller.state.project.root);
+  return activateProjectStructure(controller, itemId, () => {
+    if (isEditingSection(controller, 'project')) return showWorkflowSections(controller);
+    return controller.state.project.git ? showChecksStep(controller) : showGitBootstrap(controller);
+  });
 }
 
 async function submitProjectPath(controller) {
@@ -120,7 +129,7 @@ async function submitProjectPath(controller) {
     state.project = await discoverProject(target);
     state.draft = createRecommendedWorkflow(state.project);
     controller.message('Project selected', [displayPath(state.project.root), detectedLine(state.project)], 'success');
-    showProjectStep(controller);
+    showProjectStructureStep(controller);
   } catch (error) {
     controller.message('Could not use this directory', [error.message], 'error');
   }
@@ -133,7 +142,7 @@ function showWorkflowSections(controller, selectedSection = null) {
   controller.state.setupSection = null;
   const selectedChecks = workflow.checks.filter((check) => check.selected).length;
   const items = [
-    { id: 'section-project', label: 'Project', description: `${displayPath(controller.state.project.root)} · ${detectedLine(controller.state.project)}` },
+    { id: 'section-project', label: 'Project structure', description: `${displayPath(controller.state.project.root)} · ${detectedLine(controller.state.project)}` },
     { id: 'section-checks', label: 'Checks', description: `${selectedChecks} selected check${selectedChecks === 1 ? '' : 's'}` },
     { id: 'section-policy', label: 'Update policy', description: workflow.policy.label },
     { id: 'section-autonomy', label: 'Decision mode', description: workflow.autonomy?.mode === 'full' ? 'Full autopilot · Dangerous' : workflow.autonomy?.mode === 'guarded' ? 'Guarded autopilot' : 'Manual' },
@@ -156,7 +165,7 @@ function activateWorkflowSection(controller, itemId) {
 
 function openWorkflowSection(controller, section) {
   controller.state.setupSection = section;
-  if (section === 'project') return showProjectStep(controller);
+  if (section === 'project') return showProjectStructureStep(controller);
   if (section === 'checks') return showChecksStep(controller);
   if (section === 'policy') return showPolicyStep(controller);
   if (section === 'autonomy') return showAutonomyStep(controller);
@@ -172,14 +181,6 @@ function isEditingSection(controller, section) {
 function finishSetupSection(controller, fallback) {
   if (controller.state.setupEditing && controller.state.setupSection) return showWorkflowSections(controller);
   return fallback();
-}
-
-function showProjectStep(controller) {
-  const { project } = controller.state;
-  controller.showMenu('setup-project', [
-    { id: 'use-project', label: 'Use this project', description: `${displayPath(project.root)} · ${detectedLine(project)}` },
-    { id: 'choose-project', label: 'Choose another directory', description: 'Tab completes directory names' },
-  ], 'Project setup');
 }
 
 function showPolicyStep(controller) {
@@ -353,10 +354,11 @@ function workflowReviewLines(state, workflow) {
     'PROJECT',
     `  ${displayPath(state.project.root)}`,
     `  ${detectedLine(state.project)}`,
+    ...projectReviewLines(workflow),
     '',
     'CHECKS',
     `  ${selectedChecks.length} enabled`,
-    ...selectedChecks.map((check) => `  • ${check.name}${check.commandText ? ` · ${check.commandText}` : ''}`),
+    ...selectedChecks.map((check) => `  • ${(check.cwd ?? '.') === '.' ? 'Root' : `${check.cwd}/`} · ${check.name}${check.commandText ? ` · ${check.commandText}` : ''}`),
     '',
     'UPDATE POLICY',
     `  ${workflow.policy.label}`,
@@ -381,7 +383,7 @@ function workflowReviewLines(state, workflow) {
     '',
     'DEPLOYMENT',
     `  ${deployPolicyDescription(workflow.deploy.policy)}`,
-    ...(workflow.deploy.commandText ? [`  Command: ${workflow.deploy.commandText}`] : []),
+    ...(workflow.deploy.commandText ? [`  Directory: ${(workflow.deploy.cwd ?? '.') === '.' ? 'Root' : `${workflow.deploy.cwd}/`}`, `  Command: ${workflow.deploy.commandText}`] : []),
   );
   return lines;
 }
@@ -421,7 +423,20 @@ function choice(id, selected, label, description) {
 }
 
 function detectedLine(project) {
-  return `${project.labels.join(' · ') || 'Unknown type'}${project.git ? ' · Git' : ''}`;
+  const active = project.activeProjects ?? project.projects?.filter((entry) => entry.selected !== false) ?? [];
+  const labels = project.workspaceLabels ?? project.labels ?? [];
+  const projectCount = active.length || 1;
+  const structure = projectCount > 1 ? `${projectCount} projects · ` : '';
+  return `${structure}${labels.join(' · ') || 'Unknown type'}${project.git ? ' · Git' : ''}`;
+}
+
+function projectReviewLines(workflow) {
+  const projects = workflow.projects ?? [];
+  if (!projects.length) return [];
+  return projects.filter((entry) => entry.selected !== false).map((entry) => {
+    const location = entry.path === '.' ? 'Root' : `${entry.path}/`;
+    return `  • ${location} · ${entry.labels?.join(' · ') || 'Ordinary project'}`;
+  });
 }
 
 function checkpointLabel(value) {

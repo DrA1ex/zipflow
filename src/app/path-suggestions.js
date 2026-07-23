@@ -3,8 +3,9 @@ import { exists } from '../utils/fs.js';
 import { suggestPathEntries } from '../utils/paths.js';
 import { outputPathForDirectory } from '../export/output-path.js';
 import { moveSelectableIndex } from './list-navigation.js';
+import { commandPrefix } from '../project/command-spec.js';
 
-const PATH_SCREENS = new Set(['project-path-input', 'archive-input', 'export-path']);
+const PATH_SCREENS = new Set(['project-path-input', 'project-entry-path', 'custom-check-command', 'deploy-command', 'archive-input', 'export-path']);
 
 export async function showRecentArchiveSuggestions(controller) {
   const { state } = controller;
@@ -58,7 +59,9 @@ export async function refreshPathSuggestions(controller, { settingsModal = false
   };
   controller.invalidate();
   try {
-    let items = await suggestPathEntries(state.editor.value, spec.options);
+    let items = await suggestPathEntries(spec.value ?? state.editor.value, spec.options);
+    if (spec.kind === 'workspace-relative') items = workspaceRelativeSuggestions(items, state.project.root, { command: false });
+    if (spec.kind === 'command-directory') items = workspaceRelativeSuggestions(items, state.project.root, { command: true });
     if (spec.owner === 'export-path') {
       items = items.map((item) => item.id.startsWith('use:')
         ? {
@@ -104,6 +107,12 @@ export async function acceptPathSuggestion(controller, { submit, submitSelected 
   const item = completion?.items?.[completion.selectedIndex];
   if (!item) return false;
   state.editor.set(item.insert);
+  if (item.completeCommandPrefix) {
+    clearPathSuggestions(state);
+    state.pathSuggestionActive = false;
+    state.status = 'Directory selected · enter the command after ::';
+    return true;
+  }
   if (item.submit) {
     clearPathSuggestions(state);
     state.status = 'Path selected · press Enter to continue';
@@ -120,6 +129,25 @@ export function selectPathSuggestion(state, index) {
   if (!completion?.items?.length) return false;
   completion.selectedIndex = Math.max(0, Math.min(index, completion.items.length - 1));
   return true;
+}
+
+
+function workspaceRelativeSuggestions(items, workspaceRoot, { command }) {
+  return items.map((item) => {
+    const relative = path.relative(workspaceRoot, item.path).split(path.sep).join('/');
+    if (!relative || relative === '.' || relative.startsWith('../')) return null;
+    const directory = relative.replace(/\/+$/, '');
+    return {
+      ...item,
+      id: `${command ? 'command' : 'project'}:${directory}`,
+      insert: command ? `${directory}/ :: ` : `${directory}/`,
+      label: `${directory}/`,
+      detail: command ? 'CWD' : 'DIR',
+      description: command ? `Run the command from ${directory}/.` : `Use ${directory}/ as a project directory.`,
+      submit: false,
+      completeCommandPrefix: command,
+    };
+  }).filter(Boolean);
 }
 
 function pathSuggestionSpec(state, settingsModal) {
@@ -143,6 +171,30 @@ function pathSuggestionSpec(state, settingsModal) {
       includeCurrentDirectory: true,
     },
   };
+  if (state.screen === 'project-entry-path') return {
+    owner: state.screen,
+    kind: 'workspace-relative',
+    value: state.editor.value,
+    options: {
+      cwd: state.project?.root ?? process.cwd(),
+      directoriesOnly: true,
+      includeCurrentDirectory: false,
+    },
+  };
+  if (state.screen === 'custom-check-command' || state.screen === 'deploy-command') {
+    const prefix = commandPrefix(state.editor.value);
+    if (String(state.editor.value ?? '').includes('::') || /\s/.test(prefix.trim())) return null;
+    return {
+      owner: state.screen,
+      kind: 'command-directory',
+      value: prefix,
+      options: {
+        cwd: state.project?.root ?? process.cwd(),
+        directoriesOnly: true,
+        includeCurrentDirectory: false,
+      },
+    };
+  }
   if (state.screen === 'archive-input') return {
     owner: state.screen,
     options: {

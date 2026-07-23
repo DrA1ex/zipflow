@@ -9,6 +9,7 @@ import { createRunId } from '../utils/id.js';
 import { displayPath } from '../utils/paths.js';
 import { createActionRunRecord, runReportPath, saveRunRecord } from '../runs/store.js';
 import { beginLlmProgress } from './llm-progress.js';
+import { commandLocationLabel } from '../project/command-spec.js';
 
 export function handlesManualScreen(screen) {
   return ['manual-checks-running', 'manual-checks-result', 'manual-deploy-running', 'manual-deploy-result'].includes(screen);
@@ -67,8 +68,8 @@ export async function beginManualDeploy(controller) {
   state.run = run;
   state.screen = 'manual-deploy-running';
   state.status = 'Deploying current version';
-  state.deployRuntime = { commandText: state.workflow.deploy.commandText, lastLine: '' };
-  controller.message('Manual deployment starting', [state.workflow.deploy.commandText, 'This deploys the current local project without applying a ZIP archive.'], 'process');
+  state.deployRuntime = { commandText: state.workflow.deploy.commandText, cwd: state.workflow.deploy.cwd || '.', lastLine: '' };
+  controller.message('Manual deployment starting', [`${commandLocationLabel(state.workflow.deploy.cwd)} · ${state.workflow.deploy.commandText}`, 'This deploys the current local project without applying a ZIP archive.'], 'process');
   controller.invalidate();
   try {
     const result = await runDeploy({
@@ -84,7 +85,7 @@ export async function beginManualDeploy(controller) {
     run.status = result.ok ? 'completed' : 'completed_with_errors';
     state.run = await saveRunRecord(run);
     controller.message(result.ok ? 'Manual deployment completed' : 'Manual deployment failed', [
-      state.workflow.deploy.commandText,
+      `${commandLocationLabel(state.workflow.deploy.cwd)} · ${state.workflow.deploy.commandText}`,
       `Report: ${displayPath(runReportPath(run.id))}`,
     ], result.ok ? 'success' : 'error');
     return showManualDeployResult(controller);
@@ -92,7 +93,12 @@ export async function beginManualDeploy(controller) {
     const cancelled = error.code === 'cancelled';
     run.status = cancelled ? 'cancelled' : 'failed';
     run.error = cancelled ? null : { message: error.message };
-    run.deploy ??= { ok: false, cancelled, commandText: state.workflow.deploy.commandText };
+    run.deploy ??= {
+      ok: false,
+      cancelled,
+      commandText: state.workflow.deploy.commandText,
+      cwd: state.workflow.deploy.cwd || '.',
+    };
     state.run = await saveRunRecord(run);
     controller.message(cancelled ? 'Manual deployment cancelled' : 'Manual deployment could not run', [
       cancelled ? 'The deployment process was stopped. External effects may already exist.' : error.message,

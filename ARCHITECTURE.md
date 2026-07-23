@@ -344,6 +344,14 @@ A new project detector should return:
 
 Checks use a runner `kind`. Add a specialized runner only when a check cannot be represented safely as a command and argument array.
 
+## Multi-project workspace model
+
+`src/project/detect.js` resolves one workspace root, detects technologies at that root, and scans one immediate directory level while skipping known dependency, environment, cache, generated-output, editor, and library directories. Each project entry retains its workspace-relative path, technologies, marker files, checks, deployment candidates, source, and selection state. Manual entries may be deeper than the automatic scan and are validated without following symbolic links.
+
+The top-level project object remains compatible with single-project callers while exposing `projects`, `activeProjects`, `workspaceTechnologies`, and `workspaceLabels`. Checks and deployment candidates from subprojects receive qualified identifiers and workspace-relative `cwd` values. The workflow stores selected entries in version 8; legacy workflows normalize to one selected root entry.
+
+`src/project/command-spec.js` owns the compact `path/ :: command` syntax, display formatting, workspace containment validation, missing-directory errors, and runtime `cwd` resolution. Setup editors parse and validate the command before saving it. Check and deployment runners validate the directory again immediately before process creation and never fall back to the root. Changed-file syntax checks translate workspace-relative paths into paths relative to the configured command directory.
+
 ## Testing strategy
 
 Unit and integration tests use temporary projects and Git repositories. Regression tests cover:

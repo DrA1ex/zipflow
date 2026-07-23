@@ -302,7 +302,7 @@ function buildSystemPrompt(languages, reviewArchive = false) {
 function buildUserPrompt(project, plan, payload) {
   const intro = [
     `Project: ${project.name}`,
-    `Project types: ${(project.labels ?? []).join(', ') || 'unknown'}`,
+    `Project types: ${(project.workspaceLabels ?? project.labels ?? []).join(', ') || 'unknown'}`,
     `Plan counts: created=${plan.counts.created}, updated=${plan.counts.updated}, deleted=${plan.counts.deleted}`,
   ];
   if (payload.kind === 'patch' || payload.kind === 'sample') return [
@@ -316,7 +316,7 @@ function buildUserPrompt(project, plan, payload) {
 function buildSynthesisPrompt(project, plan, notes) {
   return [
     `Project: ${project.name}`,
-    `Project types: ${(project.labels ?? []).join(', ') || 'unknown'}`,
+    `Project types: ${(project.workspaceLabels ?? project.labels ?? []).join(', ') || 'unknown'}`,
     `Plan counts: created=${plan.counts.created}, updated=${plan.counts.updated}, deleted=${plan.counts.deleted}`,
     '', 'COMPLETE CHANGED PATH LIST:', createChangeList(plan),
     '', 'FILE-BATCH ANALYSIS NOTES:', notes.join('\n\n---\n\n'),

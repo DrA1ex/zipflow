@@ -2,10 +2,12 @@ import path from 'node:path';
 import { displayPath } from '../utils/paths.js';
 
 export function projectSummary(project, workflow = null) {
-  const labels = project.labels.length ? project.labels.join(' · ') : 'Project type not detected';
+  const labels = (project.workspaceLabels ?? project.labels ?? []).length ? (project.workspaceLabels ?? project.labels).join(' · ') : 'Project type not detected';
+  const activeProjects = project.activeProjects ?? project.projects?.filter((entry) => entry.selected !== false) ?? [];
   const lines = [
     `Root: ${displayPath(project.root)}`,
     `Detected: ${labels}`,
+    ...(activeProjects.length > 1 ? activeProjects.map((entry) => `Project: ${entry.path === '.' ? 'Root' : `${entry.path}/`} · ${entry.labels?.join(' · ') || 'Ordinary project'}`) : []),
     `Git: ${project.git ? 'repository detected' : 'not initialized'} · Workflow: ${workflow ? 'configured' : 'not configured'}`,
   ];
   if (workflow) {

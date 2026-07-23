@@ -20,7 +20,7 @@ Project setup, archive review, conflict resolution, checks, commits, deployment,
 - Applies changes as a recoverable transaction with path-specific backups.
 - Revalidates project paths during planning, backup, apply, and rollback.
 - Detects conflicts only on paths changed by both the archive and the local working tree.
-- Runs project-aware checks and an optional deployment command.
+- Detects one-level subprojects and runs project-aware checks or deployment commands from their own directories.
 - Creates optional checkpoint and result commits without staging unrelated work.
 - Can summarize changes, explain failures, and make bounded workflow decisions through Ollama or LM Studio.
 - Supports Manual, Guarded autopilot, and explicitly dangerous Full autopilot decision modes.
@@ -89,7 +89,7 @@ cd ~/dev/my-project
 zipflow
 ```
 
-On the first launch, Zipflow detects the project, discovers suitable checks and deployment commands, and opens a setup wizard. Recommended choices are preselected and nothing is saved until the final confirmation.
+On the first launch, Zipflow detects the workspace root and scans immediate subdirectories for additional projects, discovers suitable checks and deployment commands for the selected projects, and opens a setup wizard. Recommended choices are preselected and nothing is saved until the final confirmation.
 
 For later runs, Zipflow opens directly in archive-waiting mode:
 
@@ -143,7 +143,7 @@ See [Decision modes and autopilot](docs/autopilot.md) before enabling autonomous
 
 ## Supported projects
 
-Zipflow detects and proposes checks for:
+Zipflow detects and proposes checks for the workspace root and selected subprojects:
 
 - Node.js and TypeScript
 - Python
@@ -154,7 +154,7 @@ Zipflow detects and proposes checks for:
 
 It also inspects project scripts for test, check, deploy, release, and publish commands. Every detected command can be reviewed, replaced, or supplemented with a custom command.
 
-See [Project detection and checks](docs/project-detection.md).
+See [Project detection and checks](docs/project-detection.md) and [Multi-project workspaces](docs/multi-project-workspaces.md).
 
 ## Local LLM integration
 
@@ -245,6 +245,7 @@ See [Settings, history, and storage](docs/settings-and-storage.md).
 - [Safety, conflicts, and rollback](docs/safety.md)
 - [Decision modes and autopilot](docs/autopilot.md)
 - [Project detection and checks](docs/project-detection.md)
+- [Multi-project workspaces](docs/multi-project-workspaces.md)
 - [Local LLM integration](docs/local-llm.md)
 - [Settings, history, and storage](docs/settings-and-storage.md)
 - [Interface localization](docs/i18n/README.md)

@@ -64,14 +64,14 @@ export function formatRunReport(run) {
   if (run.checks) {
     lines.push('', 'Checks:');
     for (const check of run.checks.results ?? []) {
-      lines.push(`- ${check.ok ? 'PASS' : 'FAIL'} ${check.name} (${formatDuration(check.durationMs)})`);
+      lines.push(`- ${check.ok ? 'PASS' : 'FAIL'} [${check.cwd === '.' ? 'Root' : `${check.cwd}/`}] ${check.name} (${formatDuration(check.durationMs)})`);
       if (!check.ok) appendCommandOutput(lines, check);
     }
   }
   if (run.commit) lines.push('', `Commit: ${run.commit.revision} ${run.commit.message}`);
   if (run.deploy) {
     lines.push('', `Deploy: ${run.deploy.skipped ? 'SKIPPED' : run.deploy.ok ? 'PASS' : 'FAIL'}`);
-    if (run.deploy.commandText) lines.push(`Command: ${run.deploy.commandText}`);
+    if (run.deploy.commandText) lines.push(`Directory: ${run.deploy.cwd === '.' ? 'Root' : `${run.deploy.cwd}/`}`, `Command: ${run.deploy.commandText}`);
     if (!run.deploy.ok && !run.deploy.skipped) appendCommandOutput(lines, run.deploy);
   }
   const autonomyDecisions = (run.decisions ?? []).filter((decision) => decision.gate);
@@ -134,10 +134,10 @@ export function formatFailureForClipboard(run) {
   ];
   if (run.plan?.counts) lines.push('', 'Applied plan:', ...formatCounts(run.plan.counts));
   if (failed) {
-    lines.push('', `Failed check: ${failed.name}`, `Exit code: ${failed.code ?? 'n/a'}`, '', 'Output:');
+    lines.push('', `Failed check: ${failed.name}`, `Directory: ${failed.cwd === '.' ? 'Root' : `${failed.cwd}/`}`, `Exit code: ${failed.code ?? 'n/a'}`, '', 'Output:');
     lines.push(([failed.stdout, failed.stderr].filter(Boolean).join('\n').trim() || '(no output)'));
   } else if (run.deploy && !run.deploy.ok && !run.deploy.skipped) {
-    lines.push('', `Failed deploy command: ${run.deploy.commandText}`, `Exit code: ${run.deploy.code ?? 'n/a'}`, '', 'Output:');
+    lines.push('', `Failed deploy directory: ${run.deploy.cwd === '.' ? 'Root' : `${run.deploy.cwd}/`}`, `Failed deploy command: ${run.deploy.commandText}`, `Exit code: ${run.deploy.code ?? 'n/a'}`, '', 'Output:');
     lines.push(([run.deploy.stdout, run.deploy.stderr].filter(Boolean).join('\n').trim() || '(no output)'));
   } else if (run.error) {
     lines.push('', `Error: ${run.error.message ?? run.error}`);
