@@ -198,11 +198,15 @@ function showSettingsHelp(controller) {
   const definition = currentDefinition(state);
   let title = definition.label;
   const sections = [];
+  const seen = new Set();
   const addSection = (...values) => {
-    const lines = values.flat().map((value) => String(value ?? '').trim()).filter(Boolean);
-    const unique = lines.filter((line, index) => lines.indexOf(line) === index);
-    if (unique.length) sections.push(unique);
+    const lines = values.flat()
+      .map((value) => String(value ?? '').trim())
+      .filter((line) => line && !seen.has(line));
+    for (const line of lines) seen.add(line);
+    if (lines.length) sections.push(lines);
   };
+  addSection(definition.description, definition.help);
   if (panel.focus === 'parameters') {
     const parameter = panelParameter(state) ?? definition;
     title = parameter.label ?? definition.label;
@@ -222,8 +226,6 @@ function showSettingsHelp(controller) {
     title = item.label ?? definition.label;
     addSection(item.description, item.help);
     if (item.disabledReason) addSection(item.disabledReason);
-  } else {
-    addSection(definition.description, definition.help);
   }
   addSection(settingsPageHelp(state, definition));
   const lines = sections.length

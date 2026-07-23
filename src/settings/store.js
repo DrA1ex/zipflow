@@ -95,7 +95,7 @@ export function saveSettings(settings, { allowClearToken = false } = {}) {
     const credential = await resolveCredential(stored ? [stored, credentials] : [backup, credentials]);
     const rawIncoming = settings && typeof settings === 'object' ? settings : {};
     const tokenWasProvided = Object.prototype.hasOwnProperty.call(rawIncoming, 'llmApiToken');
-    const incoming = normalizeSettings({ ...current, ...rawIncoming });
+    const incoming = normalizeSettings({ ...current, ...expandLegacyLanguagePatch(rawIncoming) });
     const requestedToken = tokenWasProvided ? incoming.llmApiToken : credential.token;
     const credentialChange = await applyCredentialChange({
       requestedToken,
@@ -120,7 +120,7 @@ export function updateSettings(patch, { allowClearToken = false, baseSettings = 
     ]);
     const current = normalizeSettings({ ...(baseSettings ?? {}), ...(stored ?? backup ?? {}) });
     const credential = await resolveCredential(stored ? [stored, credentials, baseSettings] : [backup, credentials, baseSettings]);
-    const nextPatch = { ...(patch ?? {}) };
+    const nextPatch = expandLegacyLanguagePatch(patch ?? {});
     const tokenWasProvided = Object.prototype.hasOwnProperty.call(nextPatch, 'llmApiToken');
     let token = credential.token;
     let secure = credential.secure;
@@ -143,6 +143,19 @@ export function updateSettings(patch, { allowClearToken = false, baseSettings = 
       secure,
     });
   });
+}
+
+
+function expandLegacyLanguagePatch(value) {
+  const patch = value && typeof value === 'object' ? { ...value } : {};
+  if (!Object.prototype.hasOwnProperty.call(patch, 'llmLanguage')) return patch;
+  if (!Object.prototype.hasOwnProperty.call(patch, 'llmSummaryLanguage')) {
+    patch.llmSummaryLanguage = patch.llmLanguage;
+  }
+  if (!Object.prototype.hasOwnProperty.call(patch, 'llmCommitLanguage')) {
+    patch.llmCommitLanguage = patch.llmLanguage;
+  }
+  return patch;
 }
 
 function enqueueSettingsWrite(task) {
