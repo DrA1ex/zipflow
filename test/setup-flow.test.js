@@ -74,6 +74,33 @@ test('custom checks ask for the command before the display name', async () => {
   assert.match(state.editorContext.instructions.join(' '), /display name on the next step/i);
 });
 
+
+test('Shift+Up and Shift+Down reorder workflow checks without toggling them', async () => {
+  const state = createInitialState();
+  state.project = projectFixture();
+  state.project.checks = [
+    { id: 'lint', name: 'Lint', description: 'npm run lint', selected: true },
+    { id: 'test', name: 'Unit tests', description: 'npm test', selected: true },
+    { id: 'types', name: 'Type check', description: 'npm run typecheck', selected: true },
+  ];
+  const controller = new ZipflowController(state);
+
+  await beginSetup(controller, { fresh: true });
+  await activateSetup(controller, 'use-project');
+  state.selectedIndex = state.menuItems.findIndex((item) => item.id === 'check:1');
+
+  await controller.handleKey({ name: 'up', shift: true });
+  assert.deepEqual(state.draft.checks.map((check) => check.id), ['test', 'lint', 'types']);
+  assert.equal(state.menuItems[state.selectedIndex].id, 'check:0');
+  assert.equal(state.draft.checks[0].selected, true);
+  assert.equal(state.status, 'Check moved up');
+
+  await controller.handleKey({ name: 'down', shift: true });
+  assert.deepEqual(state.draft.checks.map((check) => check.id), ['lint', 'test', 'types']);
+  assert.equal(state.menuItems[state.selectedIndex].id, 'check:1');
+  assert.equal(state.status, 'Check moved down');
+});
+
 test('radio selection stays on the activated item and Space selects it', async () => {
   const state = createInitialState();
   state.project = projectFixture();

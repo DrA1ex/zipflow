@@ -4,13 +4,14 @@
 
 ```text
 ↑ / ↓       move through choices
+Shift+↑/↓   reorder checks during workflow setup
 Space       toggle or select the current option
 Enter       select, toggle, continue, or submit an editor
             press twice on an empty archive field to scan the last-used folder
 Ctrl+Enter  insert a new line in the commit-message editor
 Esc         go back
 Tab         complete paths or switch Settings pane focus
-Shift+Tab   move Settings focus backward
+Shift+Tab   return to the parent path or move Settings focus backward
 ← / →       return from or open a Settings category
 Page Up     move or scroll one page upward
 Page Down   move or scroll one page downward
@@ -47,7 +48,7 @@ Workflow action lists render every choice as exactly one row. Descriptions are k
 
 The global footer is an untitled key-hint bar. It may include a short contextual value on the right, but it is not presented as a separate status panel.
 
-Context help opens as a native blocking Terlio overlay with the active accent, background dimming, and shadow. It wraps to the available terminal size, becomes scrollable when necessary, and closes with a click or `Esc`. Transient notifications use Zipflow's adaptive toast overlay: width follows the content within terminal bounds, detail text wraps, the tail is preserved, and clicking dismisses the notification.
+Context help opens as a native blocking Terlio overlay with the active accent, background dimming, and shadow. It wraps to the available terminal size, becomes scrollable when necessary, and closes with a click or `Esc`. Transient notifications use Zipflow's adaptive toast overlay: width follows the content up to 90 columns, longer detail text wraps vertically, the tail is preserved, and clicking dismisses the notification.
 
 Editors use muted placeholders with a visible cursor so examples cannot be mistaken for entered text.
 
@@ -82,7 +83,7 @@ In-app drag selection remains available while pointer controls are active. Click
 
 ## Recent archive discovery
 
-While the archive-path field is empty, the first `Enter` arms discovery and shows the exact remembered folder. Press `Enter` again within 1.5 seconds to scan that folder. Zipflow considers only `.zip` files modified during the previous 24 hours, reads their central directories without extraction, and offers only candidates whose internal project paths substantially overlap the current project. Selecting a candidate starts the normal archive security inspection. `Tab` continues to show the explicit recent-path list.
+While the archive-path field is empty, the first `Enter` arms discovery and shows the exact remembered folder. Press `Enter` again within 1.5 seconds to scan that folder. Zipflow considers only `.zip` files modified during the previous 24 hours, reads their central directories without extraction, and offers only candidates whose internal project paths substantially overlap the current project. Selecting a candidate starts the normal archive security inspection. `Tab` does nothing while the archive path is empty; recent archive discovery is intentionally reserved for the deliberate double-`Enter` action.
 
 If no archive folder has been remembered yet, the shortcut explains that one normal ZIP selection is required first.
 
@@ -92,11 +93,12 @@ Path suggestions appear in an overlay without moving the surrounding layout.
 
 - `Up` and `Down` select a suggestion.
 - `Tab` or `Enter` inserts the selected suggestion.
+- `Shift+Tab` returns to the parent directory in path editors and directory trees.
 - Selecting a ZIP fills the field but does not submit it.
 - Press `Enter` again to confirm the completed path.
 - Existing directories can expose **Use this directory** in directory pickers.
 
-Archive and output-path editors share this behavior. Project-path editors complete workspace-relative directories. In custom check and deployment editors, completion applies before `::`; selecting `web/` inserts `web/ :: ` so the shell command can be entered immediately afterward. Output paths add `.zip` when missing and ask separately before overwriting an existing destination.
+Archive and output-path editors share this behavior. An empty archive field never restores an old path through `Tab`. Project-path editors complete workspace-relative directories. In custom check and deployment editors, completion applies before `::`; selecting `web/` inserts `web/ :: ` so the shell command can be entered immediately afterward. Output paths add `.zip` when missing and ask separately before overwriting an existing destination.
 
 ## Diff review
 

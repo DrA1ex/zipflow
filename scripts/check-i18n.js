@@ -32,8 +32,24 @@ else {
     }
   }
 
-  const missing = findMissingStaticUiStrings(new Set([...englishMessages, ...englishPatterns]));
+  const canonical = new Set([...englishMessages, ...englishPatterns]);
+  const missing = findMissingStaticUiStrings(canonical);
   for (const entry of missing) fail(`${entry.file}: English catalog is missing ${JSON.stringify(entry.value)}`);
+
+  const strictStrings = findStrictUiStrings();
+  for (const entry of strictStrings.filter((item) => !canonical.has(item.value))) {
+    fail(`${entry.file}: English catalog is missing strict UI text ${JSON.stringify(entry.value)}`);
+  }
+  const russian = packs.get('ru');
+  if (russian) {
+    const russianCatalog = new Set([
+      ...Object.keys(russian.messages ?? {}),
+      ...(russian.patterns ?? []).map((entry) => entry.source),
+    ]);
+    for (const entry of strictStrings.filter((item) => !russianCatalog.has(item.value))) {
+      fail(`${entry.file}: Russian catalog is missing strict UI text ${JSON.stringify(entry.value)}`);
+    }
+  }
 }
 
 if (failed) process.exitCode = 1;
@@ -71,6 +87,45 @@ function shouldIgnore(value, technical) {
   return !value || value.includes('${') || technical.has(value)
     || value.startsWith('.') || value.startsWith('/') || value.startsWith('~')
     || (/^[A-Za-z0-9_.:/@-]+$/.test(value) && !value.includes(' '));
+}
+
+function findStrictUiStrings() {
+  const files = [
+    'src/app/setup-flow.js',
+    'src/app/setup-autonomy.js',
+    'src/app/setup-projects.js',
+    'src/app/setup-checks.js',
+    'src/app/setup-deploy.js',
+    'src/app/setup-git-init.js',
+    'src/app/setup-restart.js',
+    'src/app/settings-options.js',
+    'src/autonomy/policies.js',
+  ];
+  const technical = new Set([
+    'Git', 'Go', 'Python', 'Node.js', 'Swift', 'CMake · C/C++', 'CMake and C++',
+    'Ollama', 'LM Studio', 'English', 'Russian', 'French', 'German', 'Italian', 'Spanish',
+    'System', 'POST', 'GET', 'utf8', '[x]', '.gitignore', 'zipflow: apply {runId}',
+  ]);
+  const results = [];
+  const seen = new Set();
+  for (const filename of files) {
+    const source = readFileSync(path.resolve(filename), 'utf8');
+    for (const match of source.matchAll(/(['"])((?:\\.|(?!\1).)*)\1/g)) {
+      const value = match[2].replace(/\\(['"])/g, '$1').replace(/\\n/g, '\n');
+      if (strictUiStringIgnored(value, technical) || seen.has(value)) continue;
+      seen.add(value);
+      results.push({ file: filename.replace(/^src\//, ''), value });
+    }
+  }
+  return results;
+}
+
+function strictUiStringIgnored(value, technical) {
+  if (!value || !/[A-Za-z]/.test(value) || value.includes('${') || technical.has(value)) return true;
+  if (value.startsWith('.') || value.startsWith('/') || value.startsWith('~')) return true;
+  if (/^[a-z0-9:_-]+$/.test(value)) return true;
+  if (/^(?:node:|\.\.\/|[a-z-]+\.js$)/.test(value)) return true;
+  return !(value.includes(' ') || /^[A-Z][A-Za-z]+$/.test(value));
 }
 
 function collect(root) {

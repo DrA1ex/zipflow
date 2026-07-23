@@ -33,7 +33,7 @@ test('English is the canonical catalog for built-in language packs', async () =>
   const packs = await Promise.all(names.map(async (name) => JSON.parse(await readText(new URL(name, localeDirectory), 'utf8'))));
   const english = packs.find((pack) => pack.id === 'en');
   assert.ok(english);
-  assert.ok(Object.keys(english.messages).length >= 700);
+  assert.ok(Object.keys(english.messages).length >= 900);
   assert.ok(Object.entries(english.messages).every(([source, target]) => source === target));
   assert.ok((english.patterns ?? []).every((entry) => entry.source === entry.target));
 
@@ -43,6 +43,18 @@ test('English is the canonical catalog for built-in language packs', async () =>
     assert.deepEqual(Object.keys(pack.messages).filter((source) => !englishMessages.has(source)), [], pack.id);
     assert.deepEqual((pack.patterns ?? []).map((entry) => entry.source).filter((source) => !englishPatterns.has(source)), [], pack.id);
   }
+});
+
+
+test('Russian translates workflow policy and decision descriptions, not only their labels', () => {
+  const examples = new Map([
+    ['Review every archive plan and ask before overwriting local changes.', 'Проверять каждый план архива и спрашивать перед перезаписью локальных изменений.'],
+    ['Apply safe plans automatically and ask only when local work is affected.', 'Автоматически применять безопасные планы и спрашивать только при затрагивании локальной работы.'],
+    ['Back up and overwrite conflicting local files without asking each time.', 'Создавать резервную копию и перезаписывать конфликтующие локальные файлы без отдельного подтверждения.'],
+    ['Zipflow follows workflow rules and asks you at every unresolved decision.', 'Zipflow следует правилам процесса и запрашивает решение во всех неоднозначных случаях.'],
+    ['Keep each completed raw model response as a collapsed Activity block before the parsed result.', 'Сохранять каждый завершённый необработанный ответ модели как свёрнутый блок Activity перед обработанным результатом.'],
+  ]);
+  for (const [source, target] of examples) assert.equal(translate(source, {}, 'ru'), target);
 });
 
 test('pattern templates translate before variable interpolation', () => {

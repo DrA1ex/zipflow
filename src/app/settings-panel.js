@@ -12,7 +12,7 @@ import {
 } from './settings-model.js';
 import { ensureDefinitionData, ensureModels, refreshModels, resetModelCache } from './settings-model-list.js';
 import {
-  clearPathSuggestions, movePathSuggestion, refreshPathSuggestions, resetPathSuggestionInput, selectPathSuggestion,
+  clearPathSuggestions, movePathSuggestion, navigatePathSuggestionParent, refreshPathSuggestions, resetPathSuggestionInput, selectPathSuggestion,
 } from './path-suggestions.js';
 import { validateSettingValue } from './settings-validation.js';
 import { pageSelectableIndex } from './list-navigation.js';
@@ -485,12 +485,18 @@ async function handleModalKey(controller, key) {
     backSettingsEditor(controller);
     return true;
   }
+  const reverseTab = (key.name === 'tab' && key.shift) || key.name === 'backtab' || key.name === 'shift-tab';
+  if (modal.field.path && reverseTab) {
+    await navigatePathSuggestionParent(controller, { settingsModal: true });
+    controller.invalidate();
+    return true;
+  }
   if (modal.field.path && (key.name === 'up' || key.name === 'down') && state.pathSuggestions?.items?.length) {
     movePathSuggestion(state, key.name === 'up' ? -1 : 1);
     controller.invalidate();
     return true;
   }
-  if (modal.field.path && ['tab', 'enter'].includes(key.name) && state.pathSuggestions?.items?.length) {
+  if (modal.field.path && ((key.name === 'tab' && !key.shift) || key.name === 'enter') && state.pathSuggestions?.items?.length) {
     selectPathSuggestion(state, state.pathSuggestions.selectedIndex);
     const item = state.pathSuggestions.items[state.pathSuggestions.selectedIndex];
     state.editor.set(item.insert);

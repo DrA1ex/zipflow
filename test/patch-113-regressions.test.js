@@ -105,6 +105,7 @@ test('Zipflow toasts auto-size and wrap all detail text instead of clipping it',
   assert.ok(zipflowToastWidth([{ message: 'Saved' }], 100) < zipflowToastWidth([{
     message: 'A much longer notification title that needs additional room',
   }], 100));
+  assert.equal(zipflowToastWidth([{ message: 'x '.repeat(200) }], 160), 90);
 
   const state = createInitialState();
   state.project = projectFixture();

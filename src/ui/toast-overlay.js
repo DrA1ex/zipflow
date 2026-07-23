@@ -11,7 +11,7 @@ import {
 } from 'terlio.js';
 
 const MIN_TOAST_WIDTH = 28;
-const MAX_TOAST_WIDTH = 88;
+const MAX_TOAST_WIDTH = 90;
 const MAX_VISIBLE_TOASTS = 3;
 
 export function overlayManagerWithoutToasts(manager) {

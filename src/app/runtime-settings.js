@@ -11,6 +11,7 @@ const RUN_SETTING_KEYS = Object.freeze([
   'llmArchiveReview',
   'llmChangeDelivery',
   'llmFailureAnalysis',
+  'llmVerboseOutput',
   'llmModelLoadConfigs',
   'archivePolicy',
   'archiveDirectory',

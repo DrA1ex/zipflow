@@ -64,6 +64,27 @@ test('Tab opens a selected directory while a selected file completes the path', 
   assert.ok(state.pathSuggestions.items.some((item) => item.label === 'release.zip'));
 });
 
+
+test('Shift+Tab returns from an opened directory to its parent suggestions', async () => {
+  const root = await tempDir('zipflow-path-back-navigation-');
+  const nested = path.join(root, 'updates');
+  await mkdir(nested);
+  await writeFile(path.join(nested, 'release.zip'), 'zip');
+  const { state, controller } = controllerFixture(root);
+  controller.showEditor('archive-input', { label: 'ZIP archive path', purpose: 'archive-path' }, `${root}${path.sep}`);
+  state.pathSuggestionActive = true;
+  await refreshPathSuggestions(controller);
+  state.pathSuggestions.selectedIndex = state.pathSuggestions.items.findIndex((item) => item.label === 'updates/');
+
+  await controller.handleKey({ name: 'tab' });
+  assert.match(state.editor.value, /updates[\/]$/);
+
+  await controller.handleKey({ name: 'tab', shift: true });
+  assert.equal(state.editor.value, `${root}${path.sep}`);
+  assert.equal(state.status, 'Parent directory');
+  assert.ok(state.pathSuggestions.items.some((item) => item.label === 'updates/'));
+});
+
 test('selecting a ZIP completion only fills the editor until Enter is pressed again', async () => {
   const root = await tempDir('zipflow-path-select-only-');
   const archive = path.join(root, 'release.zip');

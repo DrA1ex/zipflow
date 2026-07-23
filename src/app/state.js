@@ -94,14 +94,21 @@ export function refreshMenuSearch(state, query) {
 }
 
 export function appendMessage(state, title, lines = [], tone = 'info', options = {}) {
+  return insertMessage(state, state.messages.length, title, lines, tone, options);
+}
+
+export function insertMessage(state, index, title, lines = [], tone = 'info', options = {}) {
   const normalized = Array.isArray(lines) ? lines : [String(lines)];
   const collapsible = options.collapsible ?? (tone !== 'project' && tone !== 'summary' && normalized.length > 3);
-  state.messages.push({
+  const message = {
     id: state.nextMessageId++, title, lines: normalized, tone,
     collapsedSummary: options.collapsedSummary ?? null,
     collapsible, collapsed: options.collapsed ?? collapsible, at: new Date().toISOString(),
-  });
+  };
+  const target = Math.max(0, Math.min(state.messages.length, Number(index) || 0));
+  state.messages.splice(target, 0, message);
   noteActivityChange(state);
+  return message;
 }
 
 export function upsertMessage(state, key, title, lines = [], tone = 'info', options = {}) {

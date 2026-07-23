@@ -112,7 +112,12 @@ test('Activity renders incremental local LLM progress and streamed text', () => 
   assert.match(output, /gemma-loaded · already loaded/);
   assert.match(output, /The model is analyzing the patch/);
   assert.match(output, /Checking tests/);
-  assert.match(output, /8 chunks/);
+  const rows = output.split('\n');
+  const detailRow = rows.findIndex((line) => line.includes('Streaming summary'));
+  assert.ok(detailRow >= 0, output);
+  assert.doesNotMatch(rows[detailRow], /%|█|▓|▒|░/u);
+  const safetyRow = rows.findIndex((line) => line.includes('Zipflow is preserving the original project'));
+  assert.ok(safetyRow > detailRow + 1, output);
 });
 
 test('run screens show the current five-step stage and typed Activity entries', () => {

@@ -113,6 +113,8 @@ Press `Esc` during review generation to cancel only that local LLM request. Arch
 
 Replay and autopilot simulation show the selected historical update and safety scope before opening the generation workspace. Neither changes project files, Git state, backups, source archives, or run history. Terlio 1.1.3 syntax highlighting is applied consistently to fenced code blocks and standalone JSON in live output, saved raw model responses, Activity, and historical replay. Zipflow infers JSON for partial structured streams so the response remains readable before the closing brace arrives.
 
+During generation, raw model output is streamed in Activity. By default that temporary block disappears when Zipflow produces its parsed result. Enable **Raw model responses → Keep raw responses** to retain the completed raw response as a collapsed Activity block immediately before the parsed explanation or review.
+
 ## Autopilot decisions
 
 Autopilot uses a separate strict structured contract. Zipflow supplies the current gate, state hashes, bounded context, and exact allowed actions. Invalid actions, low effective confidence, unavailable models, and state drift cause a fallback or return to manual control.

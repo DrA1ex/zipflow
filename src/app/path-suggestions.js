@@ -1,38 +1,10 @@
 import path from 'node:path';
-import { exists } from '../utils/fs.js';
 import { suggestPathEntries } from '../utils/paths.js';
 import { outputPathForDirectory } from '../export/output-path.js';
 import { moveSelectableIndex } from './list-navigation.js';
 import { commandPrefix } from '../project/command-spec.js';
 
 const PATH_SCREENS = new Set(['project-path-input', 'project-entry-path', 'custom-check-command', 'deploy-command', 'archive-input', 'export-path']);
-
-export async function showRecentArchiveSuggestions(controller) {
-  const { state } = controller;
-  const recent = state.settings?.recentArchivePaths ?? [];
-  const available = [];
-  for (const archivePath of recent) {
-    if (await exists(archivePath)) available.push({
-      id: `recent:${archivePath}`,
-      label: path.basename(archivePath),
-      insert: archivePath,
-      isDirectory: false,
-      submit: true,
-    });
-  }
-  if (!available.length) return false;
-  state.pathSuggestionActive = true;
-  state.pathSuggestions = {
-    requestId: 0,
-    loading: false,
-    items: available,
-    selectedIndex: 0,
-    owner: 'archive-input',
-  };
-  state.status = 'Recent archives · Enter selects';
-  controller.invalidate();
-  return true;
-}
 
 export function isPathEditorScreen(screen) {
   return PATH_SCREENS.has(screen);
@@ -83,6 +55,35 @@ export async function refreshPathSuggestions(controller, { settingsModal = false
     state.pathSuggestions = { requestId, loading: false, items: [], selectedIndex: 0, owner: spec.owner, error: error.message };
   }
   controller.invalidate();
+}
+
+
+export async function navigatePathSuggestionParent(controller, { settingsModal = false } = {}) {
+  const { state } = controller;
+  if (!settingsModal && !isPathEditorScreen(state.screen)) return false;
+  const spec = pathSuggestionSpec(state, settingsModal);
+  if (!spec) return false;
+  const current = spec.kind === 'command-directory' ? commandPrefix(state.editor.value) : state.editor.value;
+  const relative = spec.kind === 'workspace-relative' || spec.kind === 'command-directory';
+  const parent = parentPathInput(current, { relative });
+  if (parent === null || parent === current) return false;
+  state.editor.set(parent);
+  state.pathSuggestionActive = Boolean(String(parent).trim());
+  if (state.pathSuggestionActive) await refreshPathSuggestions(controller, { settingsModal });
+  else clearPathSuggestions(state);
+  state.status = 'Parent directory';
+  return true;
+}
+
+function parentPathInput(value, { relative = false } = {}) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return null;
+  const separator = raw.includes('\\') && !raw.includes('/') ? '\\' : '/';
+  const withoutTrailing = raw.replace(/[\\/]+$/u, '');
+  if (!withoutTrailing) return null;
+  const slash = Math.max(withoutTrailing.lastIndexOf('/'), withoutTrailing.lastIndexOf('\\'));
+  if (slash >= 0) return withoutTrailing.slice(0, slash + 1);
+  return relative ? `.${separator}` : null;
 }
 
 export function clearPathSuggestions(state) {

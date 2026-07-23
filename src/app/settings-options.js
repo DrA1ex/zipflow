@@ -88,6 +88,10 @@ export function settingsChoices(state, parameter) {
     option(parameter, 'same-context', 'Continue change context', 'Explain the failure using the previous change review summary as context.'),
     option(parameter, 'new-context', 'New context', 'Explain only the failed command and its output in a fresh request.'),
   ];
+  if (parameter.settingId === 'llmVerboseOutput') return [
+    option(parameter, false, 'Hide raw responses', 'Show streamed model output only while generation is active, then keep only Zipflow’s parsed result.'),
+    option(parameter, true, 'Keep raw responses', 'Keep each completed raw model response as a collapsed Activity block before the parsed result.'),
+  ];
   if (parameter.settingId === 'backupRetentionPolicy') return [
     option(parameter, 'all', 'Keep all backups', 'Never remove backups automatically. Manual Clear now remains available.'),
     option(parameter, 'limits', 'Keep backups within limits', 'Remove oldest backups after successful runs when age or total-size limits are exceeded.'),
@@ -165,6 +169,11 @@ function localLlmParameters(state) {
     },
     {
       ...choiceParameter('llmFailureAnalysis', 'Failed checks', failureAnalysisLabel(state.settings.llmFailureAnalysis), 'Optionally ask the model to explain failed checks after they run.'),
+      disabled,
+      disabledReason: 'Enable a local LLM provider first.',
+    },
+    {
+      ...choiceParameter('llmVerboseOutput', 'Raw model responses', verboseOutputLabel(state.settings.llmVerboseOutput), 'Control whether completed raw model output remains in Activity after Zipflow parses it.'),
       disabled,
       disabledReason: 'Enable a local LLM provider first.',
     },
@@ -496,6 +505,10 @@ function failureAnalysisLabel(value) {
   if (value === 'same-context') return 'Continue change context';
   if (value === 'new-context') return 'New context';
   return 'Disabled';
+}
+
+function verboseOutputLabel(value) {
+  return value ? 'Keep raw responses' : 'Hide raw responses';
 }
 
 function archivePolicyLabel(value) {

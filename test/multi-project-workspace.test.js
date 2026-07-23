@@ -121,11 +121,13 @@ test('checks and deployment commands run from configured subdirectories', async 
   try {
     await mkdir(path.join(root, 'web'), { recursive: true });
     await write(root, 'web/valid.js', 'export const value = 1;\n');
+    await write(root, 'web/cwd-marker.txt', 'nested-workdir\n');
     const executable = JSON.stringify(process.execPath);
+    const cwdProbe = `${executable} -e ${JSON.stringify("const fs=require('fs'); console.log(fs.readFileSync('cwd-marker.txt','utf8').trim()); console.log(process.cwd());")}`;
     const workflow = {
       checks: [{
         id: 'cwd-check', name: 'CWD check', kind: 'custom', type: 'custom', selected: true, required: true,
-        commandText: `${executable} -e "console.log(process.cwd())"`, cwd: 'web', timeoutMs: 10_000,
+        commandText: cwdProbe, cwd: 'web', timeoutMs: 10_000,
       }, {
         id: 'web-syntax', name: 'Web syntax', kind: 'node-syntax', type: 'syntax', selected: true, required: true,
         cwd: 'web', timeoutMs: 10_000,
@@ -134,15 +136,17 @@ test('checks and deployment commands run from configured subdirectories', async 
 
     const checks = await runChecks({ workflow, projectPath: root, changedPaths: ['web/valid.js'] });
     assert.equal(checks.ok, true);
+    assert.match(checks.results[0].stdout, /nested-workdir/);
     assert.match(checks.results[0].stdout, new RegExp(`${path.sep}web`));
     assert.equal(checks.results[1].ok, true);
     assert.equal(checks.results[0].cwd, 'web');
 
     const deploy = await runDeploy({
       projectPath: root,
-      deploy: { commandText: `${executable} -e "console.log(process.cwd())"`, cwd: 'web', timeoutMs: 10_000 },
+      deploy: { commandText: cwdProbe, cwd: 'web', timeoutMs: 10_000 },
     });
     assert.equal(deploy.ok, true);
+    assert.match(deploy.stdout, /nested-workdir/);
     assert.match(deploy.stdout, new RegExp(`${path.sep}web`));
   } finally {
     await cleanup();

@@ -7,7 +7,7 @@ import {
   deleteLlmApiToken, readLlmApiToken, SecureCredentialStoreError, writeLlmApiToken,
 } from '../security/credential-store.js';
 
-export const SETTINGS_VERSION = 16;
+export const SETTINGS_VERSION = 17;
 export const THEME_NAMES = Object.keys(themes);
 export const LLM_PROVIDERS = ['disabled', 'ollama', 'lmstudio'];
 export const LLM_LANGUAGES = ['English', 'Russian', 'German', 'French', 'Spanish', 'Chinese', 'Japanese'];
@@ -34,6 +34,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   llmArchiveReview: 'disabled',
   llmChangeDelivery: 'adaptive',
   llmFailureAnalysis: 'disabled',
+  llmVerboseOutput: false,
   llmDecisionCompatibility: null,
   llmDecisionCompatibilityByModel: {},
   llmModelLoadConfigs: {},
@@ -260,6 +261,7 @@ export function normalizeSettings(settings) {
   if (!LLM_ARCHIVE_REVIEW_MODES.includes(value.llmArchiveReview)) value.llmArchiveReview = DEFAULT_SETTINGS.llmArchiveReview;
   if (!LLM_CHANGE_DELIVERY_MODES.includes(value.llmChangeDelivery)) value.llmChangeDelivery = DEFAULT_SETTINGS.llmChangeDelivery;
   if (!LLM_FAILURE_ANALYSIS_MODES.includes(value.llmFailureAnalysis)) value.llmFailureAnalysis = DEFAULT_SETTINGS.llmFailureAnalysis;
+  value.llmVerboseOutput = value.llmVerboseOutput === true;
   value.llmDecisionCompatibilityByModel = normalizeCompatibilityMap(value.llmDecisionCompatibilityByModel);
   const legacyCompatibility = normalizeDecisionCompatibility(value.llmDecisionCompatibility, value);
   if (legacyCompatibility) value.llmDecisionCompatibilityByModel[modelIdentityKey(value.llmProvider, value.llmModel)] = legacyCompatibility;

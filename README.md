@@ -182,7 +182,7 @@ Press `Esc` from the archive prompt to open the project menu. Depending on the c
 - **Create ZIP**
 - **Exit**
 
-Global settings are available with `Ctrl+B`. **Change workflow** can edit individual sections or choose **Start over** to build a replacement from fresh project recommendations. The saved workflow and its selected projects remain active until the replacement reaches Review and save; leaving setup earlier restores the saved configuration. Workflow setup and Change Workflow use compact one-row choices; descriptions stay in the fixed context dock. Every mouse-wheel event moves the active menu, Settings list, path suggestion list, help view, Activity view, diff, or replay workspace by exactly one row. Wheel navigation stops at list boundaries; keyboard navigation may wrap where documented. Arrows, Page Up/Page Down, Home, End, and `/` search remain available for longer navigation. Transient notifications use an adaptive overlay that grows within the terminal width and wraps long detail text instead of clipping it.
+Global settings are available with `Ctrl+B`. **Change workflow** can edit individual sections or choose **Start over** to build a replacement from fresh project recommendations. The saved workflow and its selected projects remain active until the replacement reaches Review and save; leaving setup earlier restores the saved configuration. Workflow setup and Change Workflow use compact one-row choices; descriptions stay in the fixed context dock. Every mouse-wheel event moves the active menu, Settings list, path suggestion list, help view, Activity view, diff, or replay workspace by exactly one row. Wheel navigation stops at list boundaries; keyboard navigation may wrap where documented. Arrows, Page Up/Page Down, Home, End, and `/` search remain available for longer navigation. Transient notifications use an adaptive overlay capped at 90 columns; longer text wraps vertically instead of clipping. Archive inspection and other determinate work use Terlio progress bars on a dedicated line below the current detail.
 
 Create ZIP safety review keeps small flagged sets readable: up to five files are shown as full project-relative paths, and larger trees collapse directory chains that contain only one flagged file. Credential-like source filenames such as `credential-store.js` are not treated as secret files by name alone; JSON-like and extensionless credential files remain review candidates.
 
@@ -190,11 +190,13 @@ Create ZIP safety review keeps small flagged sets readable: up to five files are
 
 ```text
 ↑ / ↓       move through choices
+Shift+↑/↓   reorder checks during workflow setup
 Space       toggle or select the current option
 Enter       open, continue, or submit; twice on an empty archive field scans the remembered folder
 Ctrl+Enter  insert a newline in commit text; multiline paste never submits
 Esc         go back or open the project menu
-Tab         complete paths or switch Settings panes
+Tab         complete paths or switch Settings panes; does nothing on an empty archive path
+Shift+Tab   return to the parent directory during path completion
 Page Up     move or scroll one page upward
 Page Down   move or scroll one page downward
 Home        move to the first item where supported

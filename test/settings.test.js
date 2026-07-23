@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { renderToString } from 'terlio.js';
 import { tempDir } from '../test-support/helpers.js';
-import { writeFile, readFile } from 'node:fs/promises';
+import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { DEFAULT_SETTINGS, LLM_LANGUAGES, loadSettings, normalizeSettings, saveSettings, settingsBackupPath, settingsPath } from '../src/settings/store.js';
 import { createInitialState } from '../src/app/state.js';
 import { renderZipflow } from '../src/ui/render.js';
@@ -256,6 +256,15 @@ test('archive storage parameters stay on one page and input values open in a mod
   assert.equal(state.screen, 'settings');
   assert.equal(state.settingsPanel.modal.field.id, 'archiveDirectory');
 
+  const nested = path.join(state.project.root, 'archives', 'nested');
+  await mkdir(nested, { recursive: true });
+  state.editor.set(`${nested}${path.sep}`);
+  state.pathSuggestionActive = true;
+  const modalOutput = renderToString(renderZipflow({ state, width: 110, height: 30 }), { width: 110, height: 30 });
+  assert.match(modalOutput, /Shift\+Tab up/);
+  await handleSettingsKey(controller, { name: 'backtab' });
+  assert.equal(state.editor.value, `${path.dirname(nested)}${path.sep}`);
+
   const target = path.join(await tempDir('zipflow-settings-storage-'), 'new-folder');
   state.editor.set(target);
   await submitSettingsEditor(controller);
@@ -332,12 +341,13 @@ test('archive review mode is selected from the Local LLM page and preserves the 
 test('Local LLM settings expose delivery and failed-check analysis choices', async () => withSettingsHome(async () => {
   const { state, controller } = await settingsController({
     llmProvider: 'ollama', llmModel: 'qwen', llmChangeDelivery: 'chunked',
-    llmFailureAnalysis: 'same-context',
+    llmFailureAnalysis: 'same-context', llmVerboseOutput: true,
   });
   await selectCategory(controller, 'localLlm');
   let view = settingsViewModel(state);
   assert.match(view.parameters.find((item) => item.id === 'llmChangeDelivery').value, /File-by-file/);
   assert.match(view.parameters.find((item) => item.id === 'llmFailureAnalysis').value, /Continue/);
+  assert.match(view.parameters.find((item) => item.id === 'llmVerboseOutput').value, /Keep raw/);
 
   view = await openParameter(controller, 'llmChangeDelivery');
   assert.equal(view.choices[view.choiceIndex].id, 'llmChangeDelivery:chunked');
@@ -353,6 +363,13 @@ test('Local LLM settings expose delivery and failed-check analysis choices', asy
   assert.equal(view.choices[view.choiceIndex].id, 'llmFailureAnalysis:same-context');
   assert.deepEqual(view.choices.map((item) => item.id), [
     'llmFailureAnalysis:disabled', 'llmFailureAnalysis:same-context', 'llmFailureAnalysis:new-context',
+  ]);
+  await handleSettingsKey(controller, { name: 'escape' });
+
+  view = await openParameter(controller, 'llmVerboseOutput');
+  assert.equal(view.choices[view.choiceIndex].id, 'llmVerboseOutput:true');
+  assert.deepEqual(view.choices.map((item) => item.id), [
+    'llmVerboseOutput:false', 'llmVerboseOutput:true',
   ]);
 }));
 
@@ -394,4 +411,9 @@ test('settings recover from the backup file without resetting tokens or archive 
 
 test('rollback backup storage defaults to 2 GB', () => {
   assert.equal(DEFAULT_SETTINGS.backupMaxBytes, 2_000_000_000);
+});
+
+test('completed raw LLM responses are hidden by default', () => {
+  assert.equal(DEFAULT_SETTINGS.llmVerboseOutput, false);
+  assert.equal(normalizeSettings({ version: 16 }).llmVerboseOutput, false);
 });

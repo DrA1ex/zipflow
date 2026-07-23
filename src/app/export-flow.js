@@ -81,11 +81,11 @@ export function handleExportShortcut(controller, key) {
     requestTreeToggle(controller, selected.path, state.selectedIndex);
     return true;
   }
-  if (key.name === 'tab' && key.shift) {
+  if ((key.name === 'tab' && key.shift) || key.name === 'backtab' || key.name === 'shift-tab') {
     if (leaveTreeDirectory(state.exportDraft)) showExportFiles(controller, 0);
     return true;
   }
-  if (key.name === 'tab') {
+  if (key.name === 'tab' && !key.shift) {
     state.selectedIndex = nextDirectoryItemIndex(state.menuItems, state.selectedIndex, 1);
     return true;
   }

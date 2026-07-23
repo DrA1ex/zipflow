@@ -93,6 +93,18 @@ export function handleChecksShortcut(controller, key) {
   const { state } = controller;
   if (state.screen !== 'setup-checks') return false;
   const selected = state.menuItems[state.selectedIndex];
+  if (key.shift && (key.name === 'up' || key.name === 'down') && selected?.id.startsWith('check:')) {
+    const index = Number(selected.id.slice(6));
+    const direction = key.name === 'up' ? -1 : 1;
+    const target = Math.max(0, Math.min(state.draft.checks.length - 1, index + direction));
+    if (target !== index) {
+      const [moved] = state.draft.checks.splice(index, 1);
+      state.draft.checks.splice(target, 0, moved);
+      showChecksStep(controller, target);
+      controller.setStatus(direction < 0 ? 'Check moved up' : 'Check moved down');
+    }
+    return true;
+  }
   if (key.name === 'space' && selected?.id.startsWith('check:')) {
     toggleCheck(state, Number(selected.id.slice(6)));
     showChecksStep(controller, state.selectedIndex);

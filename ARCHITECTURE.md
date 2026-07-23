@@ -48,7 +48,7 @@ Owns the interactive state machine.
 - `settings-model-replay.js` owns the shared read-only historical replay workspace, scrolling, copy, and diagnostics behavior.
 - `settings-autopilot-replay.js` reconstructs historical decision gates and compares Guarded and Full autopilot without executing any action.
 - `settings-storage.js` owns source-archive and backup statistics, cleanup, and retention actions.
-- `llm-progress.js` maps streaming model events into Activity and retains the completed raw reasoning/answer as a collapsed durable block.
+- `llm-progress.js` maps streaming model events into Activity. Completed raw reasoning/answers are discarded by default or inserted as collapsed Activity blocks before parsed results when verbose model output is enabled.
 - `archive-policy.js` applies the global source-ZIP disposition after a run is kept.
 - `export-flow.js` owns the interactive Create ZIP workflow.
 - `state.js` contains UI state helpers.
@@ -368,9 +368,10 @@ Unit and integration tests use temporary projects and Git repositories. Regressi
 - exact rollback of pre-run dirty content;
 - path-scoped commits;
 - staged-index protection;
-- deploy command execution;
+- deploy command execution from the configured workspace-relative directory;
+- check command execution from the configured workspace-relative directory;
 - child-process cleanup;
-- custom-check prompt order;
+- custom-check prompt order and Shift+Up/Shift+Down ordering;
 - stable radio selection and Space activation;
 - global settings persistence, schema migration, interface-language discovery/validation/fallback, pane-focus navigation, section/stat rendering, and compact descriptions;
 - LM Studio and Ollama model metadata, atomic model selection, unload/reload configuration, separate prompt/summary/commit languages, compatibility tests, read-only historical replay, context budgeting, structural patch truncation, adaptive/full/path-list/file-batch delivery, optional authorization, native and OpenAI-compatible streams, readable wrapped progress, context/OOM retries, reasoning-only responses, hidden repair requests, failure explanations, and diagnostics;
@@ -388,7 +389,7 @@ Unit and integration tests use temporary projects and Git repositories. Regressi
 - unified and side-by-side file diff rendering with hunk navigation;
 - compact workflow home, five-stage run progress, duplicate/old/shrinking archive warnings, performance analytics, and persisted run history;
 - ZIP preview and post-create actions;
-- typed Activity and TUI rendering;
+- typed Activity and TUI rendering, Terlio progress bars on dedicated rows, 90-column wrapping toasts, and forward/reverse path navigation;
 - operation-aware first/second `Ctrl+C`, critical-section cancellation, child-process force stop, and stable cancellation recovery;
 - Manual, Guarded, and Full autonomy profiles, historical Guarded-versus-Full simulation, structured allowlists, confidence degradation, repair/fallback, state drift, paused decisions, execution-state audit, and restart recovery;
 - safe amend/squash candidate generation limited to eligible unpublished Zipflow commits;

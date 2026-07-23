@@ -10,7 +10,7 @@ import {
   followReplayLatest, handleModelReplayWorkspaceKey, scrollReplayWorkspace,
   startHistoricalModelReplay, updateReplayWorkspace,
 } from '../src/app/settings-model-replay.js';
-import { beginCreateZip, activateExport } from '../src/app/export-flow.js';
+import { beginCreateZip, activateExport, handleExportShortcut } from '../src/app/export-flow.js';
 import { activateChecks, showChecksStep } from '../src/app/setup-checks.js';
 import { settingsDefinitions, settingsParameters } from '../src/app/settings-options.js';
 import { openModelConfiguration } from '../src/app/settings-model.js';
@@ -168,6 +168,29 @@ test('workflow check toggles keep focus on the same checkbox', () => {
   assert.equal(state.draft.checks[1].selected, true);
   assert.equal(state.selectedIndex, 1);
   assert.equal(state.menuItems[state.selectedIndex].id, 'check:1');
+});
+
+
+test('directory trees accept Backtab as Shift+Tab and return to the parent directory', () => {
+  const state = createInitialState();
+  state.project = projectFixture();
+  state.exportDraft = {
+    treeDirectory: 'src/nested',
+    treeOrigin: 'preview',
+    treeSensitiveOnly: false,
+    paths: ['src/nested/file.js'],
+    selectedPaths: new Set(['src/nested/file.js']),
+    sensitive: [],
+    sensitiveMap: new Map(),
+  };
+  state.screen = 'export-files';
+  state.menuItems = [{ id: 'file', path: 'src/nested/file.js', kind: 'file' }];
+  state.selectedIndex = 0;
+  const controller = new ZipflowController(state);
+  controller.invalidate = () => {};
+
+  assert.equal(handleExportShortcut(controller, { name: 'backtab' }), true);
+  assert.equal(state.exportDraft.treeDirectory, 'src');
 });
 
 test('storage settings are separate focused categories without selectable section rows', () => {

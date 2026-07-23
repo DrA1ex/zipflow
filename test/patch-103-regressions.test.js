@@ -4,7 +4,7 @@ import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createOverlayManager, renderToString, stripAnsi } from 'terlio.js';
-import { createInitialState } from '../src/app/state.js';
+import { appendMessage, createInitialState } from '../src/app/state.js';
 import { ZipflowController } from '../src/app/controller.js';
 import { initializePlanSelections, selectedPlanCounts, selectedPlanItems } from '../src/app/plan-selection.js';
 import { activateReview, handleReviewKey, showPlanReview } from '../src/app/run-review.js';
@@ -109,15 +109,36 @@ test('partial settings updates preserve an existing LLM token and archive policy
   }
 });
 
-test('completed LLM streaming is retained as a collapsed raw response block', () => {
+test('completed LLM streaming is removed after the parsed result by default', () => {
   const { state, controller } = fixtureController();
-  state.runSettings = { ...DEFAULT_SETTINGS, llmProvider: 'lmstudio', llmModel: 'gemma' };
+  state.runSettings = {
+    ...DEFAULT_SETTINGS, llmProvider: 'lmstudio', llmModel: 'gemma', llmVerboseOutput: false,
+  };
   const progress = beginLlmProgress(controller);
   progress.onEvent({ type: 'chunk', chunks: 2, reasoning: 'thinking details', content: 'final model output', reasoningDelta: 'thinking', contentDelta: 'final' });
+  appendMessage(state, 'Local LLM error explanation', ['Parsed explanation'], 'warning');
   progress.stop();
 
-  const raw = state.messages.find((item) => item.title === 'Raw LLM response');
-  assert.ok(raw);
+  assert.equal(state.llmRuntime, null);
+  assert.equal(state.messages.some((item) => item.title === 'Raw LLM response'), false);
+  assert.equal(state.messages.at(-1).title, 'Local LLM error explanation');
+});
+
+test('verbose LLM output is retained as a collapsed raw block before the parsed result', () => {
+  const { state, controller } = fixtureController();
+  state.runSettings = {
+    ...DEFAULT_SETTINGS, llmProvider: 'lmstudio', llmModel: 'gemma', llmVerboseOutput: true,
+  };
+  const progress = beginLlmProgress(controller);
+  progress.onEvent({ type: 'chunk', chunks: 2, reasoning: 'thinking details', content: 'final model output', reasoningDelta: 'thinking', contentDelta: 'final' });
+  appendMessage(state, 'Local LLM error explanation', ['Parsed explanation'], 'warning');
+  progress.stop();
+
+  const rawIndex = state.messages.findIndex((item) => item.title === 'Raw LLM response');
+  const parsedIndex = state.messages.findIndex((item) => item.title === 'Local LLM error explanation');
+  const raw = state.messages[rawIndex];
+  assert.ok(rawIndex >= 0);
+  assert.ok(rawIndex < parsedIndex);
   assert.equal(raw.collapsible, true);
   assert.equal(raw.collapsed, true);
   assert.match(raw.lines.join('\n'), /thinking details/);

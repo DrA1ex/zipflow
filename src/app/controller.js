@@ -36,8 +36,8 @@ import {
 import { activateHistory, backHistory, handlesHistoryScreen, repeatLastArchive, showRunHistory } from './history-flow.js';
 import { activateManual, backManual, beginManualChecks, beginManualDeploy, handlesManualScreen } from './manual-flow.js';
 import {
-  acceptPathSuggestion, clearPathSuggestions, isPathEditorScreen, movePathSuggestion,
-  refreshPathSuggestions, resetPathSuggestionInput, selectPathSuggestion, showRecentArchiveSuggestions,
+  acceptPathSuggestion, clearPathSuggestions, isPathEditorScreen, movePathSuggestion, navigatePathSuggestionParent,
+  refreshPathSuggestions, resetPathSuggestionInput, selectPathSuggestion,
 } from './path-suggestions.js';
 import { isEditorScreen, isPagedMenuScreen, isSearchableScreen, shouldRecordChoice } from './controller-screen-rules.js';
 import { InputActionGate } from './input-action-gate.js';
@@ -427,9 +427,6 @@ export class ZipflowController {
   async handleEditorKey(key) {
     if (key.name === 'escape') return this.back();
     const pathEditor = isPathEditorScreen(this.state.screen);
-    if (this.state.screen === 'archive-input' && key.name === 'tab' && !String(this.state.editor.value ?? '').trim()) {
-      if (await showRecentArchiveSuggestions(this)) return this.invalidate();
-    }
     const pastedText = pastedTextFromKey(key);
     if (pastedText !== null) {
       const previousValue = this.state.editor.value;
@@ -443,11 +440,16 @@ export class ZipflowController {
     if (this.state.screen === 'archive-input' && key.name === 'enter' && !key.ctrl && !String(this.state.editor.value ?? '').trim() && !this.state.pathSuggestions?.items?.length) {
       if (await handleEmptyArchiveEnter(this)) return this.invalidate();
     }
+    const reverseTab = (key.name === 'tab' && key.shift) || key.name === 'backtab' || key.name === 'shift-tab';
+    if (pathEditor && reverseTab) {
+      if (await navigatePathSuggestionParent(this)) this.invalidate();
+      return;
+    }
     if (pathEditor && (key.name === 'up' || key.name === 'down') && this.state.pathSuggestions?.items?.length) {
       movePathSuggestion(this.state, key.name === 'up' ? -1 : 1);
       return this.invalidate();
     }
-    if (pathEditor && (key.name === 'tab' || key.name === 'enter') && this.state.pathSuggestions?.items?.length) {
+    if (pathEditor && ((key.name === 'tab' && !key.shift) || key.name === 'enter') && this.state.pathSuggestions?.items?.length) {
       await acceptPathSuggestion(this, { submit: () => this.inputActions.run(() => this.submitCurrentEditor()), submitSelected: false });
       return this.invalidate();
     }

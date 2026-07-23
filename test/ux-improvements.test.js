@@ -148,12 +148,12 @@ test('context help uses a blocking Terlio help overlay and never adds an Activit
   assert.equal(state.overlays.top(), null);
 });
 
-test('empty archive input exposes existing recent archives only after explicit Tab', async () => {
+test('Tab does nothing while the archive path is empty', async () => {
   const archive = path.join(await tempDir('zipflow-recent-archive-'), 'recent.zip');
   await writeFile(archive, 'zip placeholder');
   const state = createInitialState();
   state.project = projectFixture();
-  state.settings = { ...DEFAULT_SETTINGS, recentArchivePaths: [archive, '/missing/archive.zip'] };
+  state.settings = { ...DEFAULT_SETTINGS, recentArchivePaths: [archive] };
   const controller = new ZipflowController(state);
   controller.invalidate = () => {};
 
@@ -161,8 +161,10 @@ test('empty archive input exposes existing recent archives only after explicit T
   assert.equal(state.pathSuggestions, null);
   await controller.handleKey({ name: 'tab' });
 
-  assert.deepEqual(state.pathSuggestions.items.map((item) => item.insert), [archive]);
-  assert.equal(state.pathSuggestionActive, true);
+  assert.equal(state.editor.value, '');
+  assert.equal(state.pathSuggestions, null);
+  assert.equal(state.pathSuggestionActive, false);
+  assert.equal(state.archiveDiscoveryTap, null);
 });
 
 test('active-run settings guidance is confined to the footer while Settings is open', () => {

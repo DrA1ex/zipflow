@@ -308,7 +308,8 @@ function renderBusy(state, height, theme) {
     theme,
     children: [
       Text(color(theme, 'title', t(state, state.busyLabel)), { wrap: true }),
-      ProgressBar({ value: state.progress.value, total: Math.max(1, state.progress.total), width: 44, label: state.progress.detail || undefined, theme }),
+      ...(state.progress.detail ? [Text(color(theme, 'textMuted', t(state, state.progress.detail)), { wrap: true })] : []),
+      ProgressBar({ value: state.progress.value, total: Math.max(1, state.progress.total), width: 44, theme }),
       Text(color(theme, 'textMuted', t(state, 'Zipflow is preserving the project state while this step runs.')), { wrap: true }),
     ],
   });
@@ -434,6 +435,7 @@ function screenTitle(state) {
 
 function footerHints(state) {
   if (state.screen === 'settings') {
+    if (state.settingsPanel?.modal?.field?.path) return ['Tab open', 'Shift+Tab up', '↑/↓ choose', 'Enter save', 'Esc cancel'];
     if (state.settingsPanel?.modal) return ['Enter save', 'Esc cancel', 'Ctrl+B close'];
     if (state.settingsPanel?.choiceSearch?.active) return ['Type to filter', 'Enter keep', 'Esc clear/close'];
     return ['↑/↓', 'Enter', '/ models', 'Ctrl+B close'];
@@ -442,9 +444,10 @@ function footerHints(state) {
   if (state.llmAbortController) return ['Esc cancel LLM', 'Ctrl+C stop'];
   if (state.busy || ['checks-running', 'deploy-running', 'manual-checks-running', 'manual-deploy-running'].includes(state.screen)) return ['Ctrl+C stop'];
   if (state.menuSearch?.active) return ['Type to filter', 'Enter keep', 'Esc clear/close'];
+  if (state.screen === 'setup-checks') return ['↑/↓ choose', 'Shift+↑/↓ move', 'Space toggle', 'Enter select', '? help'];
   if (isEditorScreen(state.screen)) {
     if (state.screen === 'commit-message') return ['Enter commit', 'Ctrl+Enter new line', 'Esc back'];
-    if (['archive-input', 'project-path-input', 'project-entry-path', 'custom-check-command', 'deploy-command', 'export-path'].includes(state.screen)) return ['Tab complete', '↑/↓ choose', 'Enter confirm', 'Esc back'];
+    if (['archive-input', 'project-path-input', 'project-entry-path', 'custom-check-command', 'deploy-command', 'export-path'].includes(state.screen)) return ['Tab open', 'Shift+Tab up', '↑/↓ choose', 'Enter confirm', 'Esc back'];
     return ['Enter confirm', 'Esc back'];
   }
   const report = state.run?.id ? ['G report'] : [];
@@ -464,7 +467,7 @@ function headerStats(state) {
 
 function preferredPromptHeight(state, width = 80, mainHeight = 20) {
   const compactMaximum = Math.max(7, Math.floor(mainHeight * 0.62));
-  if (state.busy) return Math.min(compactMaximum, 8);
+  if (state.busy) return Math.min(compactMaximum, 9);
   if (state.screen === 'setup-review') return Math.min(compactMaximum, 8);
   if (['checks-running', 'manual-checks-running'].includes(state.screen)) {
     return Math.min(compactMaximum, Math.max(9, Math.min(12, (state.checkRuntime?.checks?.length ?? 0) + 5)));

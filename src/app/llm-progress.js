@@ -1,10 +1,13 @@
 import { color, wrapText } from 'terlio.js';
 import { activeRunSettings } from './runtime-settings.js';
+import { insertMessage } from './state.js';
 import { inferLanguage, standaloneCode } from '../ui/rich-text.js';
-export function beginLlmProgress(controller, { expectedMs = 0, presentation = 'review', preserveRaw = true } = {}) {
+export function beginLlmProgress(controller, { expectedMs = 0, presentation = 'review', preserveRaw = null } = {}) {
   const { state } = controller;
   const startedAt = Date.now();
   const settings = activeRunSettings(state);
+  const keepRaw = preserveRaw ?? Boolean(settings?.llmVerboseOutput);
+  const rawMessageIndex = state.messages.length;
   state.llmRuntime = {
     provider: settings.llmProvider,
     model: settings.llmModel,
@@ -42,7 +45,7 @@ export function beginLlmProgress(controller, { expectedMs = 0, presentation = 'r
       clearInterval(timer);
       const finished = state.llmRuntime;
       state.llmRuntime = null;
-      if (preserveRaw && finished && (String(finished.reasoning ?? '').trim() || String(finished.content ?? '').trim())) {
+      if (keepRaw && finished && (String(finished.reasoning ?? '').trim() || String(finished.content ?? '').trim())) {
         const lines = [];
         if (String(finished.reasoning ?? '').trim()) lines.push('Analysis', ...String(finished.reasoning).replace(/\r\n/g, '\n').split('\n'));
         if (String(finished.content ?? '').trim()) {
@@ -53,7 +56,7 @@ export function beginLlmProgress(controller, { expectedMs = 0, presentation = 'r
             ? [`\`\`\`${code.language}`, ...code.code.split('\n'), '```']
             : rawContent.split('\n')));
         }
-        controller.message('Raw LLM response', lines, 'info', {
+        insertMessage(state, rawMessageIndex, 'Raw LLM response', lines, 'info', {
           collapsible: true,
           collapsed: true,
           collapsedSummary: `Raw LLM response · ${finished.chunks || 0} chunks`,
