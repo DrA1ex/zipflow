@@ -46,16 +46,23 @@ import { InputActionGate } from './input-action-gate.js';
 import { insertPastedText, pastedTextFromKey } from '../ui/editor-paste.js';
 import { configureI18n, translateForState as t } from '../i18n/index.js';
 import { moveSelectableIndex, nearestSelectableIndex, pageSelectableIndex } from './list-navigation.js';
+import { createUpdateService } from '../update/service.js';
+import { handleUpdateDispatch, handleUpdateKey, showAvailableUpdate, startStartupUpdateCheck } from './update-flow.js';
 export class ZipflowController {
-  constructor(state) {
+  constructor(state, { updateService = createUpdateService() } = {}) {
     this.state = state;
     this.runtime = null;
     this.activeLock = null;
     this.inputActions = new InputActionGate();
+    this.updateService = updateService;
+    this.restartRequested = false;
     this.operations = new OperationManager({
       onChange: (operation) => {
         state.activeOperation = operation;
         if (operation?.kind === 'llm-review') state.llmReviewCancelling = Boolean(operation.cancelling);
+        if (operation?.kind === 'self-update' && state.updatePrompt?.phase === 'installing') {
+          state.updatePrompt.cancelling = Boolean(operation.cancelling);
+        }
         this.invalidate();
       },
       forceStop: () => terminateActiveProcesses({ graceMs: 0 }),
@@ -89,8 +96,10 @@ export class ZipflowController {
   }
 
   async handleKey(key) {
+    this.state.inputGeneration = (Number(this.state.inputGeneration) || 0) + 1;
     const normalized = key.printable && key.text === ' ' ? { ...key, name: 'space' } : key;
     if (isInterruptKey(normalized)) return this.handleInterrupt();
+    if (this.state.updatePrompt) return handleUpdateKey(this, normalized);
     if (this.state.menuSearch?.active) return handleMenuSearchKey(this, normalized);
     if (normalized.ctrl && normalized.name === 't') {
       const pointerEnabled = this.runtime?.togglePointerOverride?.();
@@ -178,6 +187,15 @@ export class ZipflowController {
     if (normalized.name === 'escape') return this.back();
   }
 
+  startStartupUpdateCheck() {
+    return startStartupUpdateCheck(this);
+  }
+
+  requestRestart() {
+    this.restartRequested = true;
+    this.exit(0);
+  }
+
   beginOperation(options) {
     return this.operations.begin(options);
   }
@@ -205,6 +223,7 @@ export class ZipflowController {
   }
 
   async dispatch(action) {
+    if (await handleUpdateDispatch(this, action)) return;
     if (action.type === 'activity-follow-latest') {
       followLatestActivity(this);
       this.invalidate();
@@ -304,8 +323,10 @@ export class ZipflowController {
       const lastRun = workflow.lastRunId ? `Last run: ${workflow.lastRunId}` : 'No previous runs';
       const checks = workflow.checks.filter((check) => check.selected);
       const deployConfigured = Boolean(workflow.deploy?.commandText);
+      const updateItem = availableUpdateMenuItem(this.state.updateCheck);
       return this.showMenu('home', [
         { id: 'start-update', label: 'Start an update', description: 'Choose a ZIP archive and use the saved workflow' },
+        ...(updateItem ? [updateItem] : []),
         ...(checks.length ? [{ id: 'run-tests', label: 'Run tests', description: `Run ${checks.length} configured check${checks.length === 1 ? '' : 's'} against the current project` }] : []),
         ...(deployConfigured ? [{ id: 'run-deploy-now', label: 'Run deployment', description: `${commandLocationLabel(workflow.deploy.cwd)} · ${workflow.deploy.commandText}` }] : []),
         { id: 'change-workflow', label: 'Change workflow', description: 'Review and update the workflow; nothing changes until you confirm the final step' },
@@ -315,8 +336,10 @@ export class ZipflowController {
         { id: 'exit', label: 'Exit' },
       ], 'Ready');
     }
+    const updateItem = availableUpdateMenuItem(this.state.updateCheck);
     return this.showMenu('new-project', [
       { id: 'setup-project', label: 'Set up this project', description: `${displayPath(project.root)} · ${(project.workspaceLabels ?? project.labels ?? []).join(' · ') || 'Custom project'}${project.projects?.length > 1 ? ` · ${project.projects.length} projects` : ''}` },
+      ...(updateItem ? [updateItem] : []),
       { id: 'choose-directory', label: 'Choose another directory', description: 'Tab completes directory names' },
       { id: 'create-zip', label: 'Create ZIP', description: 'Export files before configuring an update workflow' },
       { id: 'exit', label: 'Exit' },
@@ -398,6 +421,7 @@ export class ZipflowController {
 
   async activateHome(itemId) {
     if (itemId === 'exit') return this.exit(0);
+    if (itemId === 'update-zipflow') return showAvailableUpdate(this);
     if (itemId === 'start-update') return beginArchiveInput(this);
     if (itemId === 'change-workflow' || itemId === 'review-settings') return beginSetup(this, { fresh: false });
     if (itemId === 'last-run') return showLastRun(this);
@@ -530,6 +554,14 @@ export class ZipflowController {
     const page = Math.max(5, Math.min(12, Number(this.state.menuPageSize) || 8));
     this.state.selectedIndex = pageSelectableIndex(items, this.state.selectedIndex, direction, page);
   }
+}
+
+function availableUpdateMenuItem(result) {
+  if (result?.status !== 'available') return null;
+  return {
+    id: 'update-zipflow', label: 'Update Zipflow',
+    description: 'Install the available version globally with npm.',
+  };
 }
 
 function isInterruptKey(key) {

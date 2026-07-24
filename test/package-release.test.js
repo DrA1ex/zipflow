@@ -30,6 +30,7 @@ test('package README stays concise and sends detailed guidance to docs', async (
   assert.ok(readme.split(/\r?\n/).length <= 140);
   assert.match(readme, /npm install --global zipflow/);
   assert.match(readme, /docs\/README\.md/);
+  assert.match(readme, /Automatic updates/);
   assert.doesNotMatch(readme, /^## Safety model$/m);
   assert.doesNotMatch(readme, /^## Decision modes and autopilot$/m);
   assert.doesNotMatch(readme, /^## Data and storage$/m);
@@ -41,5 +42,6 @@ test('package README stays concise and sends detailed guidance to docs', async (
     'docs/local-llm.md',
     'docs/settings-and-storage.md',
     'docs/development.md',
+    'docs/updates.md',
   ]) await access(path.join(root, file));
 });

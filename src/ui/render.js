@@ -35,6 +35,7 @@ import { selectRowIndex, selectRows } from './select-rows.js';
 import { translateForState as t } from '../i18n/index.js';
 import { wheelScrollDelta } from './wheel.js';
 import { overlayManagerWithoutToasts, renderZipflowToasts } from './toast-overlay.js';
+import { renderUpdateOverlay } from './update-view.js';
 import { commandLocationLabel } from '../project/command-spec.js';
 import { isEditorScreen } from '../app/controller-screen-rules.js';
 
@@ -83,8 +84,9 @@ export function renderZipflow({ state, width, height, animationFrame = 0 }) {
     theme,
     children: shell,
   });
+  const updated = renderUpdateOverlay({ content: responsive, state, width, height, theme, animationFrame });
   const hosted = OverlayHost({
-    content: responsive,
+    content: updated,
     manager: overlayManagerWithoutToasts(state.overlays),
     theme,
     width,

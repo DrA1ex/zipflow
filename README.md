@@ -53,6 +53,7 @@ Archive → Review → Apply → Checks → Finish
 - Optional local LLM integration through Ollama or LM Studio.
 - Manual, Guarded autopilot, and Full autopilot decision modes.
 - Run history, performance analytics, reports, stored patches, and ZIP export.
+- Startup update checks and one-step global npm updates.
 - English and Russian interface coverage, with additional built-in and custom language packs.
 
 ## Useful controls
@@ -74,6 +75,8 @@ Ctrl+C      cancel an active operation; exit while idle
 
 Press `Esc` from the archive prompt to open project actions such as Change workflow, Run history, Run tests, Run deployment, Create ZIP, and Exit.
 
+When a newer globally installed npm version is available, Zipflow offers to install it at startup and then restart the application.
+
 ## Documentation
 
 Start with the [documentation index](docs/README.md).
@@ -86,6 +89,7 @@ Start with the [documentation index](docs/README.md).
 - [Local LLM integration](docs/local-llm.md)
 - [Decision modes and autopilot](docs/autopilot.md)
 - [Settings, history, and storage](docs/settings-and-storage.md)
+- [Automatic updates](docs/updates.md)
 - [Interface and controls](docs/controls.md)
 - [Interface localization](docs/i18n/README.md)
 
