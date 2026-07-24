@@ -1050,7 +1050,29 @@
     "Managed-file statistics": "Статистика управляемых файлов",
     "Requested LLM output is running in the background and does not block Apply.": "Запрошенный результат LLM создаётся в фоне и не блокирует применение.",
     "The update continues without the cancelled model output.": "Обновление продолжается без отменённого результата модели.",
-    "Requested Local LLM output was not generated": "Запрошенный результат локальной LLM не создан"
+    "Requested Local LLM output was not generated": "Запрошенный результат локальной LLM не создан",
+    "Another operation is still running": "Другая операция всё ещё выполняется",
+    "LLM review is still running": "LLM-проверка всё ещё выполняется",
+    "Wait for it to finish or cancel the review first.": "Дождитесь завершения или сначала отмените LLM-проверку.",
+    "LLM review cancellation is finishing before another operation can start.": "Отмена LLM-проверки завершается; после этого можно будет запустить другую операцию.",
+    "LLM review is still running. You can inspect the plan or cancel the review.": "LLM-проверка всё ещё выполняется. Можно просматривать план или отменить проверку.",
+    "Continue · waiting for LLM review": "Продолжить · ожидание LLM-проверки",
+    "Wait for the active review or cancel it first": "Дождитесь активной проверки или сначала отмените её",
+    "Cancel the LLM review before leaving this run": "Перед выходом из запуска отмените LLM-проверку",
+    "Cancel LLM review": "Отменить LLM-проверку",
+    "Cancelling LLM review…": "Отмена LLM-проверки…",
+    "Waiting for the active model request to close safely": "Ожидание безопасного завершения активного запроса к модели",
+    "Stop the model request and keep the deterministic update plan": "Остановить запрос к модели и сохранить детерминированный план обновления",
+    "Restart LLM review": "Запустить LLM-проверку заново",
+    "Run the configured Local LLM tasks again for this update plan": "Повторно выполнить настроенные задачи Local LLM для этого плана обновления",
+    "Stopping the LLM review safely. Apply will become available after the active request closes.": "LLM-проверка безопасно останавливается. Применение станет доступно после завершения активного запроса.",
+    "LLM review is running. Files and diffs remain available; Apply waits until the review finishes or is cancelled.": "LLM-проверка выполняется. Файлы и diff доступны; применение станет доступно после завершения или отмены проверки.",
+    "LLM review was cancelled. The update plan is still available.": "LLM-проверка отменена. План обновления остаётся доступным.",
+    "LLM review failed. The deterministic update plan is still available.": "LLM-проверка завершилась ошибкой. Детерминированный план обновления остаётся доступным.",
+    "Apply selected changes · waiting for LLM review": "Применить выбранные изменения · ожидание LLM-проверки",
+    "Stopping safely": "Безопасная остановка",
+    "Ctrl+C cancel operation": "Ctrl+C отменить операцию",
+    "↑/↓ Activity": "↑/↓ журнал"
   },
   "patterns": [
     {
@@ -1416,6 +1438,10 @@
     {
       "source": "Last updated: {updated}",
       "target": "Последнее обновление: {updated}"
+    },
+    {
+      "source": "Wait for {operation} to finish or cancel it first.",
+      "target": "Дождитесь завершения операции «{operation}» или сначала отмените её."
     }
   ]
 }

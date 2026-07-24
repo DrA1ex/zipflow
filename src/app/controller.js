@@ -23,9 +23,11 @@ import { handleReplayDispatch } from './settings-model-replay.js';
 import { projectSummary } from '../ui/format.js';
 import { toggleActivityBlockAtRow, toggleActivityBlockAtScroll } from '../ui/activity.js';
 import { terminateActiveProcesses } from '../utils/process.js';
-import { OperationManager } from '../operations/manager.js';
+import { OperationManager, isOperationBusyError } from '../operations/manager.js';
 import { removeIfExists } from '../utils/fs.js';
 import { clearRunSettings } from './runtime-settings.js';
+import { cancelPendingLlmReview } from './run-llm-review.js';
+import { showOperationBusy } from './operation-feedback.js';
 import { offerInterruptedRunRecovery } from './interrupted-run.js';
 import {
   beginMenuSearch, followLatestActivity, handleMenuSearchKey, showContextHelp,
@@ -51,7 +53,11 @@ export class ZipflowController {
     this.activeLock = null;
     this.inputActions = new InputActionGate();
     this.operations = new OperationManager({
-      onChange: (operation) => { state.activeOperation = operation; this.invalidate(); },
+      onChange: (operation) => {
+        state.activeOperation = operation;
+        if (operation?.kind === 'llm-review') state.llmReviewCancelling = Boolean(operation.cancelling);
+        this.invalidate();
+      },
       forceStop: () => terminateActiveProcesses({ graceMs: 0 }),
     });
     state.dispatch = (action) => { void this.dispatch(action).catch((error) => this.handleUnexpected(error)); };
@@ -103,6 +109,10 @@ export class ZipflowController {
     if (normalized.name === 'escape' && this.state.exportAbortController) {
       this.state.exportAbortController.abort();
       this.setStatus('Cancelling ZIP preview preparation…');
+      return;
+    }
+    if (normalized.name === 'escape' && this.state.activeOperation?.kind === 'llm-review') {
+      await cancelPendingLlmReview(this, { skippedByUser: true });
       return;
     }
     if (normalized.name === 'escape' && this.state.llmAbortController) {
@@ -282,6 +292,11 @@ export class ZipflowController {
     this.state.archiveMetadata = null;
     this.state.archiveSafety = null;
     this.state.plan = null;
+    this.state.llmReviewPending = false;
+    this.state.llmReviewCancelling = false;
+    this.state.llmReviewPromise = null;
+    this.state.llmReviewInput = null;
+    this.state.llmReviewSkippedByUser = false;
     this.state.runDetailsOrigin = null;
     if (workflow) {
       const lastRun = workflow.lastRunId ? `Last run: ${workflow.lastRunId}` : 'No previous runs';
@@ -355,6 +370,10 @@ export class ZipflowController {
   }
 
   async handleUnexpected(error) {
+    if (isOperationBusyError(error)) {
+      showOperationBusy(this, error);
+      return;
+    }
     this.state.busy = false;
     await this.activeLock?.release?.().catch(() => {});
     this.activeLock = null;

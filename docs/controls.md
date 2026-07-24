@@ -34,9 +34,13 @@ Idle screens include archive waiting, menus, history, and ordinary editors. On t
 
 During archive inspection, LLM generation or decisions, checks, deployment, ZIP creation, storage scans, model operations, apply, or rollback:
 
-1. the first `Ctrl+C` requests cancellation and keeps Zipflow open;
-2. a second press while cancellation is still pending force-stops owned child processes but still does not exit;
-3. after the operation reaches a stable screen, a later `Ctrl+C` exits normally.
+1. the active screen exposes cancellation when the operation supports it;
+2. `Esc` cancels an active LLM review, while `Ctrl+C` cancels any active operation;
+3. conflicting actions such as **Apply update** remain disabled until the current operation finishes or is cancelled;
+4. a second `Ctrl+C` while cancellation is still pending force-stops owned child processes but still does not exit;
+5. after the operation reaches a stable screen, a later `Ctrl+C` exits normally.
+
+An operation conflict is an ordinary UI state, not an application failure. If a late input race reaches the operation guard, Zipflow keeps the current screen and shows a warning instead of opening the global error screen. While an LLM review is stopping, the footer shows **Stopping safely** and repeated cancellation or apply actions remain unavailable.
 
 Filesystem transactions defer interruption until the current atomic step can complete or be restored. Zipflow intercepts the workspace-level `Ctrl+C` event before Terlio's default exit behavior so an owned operation always receives the cancellation request first.
 

@@ -83,3 +83,39 @@ test('operation handoff releases the current phase before the next phase begins'
   assert.equal(manager.current, null);
   apply.finish();
 });
+
+test('operation conflicts expose a typed busy error instead of a generic failure', () => {
+  const manager = new OperationManager();
+  const llm = manager.begin({ kind: 'llm-review', label: 'Reviewing update' });
+  assert.throws(
+    () => manager.begin({ kind: 'apply', label: 'Applying update' }),
+    (error) => error.code === 'operation-busy'
+      && error.requestedOperation === 'apply'
+      && error.activeOperation === 'llm-review',
+  );
+  llm.finish();
+});
+
+test('controller keeps the current screen when an operation conflict reaches the safety net', async () => {
+  const state = createInitialState();
+  state.screen = 'plan-review';
+  const toasts = [];
+  const controller = new ZipflowController(state);
+  controller.attachRuntime({
+    invalidate() {},
+    overlays: { toast: (...args) => toasts.push(args) },
+  });
+  const llm = controller.beginOperation({ kind: 'llm-review', label: 'Generating local LLM review' });
+  let error;
+  try {
+    controller.beginOperation({ kind: 'apply', label: 'Applying update' });
+  } catch (caught) {
+    error = caught;
+  }
+  await controller.handleUnexpected(error);
+  assert.equal(state.screen, 'plan-review');
+  assert.equal(controller.recovery, undefined);
+  assert.match(state.status, /still running/i);
+  assert.equal(toasts.length, 1);
+  llm.finish();
+});

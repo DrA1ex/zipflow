@@ -1050,7 +1050,29 @@
     "Managed-file statistics": "Managed-file statistics",
     "Requested LLM output is running in the background and does not block Apply.": "Requested LLM output is running in the background and does not block Apply.",
     "The update continues without the cancelled model output.": "The update continues without the cancelled model output.",
-    "Requested Local LLM output was not generated": "Requested Local LLM output was not generated"
+    "Requested Local LLM output was not generated": "Requested Local LLM output was not generated",
+    "Another operation is still running": "Another operation is still running",
+    "LLM review is still running": "LLM review is still running",
+    "Wait for it to finish or cancel the review first.": "Wait for it to finish or cancel the review first.",
+    "LLM review cancellation is finishing before another operation can start.": "LLM review cancellation is finishing before another operation can start.",
+    "LLM review is still running. You can inspect the plan or cancel the review.": "LLM review is still running. You can inspect the plan or cancel the review.",
+    "Continue · waiting for LLM review": "Continue · waiting for LLM review",
+    "Wait for the active review or cancel it first": "Wait for the active review or cancel it first",
+    "Cancel the LLM review before leaving this run": "Cancel the LLM review before leaving this run",
+    "Cancel LLM review": "Cancel LLM review",
+    "Cancelling LLM review…": "Cancelling LLM review…",
+    "Waiting for the active model request to close safely": "Waiting for the active model request to close safely",
+    "Stop the model request and keep the deterministic update plan": "Stop the model request and keep the deterministic update plan",
+    "Restart LLM review": "Restart LLM review",
+    "Run the configured Local LLM tasks again for this update plan": "Run the configured Local LLM tasks again for this update plan",
+    "Stopping the LLM review safely. Apply will become available after the active request closes.": "Stopping the LLM review safely. Apply will become available after the active request closes.",
+    "LLM review is running. Files and diffs remain available; Apply waits until the review finishes or is cancelled.": "LLM review is running. Files and diffs remain available; Apply waits until the review finishes or is cancelled.",
+    "LLM review was cancelled. The update plan is still available.": "LLM review was cancelled. The update plan is still available.",
+    "LLM review failed. The deterministic update plan is still available.": "LLM review failed. The deterministic update plan is still available.",
+    "Apply selected changes · waiting for LLM review": "Apply selected changes · waiting for LLM review",
+    "Stopping safely": "Stopping safely",
+    "Ctrl+C cancel operation": "Ctrl+C cancel operation",
+    "↑/↓ Activity": "↑/↓ Activity"
   },
   "patterns": [
     {
@@ -1416,6 +1438,10 @@
     {
       "source": "Last updated: {updated}",
       "target": "Last updated: {updated}"
+    },
+    {
+      "source": "Wait for {operation} to finish or cancel it first.",
+      "target": "Wait for {operation} to finish or cancel it first."
     }
   ]
 }

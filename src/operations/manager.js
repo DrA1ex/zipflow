@@ -8,7 +8,7 @@ export class OperationManager {
 
   begin({ kind, label, cancellable = true, critical = false, onCancel = null, onForceCancel = null } = {}) {
     if (this.current) {
-      throw new Error(`Cannot start ${kind || 'operation'} while ${this.current.kind} is active.`);
+      throw new OperationBusyError(kind || 'operation', this.current.kind);
     }
     const abortController = new AbortController();
     const operation = {
@@ -128,4 +128,18 @@ export function cancelledError(message = 'Operation cancelled.') {
 
 export function throwIfCancelled(signal, message = 'Operation cancelled.') {
   if (signal?.aborted) throw cancelledError(message);
+}
+
+export class OperationBusyError extends Error {
+  constructor(requestedOperation = 'operation', activeOperation = 'operation') {
+    super(`Cannot start ${requestedOperation} while ${activeOperation} is active.`);
+    this.name = 'OperationBusyError';
+    this.code = 'operation-busy';
+    this.requestedOperation = requestedOperation;
+    this.activeOperation = activeOperation;
+  }
+}
+
+export function isOperationBusyError(error) {
+  return error?.code === 'operation-busy' || error instanceof OperationBusyError;
 }

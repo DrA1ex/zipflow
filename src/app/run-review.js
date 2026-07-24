@@ -1,4 +1,3 @@
-import { isLlmArchiveReviewEnabled } from '../llm/tasks.js';
 import { loadPlanItemDiff } from '../diff/file.js';
 import { loadStoredFileDiff } from '../diff/stored-patch.js';
 import { rememberDiffMode } from '../settings/recent.js';
@@ -28,6 +27,11 @@ export function handlesReviewScreen(screen) {
 export async function activateReview(controller, itemId, actions) {
   const { state } = controller;
   if (state.screen === 'archive-safety') {
+    if (itemId === 'cancel-llm-review') {
+      await actions.skipPendingLlmReview(controller, { skippedByUser: true });
+      return showArchiveSafetyReview(controller);
+    }
+    if (itemId === 'restart-llm-review') return actions.restartLlmReview(controller);
     if (itemId === 'safety-review-plan') {
       state.archiveSafety.acknowledged = true;
       return showPlanCategories(controller);
@@ -40,10 +44,11 @@ export async function activateReview(controller, itemId, actions) {
   }
   if (state.screen === 'plan-review') {
     if (itemId === 'view-plan') return showPlanCategories(controller);
-    if (itemId === 'skip-llm-review') {
-      await actions.skipPendingLlmReview(controller);
+    if (itemId === 'cancel-llm-review' || itemId === 'skip-llm-review') {
+      await actions.skipPendingLlmReview(controller, { skippedByUser: true });
       return showPlanReview(controller);
     }
+    if (itemId === 'restart-llm-review') return actions.restartLlmReview(controller);
     if (itemId === 'resume-autopilot') {
       await resumeAutopilot(controller);
       return actions.continueAfterSafety(controller);
@@ -52,11 +57,21 @@ export async function activateReview(controller, itemId, actions) {
     if (itemId === 'cancel-run') return actions.cancelRun(controller);
   }
   if (state.screen === 'plan-details') {
+    if (itemId === 'cancel-llm-review') {
+      await actions.skipPendingLlmReview(controller, { skippedByUser: true });
+      return showPlanCategories(controller);
+    }
+    if (itemId === 'restart-llm-review') return actions.restartLlmReview(controller);
     if (itemId.startsWith('plan-category:')) return showPlanFiles(controller, itemId.slice(14));
     if (itemId === 'apply-plan') return actions.startApply(controller);
     if (itemId === 'back-to-plan') return showPlanReview(controller);
   }
   if (state.screen === 'plan-files') {
+    if (itemId === 'cancel-llm-review') {
+      await actions.skipPendingLlmReview(controller, { skippedByUser: true });
+      return showPlanFiles(controller, state.planReview?.category, state.selectedIndex);
+    }
+    if (itemId === 'restart-llm-review') return actions.restartLlmReview(controller);
     if (itemId.startsWith('plan-file:')) return showPlanFileChoice(controller, itemId);
     if (itemId === 'plan-group-select-all') { setPlanGroupDecision(state, state.planReview?.category, 'archive'); return showPlanFiles(controller, state.planReview?.category, state.selectedIndex); }
     if (itemId === 'plan-group-clear') { setPlanGroupDecision(state, state.planReview?.category, 'keep'); return showPlanFiles(controller, state.planReview?.category, state.selectedIndex); }
@@ -137,36 +152,66 @@ export function handleReviewKey(controller, key) {
   return false;
 }
 
+function llmReviewActive(state) {
+  return Boolean(state.llmReviewPending || state.activeOperation?.kind === 'llm-review');
+}
+
+function llmReviewMenuItems(state) {
+  if (llmReviewActive(state)) return [{
+    id: 'cancel-llm-review',
+    label: state.llmReviewCancelling ? 'Cancelling LLM review…' : 'Cancel LLM review',
+    description: state.llmReviewCancelling ? 'Waiting for the active model request to close safely' : 'Stop the model request and keep the deterministic update plan',
+    disabled: Boolean(state.llmReviewCancelling),
+  }];
+  if (state.llmReviewInput && (state.run?.llm?.cancelled || state.run?.llm?.error)) return [{
+    id: 'restart-llm-review',
+    label: 'Restart LLM review',
+    description: 'Run the configured Local LLM tasks again for this update plan',
+  }];
+  return [];
+}
+
 function planItemFromId(state, itemId) {
   const [, category, rawIndex] = String(itemId ?? '').split(':');
   return state.plan?.[category]?.[Number(rawIndex)] ?? null;
 }
 
 export function showArchiveSafetyReview(controller) {
-  const safety = controller.state.archiveSafety ?? { warnings: [] };
+  const { state } = controller;
+  const safety = state.archiveSafety ?? { warnings: [] };
   const dangerous = safety.warnings.some((item) => item.severity === 'danger')
     || safety.llm?.assessment === 'unsuitable';
+  const active = llmReviewActive(state);
   const lines = safetyLines(safety);
+  if (active) lines.push(state.llmReviewCancelling
+    ? 'LLM review cancellation is finishing before another operation can start.'
+    : 'LLM review is still running. You can inspect the plan or cancel the review.');
   controller.showMenu('archive-safety', [
     { id: 'safety-review-plan', label: 'Review changed files', description: 'Inspect groups and diffs before deciding whether to apply' },
-    { id: 'safety-continue', label: 'Continue despite warnings', description: dangerous ? 'The archive remains subject to backup, conflict handling, and checks' : 'Acknowledge the advisory warnings and continue normally' },
-    { id: 'safety-retry', label: 'Choose another archive', description: 'Cancel this run without changing the project' },
-  ], dangerous ? 'Archive needs careful review' : 'Archive safety warning', dangerous ? 0 : 0, lines);
+    { id: 'safety-continue', label: active ? 'Continue · waiting for LLM review' : 'Continue despite warnings', description: active ? 'Wait for the active review or cancel it first' : dangerous ? 'The archive remains subject to backup, conflict handling, and checks' : 'Acknowledge the advisory warnings and continue normally', disabled: active },
+    ...llmReviewMenuItems(state),
+    { id: 'safety-retry', label: 'Choose another archive', description: active ? 'Cancel the LLM review before leaving this run' : 'Cancel this run without changing the project', disabled: active },
+  ], dangerous ? 'Archive needs careful review' : 'Archive safety warning', 0, lines);
 }
 
 export function showPlanReview(controller) {
-  const { plan, llmReviewPending } = controller.state;
-  const gated = llmReviewPending && isLlmArchiveReviewEnabled(controller.state.runSettings);
+  const { state } = controller;
+  const { plan } = state;
+  const active = llmReviewActive(state);
   const items = [
-    { id: 'apply-plan', label: gated ? 'Apply update · waiting for LLM review' : 'Apply update', description: plan.conflicts.length ? 'Uses the conflict decisions shown above' : 'Backup is created before any local file changes', disabled: gated },
+    { id: 'apply-plan', label: active ? 'Apply update · waiting for LLM review' : 'Apply update', description: active ? 'Wait for the active review or cancel it first' : plan.conflicts.length ? 'Uses the conflict decisions shown above' : 'Backup is created before any local file changes', disabled: active },
     { id: 'view-plan', label: 'Review changes', description: 'Open file groups and inspect unified or side-by-side diffs' },
+    ...llmReviewMenuItems(state),
   ];
-  if (gated) items.push({ id: 'skip-llm-review', label: 'Continue without LLM verdict', description: 'Cancel the advisory LLM step; deterministic protections remain active' });
-  if (autopilotPaused(controller.state)) items.push({ id: 'resume-autopilot', label: 'Resume autopilot', description: 'Ask the local model to decide this plan checkpoint again.' });
-  items.push({ id: 'cancel-run', label: 'Cancel update', description: 'Return without changing the project' });
-  const selection = planSelectionSummary(plan, controller.state.decisions);
-  const intro = [compactPlanLine(plan), compactPlanMeta(plan), ...(selection.excluded ? [`Selection: ${selection.selected} apply · ${selection.excluded} keep local`] : []), ...planWarnings(plan, controller.state.archiveSafety)];
-  if (llmReviewPending) intro.push(gated ? 'LLM review is running. Files and diffs remain available while Apply waits for the verdict.' : 'Requested LLM output is running in the background and does not block Apply.');
+  if (autopilotPaused(state)) items.push({ id: 'resume-autopilot', label: 'Resume autopilot', description: 'Ask the local model to decide this plan checkpoint again.' });
+  items.push({ id: 'cancel-run', label: 'Cancel update', description: active ? 'Cancel the LLM review before leaving this run' : 'Return without changing the project', disabled: active });
+  const selection = planSelectionSummary(plan, state.decisions);
+  const intro = [compactPlanLine(plan), compactPlanMeta(plan), ...(selection.excluded ? [`Selection: ${selection.selected} apply · ${selection.excluded} keep local`] : []), ...planWarnings(plan, state.archiveSafety)];
+  if (active) intro.push(state.llmReviewCancelling
+    ? 'Stopping the LLM review safely. Apply will become available after the active request closes.'
+    : 'LLM review is running. Files and diffs remain available; Apply waits until the review finishes or is cancelled.');
+  else if (state.run?.llm?.cancelled) intro.push('LLM review was cancelled. The update plan is still available.');
+  else if (state.run?.llm?.error) intro.push('LLM review failed. The deterministic update plan is still available.');
   controller.showMenu('plan-review', items, 'Review update plan', 0, intro);
 }
 
@@ -203,8 +248,10 @@ function showPlanCategories(controller) {
     const selected = selectable ? entries.filter((item) => isPlanItemSelected(controller.state, item)).length : count;
     return [{ id: `plan-category:${id}`, label: `${label} · ${selectable ? `${selected}/${count}` : count} ›`, description }];
   });
+  const active = llmReviewActive(controller.state);
   items.push(
-    { id: 'apply-plan', label: controller.state.llmReviewPending && isLlmArchiveReviewEnabled(controller.state.runSettings) ? 'Apply update · waiting for LLM review' : 'Apply update', disabled: controller.state.llmReviewPending && isLlmArchiveReviewEnabled(controller.state.runSettings) },
+    { id: 'apply-plan', label: active ? 'Apply update · waiting for LLM review' : 'Apply update', description: active ? 'Wait for the active review or cancel it first' : '', disabled: active },
+    ...llmReviewMenuItems(controller.state),
     { id: 'back-to-plan', label: 'Back to summary' },
   );
   controller.showMenu('plan-details', items, 'Review changed files', null, [compactPlanLine(plan), 'Choose a group. Enter on a changed file opens its diff.']);
@@ -230,9 +277,11 @@ function showPlanFiles(controller, category, selectedIndex = null) {
     { id: 'plan-group-select-all', label: 'Select all in this group', context: 'Apply every change shown in this group.' },
     { id: 'plan-group-clear', label: 'Keep all local in this group', context: 'Exclude every change shown in this group from this update.' },
   );
+  const active = llmReviewActive(controller.state);
   items.push(
+    ...llmReviewMenuItems(controller.state),
     { id: 'back-plan-categories', label: 'Back to groups' },
-    { id: 'apply-plan', label: controller.state.llmReviewPending && isLlmArchiveReviewEnabled(controller.state.runSettings) ? 'Apply update · waiting for LLM review' : 'Apply selected changes', disabled: controller.state.llmReviewPending && isLlmArchiveReviewEnabled(controller.state.runSettings) },
+    { id: 'apply-plan', label: active ? 'Apply selected changes · waiting for LLM review' : 'Apply selected changes', description: active ? 'Wait for the active review or cancel it first' : '', disabled: active },
   );
   const selectedCount = selectable ? entries.filter((item) => isPlanItemSelected(controller.state, item)).length : entries.length;
   controller.showMenu('plan-files', items, `${group[1]} files`, selectedIndex, [`${group[1]} · ${selectedCount} of ${entries.length} selected`, group[2]]);

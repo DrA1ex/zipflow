@@ -441,8 +441,10 @@ function footerHints(state) {
     return ['↑/↓', 'Enter', '/ models', 'Ctrl+B close'];
   }
   if (state.screen === 'diff-view') return ['↑/↓ scroll', 'N/P hunk', 'J/K file', 'M mode', 'Esc back'];
-  if (state.llmAbortController) return ['Esc cancel LLM', 'Ctrl+C stop'];
-  if (state.busy || ['checks-running', 'deploy-running', 'manual-checks-running', 'manual-deploy-running'].includes(state.screen)) return ['Ctrl+C stop'];
+  if (state.activeOperation?.cancelling) return ['Stopping safely', '↑/↓ Activity', '? help'];
+  if (state.activeOperation?.kind === 'llm-review') return ['Esc cancel LLM', 'Ctrl+C cancel operation', '↑/↓ Activity', '? help'];
+  if (state.llmAbortController) return ['Esc cancel LLM', 'Ctrl+C cancel operation'];
+  if (state.busy || ['checks-running', 'deploy-running', 'manual-checks-running', 'manual-deploy-running'].includes(state.screen)) return ['Ctrl+C cancel operation'];
   if (state.menuSearch?.active) return ['Type to filter', 'Enter keep', 'Esc clear/close'];
   if (state.screen === 'setup-checks') return ['↑/↓ choose', 'Shift+↑/↓ move', 'Space toggle', 'Enter select', '? help'];
   if (isEditorScreen(state.screen)) {

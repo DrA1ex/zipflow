@@ -17,6 +17,17 @@ Zipflow performs archive analysis before changing project files:
 
 Nothing is written to the project during these steps.
 
+### LLM review while the plan is open
+
+Local LLM review may continue in parallel while the deterministic plan and diffs are available for inspection. During that time:
+
+- **Apply update** is disabled on every plan-review surface;
+- **Cancel LLM review** stops only the model request and preserves the plan;
+- `Esc` also requests LLM cancellation and the footer reports the stopping state;
+- leaving the run or starting another operation remains unavailable until the model request closes safely.
+
+After cancellation or an LLM failure, the deterministic plan remains usable. Zipflow offers **Apply update** and **Restart LLM review**. An incomplete model stream is never treated as a completed parsed review. Operation conflicts caused by late input races are shown as a warning on the current screen rather than as a fatal application error.
+
 ## Archive root confirmation
 
 When a ZIP contains one top-level directory, Zipflow compares two interpretations:

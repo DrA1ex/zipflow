@@ -32,7 +32,7 @@ import {
 } from './run-review.js';
 import { prepareArchiveRootReview, selectArchiveRoot, showArchiveRootChoice } from './archive-root.js';
 import { activeRunSettings, captureRunSettings, clearRunSettings } from './runtime-settings.js';
-import { skipPendingLlmReview, startLlmReview, waitForPendingLlmReview } from './run-llm-review.js';
+import { restartLlmReview, skipPendingLlmReview, startLlmReview, waitForPendingLlmReview } from './run-llm-review.js';
 import { rememberArchivePath } from '../settings/recent.js';
 import { decideAtGate, autonomyEnabledFor, markAutonomyDecision } from './autonomy-flow.js';
 import { activateInterruptedRun, showInterruptedRun } from './interrupted-run.js';
@@ -92,6 +92,7 @@ export async function activateRun(controller, itemId) {
       createCheckpoint,
       continueAfterSafety,
       skipPendingLlmReview,
+      restartLlmReview,
     });
   }
   if (isPostCheckScreen(state.screen)) return activatePostCheck(controller, itemId);
@@ -309,11 +310,14 @@ async function activateArchiveRootChoice(controller, itemId) {
 
 export async function startApply(controller, { checkpointCreated = false } = {}) {
   const { state } = controller;
+  if (state.llmReviewPending || state.activeOperation?.kind === 'llm-review') {
+    controller.toast('LLM review is still running', 'warning', 4, 'Wait for it to finish or cancel the review first.');
+    return showPlanReview(controller);
+  }
   const operation = controller.beginOperation({
     kind: 'apply', label: 'Applying update', critical: true,
   });
   try {
-    if (state.llmReviewPending && isLlmArchiveReviewEnabled(activeRunSettings(state))) return showPlanReview(controller);
     if (requiresSafetyReview(state.archiveSafety) && !state.archiveSafety.acknowledged) return showArchiveSafetyReview(controller);
     if (!checkpointCreated && state.workflow.git.checkpoint === 'ask' && archiveConflictPaths(state).length) return showConflictCheckpoint(controller);
     if (!checkpointCreated && state.workflow.git.checkpoint === 'auto' && archiveConflictPaths(state).length) await createCheckpoint(controller, { operation });

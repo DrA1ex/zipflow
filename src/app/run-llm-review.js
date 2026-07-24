@@ -12,7 +12,9 @@ import { showArchiveSafetyReview, showPlanReview } from './run-review.js';
 
 export function startLlmReview(controller, input) {
   const { state } = controller;
+  state.llmReviewInput = input;
   state.llmReviewPending = true;
+  state.llmReviewCancelling = false;
   const generation = ++state.llmReviewGeneration;
   state.llmReviewPromise = generateLlmSummary(controller, input)
     .then((llm) => finishLlmReview(controller, llm, generation))
@@ -21,26 +23,37 @@ export function startLlmReview(controller, input) {
       assessment: null,
       record: { error: error.message },
     }, generation));
+  return state.llmReviewPromise;
 }
 
-export async function skipPendingLlmReview(controller) {
+export async function cancelPendingLlmReview(controller, { skippedByUser = false } = {}) {
   const { state } = controller;
-  if (!state.llmReviewPending) return false;
+  if (!state.llmReviewPending && state.activeOperation?.kind !== 'llm-review') return false;
+  if (state.llmReviewCancelling) {
+    await state.llmReviewPromise;
+    return true;
+  }
+  state.llmReviewCancelling = true;
+  state.llmReviewSkippedByUser = Boolean(skippedByUser);
+  if (state.llmRuntime) {
+    state.llmRuntime.cancellationRequested = true;
+    state.llmRuntime.phase = 'cancelling';
+    state.llmRuntime.label = 'Cancelling local LLM generation';
+  }
+  const pendingReview = state.llmReviewPromise;
+  controller.setStatus('Cancelling local LLM generation…');
   state.llmAbortController?.abort();
-  state.llmReviewGeneration += 1;
-  state.llmReviewPending = false;
-  state.llmReviewPromise = null;
-  const settings = activeRunSettings(state);
-  state.run.llm = {
-    cancelled: true,
-    skippedByUser: true,
-    provider: settings.llmProvider,
-    model: settings.llmModel,
-  };
-  state.run = await saveRunRecord(state.run);
-  controller.message('Local LLM review skipped', [
-    'The deterministic plan, backup, conflict handling, and checks remain active.',
-  ], 'warning');
+  await pendingReview;
+  return true;
+}
+
+export const skipPendingLlmReview = cancelPendingLlmReview;
+
+export function restartLlmReview(controller) {
+  const { state } = controller;
+  if (state.llmReviewPending || !state.llmReviewInput) return false;
+  startLlmReview(controller, state.llmReviewInput);
+  showPlanReview(controller);
   return true;
 }
 
@@ -54,9 +67,12 @@ async function finishLlmReview(controller, llm, generation) {
   const { state } = controller;
   if (generation !== state.llmReviewGeneration) return llm;
   state.llmReviewPending = false;
+  state.llmReviewCancelling = false;
   state.llmReviewPromise = null;
+  const skippedByUser = state.llmReviewSkippedByUser;
+  state.llmReviewSkippedByUser = false;
   if (!state.run) return llm;
-  state.run.llm = llm.record;
+  state.run.llm = llm.record ? { ...llm.record, ...(skippedByUser ? { skippedByUser: true } : {}) } : llm.record;
   state.archiveSafety = {
     ...(state.archiveSafety ?? { warnings: [], acknowledged: false }),
     llm: llm.assessment ?? null,
