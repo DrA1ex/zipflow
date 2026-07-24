@@ -80,6 +80,7 @@ test('global settings store theme, LLM authorization, and source archive default
   assert.equal(settings.llmUseSummary, false);
   assert.equal(settings.llmUseFailedChecks, true);
   assert.equal(settings.llmUseCommitMessage, true);
+  assert.equal(settings.llmUseDirtyTreeCommitMessage, false);
   assert.equal(settings.llmArchiveReview, 'patch');
   assert.equal(settings.llmChangeDelivery, 'chunked');
   assert.equal(settings.llmFailureAnalysis, 'same-context');
@@ -99,6 +100,7 @@ test('new settings default to keeping source ZIPs for 30 days and 1 GB when arch
   assert.equal(settings.llmUseSummary, true);
   assert.equal(settings.llmUseFailedChecks, false);
   assert.equal(settings.llmUseCommitMessage, true);
+  assert.equal(settings.llmUseDirtyTreeCommitMessage, false);
 });
 
 test('settings keep categories on the left and the selected category page on the right', () => {

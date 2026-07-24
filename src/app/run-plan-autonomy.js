@@ -1,9 +1,10 @@
-import { createCheckpointRef, getGitStatus } from '../git/repository.js';
+import { getGitStatus } from '../git/repository.js';
 import { loadPlanItemDiff, unifiedDiffLines } from '../diff/file.js';
 import { hashText } from '../utils/hash.js';
 import { saveRunRecord } from '../runs/store.js';
 import { decideAtGate, autonomyEnabledFor, markAutonomyDecision } from './autonomy-flow.js';
 import { archiveConflictPaths } from './run-review.js';
+import { createCheckpointSnapshot } from './run-checkpoint.js';
 
 export function serializePlanForDecision(plan) {
   return {
@@ -126,7 +127,7 @@ async function createAutonomyCheckpoint(controller, status) {
   const { state } = controller;
   const operation = controller.beginOperation({ kind: 'git-checkpoint', label: 'Creating Git checkpoint' });
   try {
-    const checkpoint = await createCheckpointRef(state.project.root, state.run.id, { signal: operation.signal });
+    const checkpoint = await createCheckpointSnapshot(controller, { operation });
     if (!checkpoint.ok) throw new Error(checkpoint.reason);
     state.run.checkpoint = {
       revision: checkpoint.revision,
@@ -135,10 +136,13 @@ async function createAutonomyCheckpoint(controller, status) {
       backupOnlyPaths: checkpoint.untrackedPaths ?? [],
       preservesIndex: true,
       autonomous: true,
+      message: checkpoint.message,
+      messageSource: checkpoint.messageSource,
     };
     state.run = await saveRunRecord(state.run);
     controller.message('Checkpoint created', [
       checkpoint.ref ? `${checkpoint.revision} · ${checkpoint.ref}` : 'No tracked local changes required a Git checkpoint.',
+      ...(checkpoint.ref ? [`Message: ${checkpoint.message}`] : []),
       'The working tree and user index were not modified; untracked files remain protected by the normal file backup.',
     ], 'success');
     return true;

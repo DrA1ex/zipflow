@@ -369,3 +369,37 @@ test('LM Studio chat reuses the saved numbered loaded instance ID', async () => 
   assert.equal(chatBody.model, 'gemma-4-e4b-it-mlx:2');
   assert.equal(chatBody.context_length, undefined);
 });
+
+test('dirty-tree commit generation reuses the configured change-delivery policy and requests only a commit message', async () => {
+  let chatBody;
+  const fetchImpl = async (url, options) => {
+    if (url.endsWith('/api/v1/models')) return jsonResponse(lmModels(32_000));
+    chatBody = JSON.parse(options.body);
+    return nativeCompletion('COMMIT MESSAGE:\nPreserve local bridge changes');
+  };
+
+  const result = await generateChangeDescription({
+    settings: {
+      llmProvider: 'lmstudio', llmModel: 'gemma-loaded', llmPromptLanguage: 'English',
+      llmSummaryLanguage: 'English', llmCommitLanguage: 'English', llmApiToken: '',
+      llmChangeDelivery: 'change-list',
+    },
+    project: { name: 'fixture', labels: ['Node.js'] },
+    plan: {
+      counts: { created: 0, updated: 2, deleted: 0 },
+      created: [], updated: [{ path: 'src/a.js' }, { path: 'src/b.js' }], deleted: [],
+    },
+    patchContent: 'diff --git a/src/a.js b/src/a.js\n@@ -1 +1 @@\n-old\n+new\n',
+  }, {
+    fetchImpl,
+    tasks: { archiveReview: false, summary: false, commitMessage: true },
+    changeContext: 'Current uncommitted tracked working-tree changes before the archive update',
+  });
+
+  assert.equal(result.commitMessage, 'Preserve local bridge changes');
+  assert.match(chatBody.input, /Change set: Current uncommitted tracked working-tree changes/);
+  assert.match(chatBody.input, /UPDATE src\/a\.js/);
+  assert.doesNotMatch(chatBody.input, /PATCH START/);
+  assert.match(chatBody.system_prompt, /COMMIT MESSAGE:/);
+  assert.doesNotMatch(chatBody.system_prompt, /SUMMARY:|ASSESSMENT:/);
+});

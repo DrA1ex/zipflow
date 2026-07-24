@@ -14,6 +14,7 @@ const RUN_SETTING_KEYS = Object.freeze([
   'llmUseSummary',
   'llmUseFailedChecks',
   'llmUseCommitMessage',
+  'llmUseDirtyTreeCommitMessage',
   'llmArchiveReview',
   'llmChangeDelivery',
   'llmFailureAnalysis',
@@ -77,6 +78,7 @@ function compactTaskLabel(settings) {
     tasks.summary ? 'Summary' : null,
     tasks.failedChecks ? 'Failed checks' : null,
     tasks.commitMessage ? 'Commit' : null,
+    tasks.dirtyTreeCommitMessage ? 'Dirty-tree commit' : null,
   ].filter(Boolean);
   return labels.length ? labels.join('+') : 'No LLM tasks';
 }

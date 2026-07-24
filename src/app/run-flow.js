@@ -9,7 +9,6 @@ import { updateManagedHistory } from '../history/managed.js';
 import { buildUpdatePlan } from '../plan/build.js';
 import { applyUpdatePlan } from '../apply/apply.js';
 import { acquireProjectLock } from '../apply/lock.js';
-import { createCheckpointRef } from '../git/repository.js';
 import { createRunId } from '../utils/id.js';
 import { exists } from '../utils/fs.js';
 import { hashFile } from '../utils/hash.js';
@@ -37,6 +36,7 @@ import { rememberArchivePath } from '../settings/recent.js';
 import { decideAtGate, autonomyEnabledFor, markAutonomyDecision } from './autonomy-flow.js';
 import { activateInterruptedRun, showInterruptedRun } from './interrupted-run.js';
 import { getGitStatus } from '../git/repository.js';
+import { createCheckpointSnapshot } from './run-checkpoint.js';
 import {
   gitStateValidator, handleLocalWorkAutonomy, resolveConflictsAutonomously,
   serializeGitStatus, serializePlanForDecision,
@@ -315,7 +315,7 @@ export async function startApply(controller, { checkpointCreated = false } = {})
     return showPlanReview(controller);
   }
   const operation = controller.beginOperation({
-    kind: 'apply', label: 'Applying update', critical: true,
+    kind: 'apply', label: 'Applying update', critical: false,
   });
   try {
     if (requiresSafetyReview(state.archiveSafety) && !state.archiveSafety.acknowledged) return showArchiveSafetyReview(controller);
@@ -324,6 +324,7 @@ export async function startApply(controller, { checkpointCreated = false } = {})
     if (effectiveChangedCount(state.plan, state.decisions) === 0) {
       return operation.handoff(() => completeNoChangeRun(controller, { reason: 'selection-empty' }));
     }
+    operation.enterCritical('Creating backup');
     setBusy(controller, 'Applying update', 0, Math.max(1, effectiveChangedCount(state.plan, state.decisions)), 'Creating backup');
     const applied = await applyUpdatePlan({
       runId: state.run.id, projectPath: state.project.root, plan: state.plan, decisions: state.decisions,
@@ -378,17 +379,20 @@ export async function createCheckpoint(controller, { force = false, operation = 
     paths = [...new Set([...(status?.staged ?? []), ...(status?.unstaged ?? [])].map((item) => item.path))].sort();
   }
   if (!paths.length) { ownOperation?.finish(); return; }
-  const checkpoint = await createCheckpointRef(controller.state.project.root, controller.state.run.id, { signal: activeOperation.signal });
+  const checkpoint = await createCheckpointSnapshot(controller, { operation: activeOperation });
   if (!checkpoint.ok) throw new Error(`Checkpoint ref failed: ${checkpoint.reason}`);
   controller.state.run.checkpoint = {
     revision: checkpoint.revision,
     ref: checkpoint.ref,
     paths,
     preservesIndex: true,
+    message: checkpoint.message,
+    messageSource: checkpoint.messageSource,
   };
   controller.state.run = await saveRunRecord(controller.state.run);
   controller.message('Checkpoint created', [
     checkpoint.ref ? `${checkpoint.revision} · ${checkpoint.ref}` : 'No tracked local changes required a Git checkpoint.',
+    ...(checkpoint.ref ? [`Message: ${checkpoint.message}`] : []),
     'The working tree and user index were not modified; untracked conflicts remain protected by the normal file backup.',
   ], 'success');
   ownOperation?.finish();

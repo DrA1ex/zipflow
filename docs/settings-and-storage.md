@@ -9,7 +9,7 @@ Settings include:
 - Terlio semantic theme;
 - compact or live running-check output;
 - local LLM provider, authentication, model, load configuration, and languages;
-- independent LLM tasks for archive review, summaries, failed-check explanations, and commit messages;
+- independent LLM tasks for archive review, summaries, failed-check explanations, update commit messages, and dirty-tree checkpoint messages;
 - archive-review methods and change-delivery behavior;
 - source ZIP disposition;
 - archive retention and size limits;

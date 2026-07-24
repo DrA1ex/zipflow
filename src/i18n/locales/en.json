@@ -1072,7 +1072,19 @@
     "Apply selected changes · waiting for LLM review": "Apply selected changes · waiting for LLM review",
     "Stopping safely": "Stopping safely",
     "Ctrl+C cancel operation": "Ctrl+C cancel operation",
-    "↑/↓ Activity": "↑/↓ Activity"
+    "↑/↓ Activity": "↑/↓ Activity",
+    "Update commit message": "Update commit message",
+    "Generate a Git commit-message candidate for the archive update without requiring any other LLM output.": "Generate a Git commit-message candidate for the archive update without requiring any other LLM output.",
+    "Dirty-tree checkpoint message": "Dirty-tree checkpoint message",
+    "Generate the Git checkpoint message from the current uncommitted tracked changes before Zipflow applies an archive.": "Generate the Git checkpoint message from the current uncommitted tracked changes before Zipflow applies an archive.",
+    "Update commit": "Update commit",
+    "Dirty-tree commit": "Dirty-tree commit",
+    "Generating dirty-tree checkpoint message": "Generating dirty-tree checkpoint message",
+    "Zipflow is analyzing the current uncommitted tracked changes without modifying the working tree or index.": "Zipflow is analyzing the current uncommitted tracked changes without modifying the working tree or index.",
+    "Dirty-tree checkpoint message generated": "Dirty-tree checkpoint message generated",
+    "Dirty-tree checkpoint message fallback": "Dirty-tree checkpoint message fallback",
+    "The local model did not return a usable commit message.": "The local model did not return a usable commit message.",
+    "The LLM task is enabled, but no local provider and model are currently available.": "The LLM task is enabled, but no local provider and model are currently available."
   },
   "patterns": [
     {
@@ -1442,6 +1454,22 @@
     {
       "source": "Wait for {operation} to finish or cancel it first.",
       "target": "Wait for {operation} to finish or cancel it first."
+    },
+    {
+      "source": "Tracked changed paths: {count}",
+      "target": "Tracked changed paths: {count}"
+    },
+    {
+      "source": "Change delivery: {delivery}",
+      "target": "Change delivery: {delivery}"
+    },
+    {
+      "source": "Zipflow will use: {message}",
+      "target": "Zipflow will use: {message}"
+    },
+    {
+      "source": "Message: {message}",
+      "target": "Message: {message}"
     }
   ]
 }

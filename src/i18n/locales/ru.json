@@ -396,7 +396,7 @@
     "Create another ZIP": "Создать другой ZIP",
     "Create checkpoint commit, then apply": "Создать контрольный коммит и применить",
     "Create the first commit with another message": "Создать первый коммит с другим сообщением",
-    "Creating Git checkpoint": "Создание контрольного коммита Git",
+    "Creating Git checkpoint": "Создание Git-checkpoint",
     "Creating Git commit": "Создание коммита Git",
     "Creating ZIP archive": "Создание ZIP-архива",
     "Custom selection": "Пользовательский выбор",
@@ -1072,7 +1072,19 @@
     "Apply selected changes · waiting for LLM review": "Применить выбранные изменения · ожидание LLM-проверки",
     "Stopping safely": "Безопасная остановка",
     "Ctrl+C cancel operation": "Ctrl+C отменить операцию",
-    "↑/↓ Activity": "↑/↓ журнал"
+    "↑/↓ Activity": "↑/↓ журнал",
+    "Update commit message": "Сообщение коммита обновления",
+    "Generate a Git commit-message candidate for the archive update without requiring any other LLM output.": "Сгенерировать вариант сообщения Git-коммита для обновления из архива без обязательной генерации других результатов LLM.",
+    "Dirty-tree checkpoint message": "Сообщение checkpoint локальных изменений",
+    "Generate the Git checkpoint message from the current uncommitted tracked changes before Zipflow applies an archive.": "Сгенерировать сообщение Git-checkpoint по текущим незакоммиченным отслеживаемым изменениям перед применением архива.",
+    "Update commit": "Коммит обновления",
+    "Dirty-tree commit": "Локальные изменения",
+    "Generating dirty-tree checkpoint message": "Генерация сообщения checkpoint локальных изменений",
+    "Zipflow is analyzing the current uncommitted tracked changes without modifying the working tree or index.": "Zipflow анализирует текущие незакоммиченные отслеживаемые изменения, не изменяя рабочее дерево и index.",
+    "Dirty-tree checkpoint message generated": "Сообщение checkpoint локальных изменений сгенерировано",
+    "Dirty-tree checkpoint message fallback": "Резервное сообщение checkpoint локальных изменений",
+    "The local model did not return a usable commit message.": "Локальная модель не вернула пригодное сообщение коммита.",
+    "The LLM task is enabled, but no local provider and model are currently available.": "Задача LLM включена, но локальный провайдер и модель сейчас недоступны."
   },
   "patterns": [
     {
@@ -1442,6 +1454,22 @@
     {
       "source": "Wait for {operation} to finish or cancel it first.",
       "target": "Дождитесь завершения операции «{operation}» или сначала отмените её."
+    },
+    {
+      "source": "Tracked changed paths: {count}",
+      "target": "Отслеживаемых изменённых путей: {count}"
+    },
+    {
+      "source": "Change delivery: {delivery}",
+      "target": "Передача изменений: {delivery}"
+    },
+    {
+      "source": "Zipflow will use: {message}",
+      "target": "Zipflow использует: {message}"
+    },
+    {
+      "source": "Message: {message}",
+      "target": "Сообщение: {message}"
     }
   ]
 }

@@ -16,9 +16,10 @@ The **LLM tasks** page contains independent checkboxes. Enable only the outputs 
 - **Archive suitability review** — ask whether the archive plausibly belongs to the current workspace;
 - **Change summary** — generate a concise human-readable description of the source changes;
 - **Failed-check explanations** — offer an LLM explanation after a configured check fails;
-- **Commit message** — generate a Git commit-message candidate.
+- **Update commit message** — generate a Git commit-message candidate for the applied archive update;
+- **Dirty-tree checkpoint message** — generate the checkpoint message from tracked local changes that already existed before the archive is applied.
 
-The tasks do not depend on each other. For example, Zipflow can request only a commit message without generating a summary or archive verdict. Turning every task off keeps the provider and model configuration but prevents ordinary workflow LLM requests. Autopilot model decisions remain a separate capability and compatibility check.
+The tasks do not depend on each other. For example, Zipflow can request only an update commit message, only a dirty-tree checkpoint message, or both without generating a summary or archive verdict. Turning every task off keeps the provider and model configuration but prevents ordinary workflow LLM requests. Autopilot model decisions remain a separate capability and compatibility check.
 
 Ordinary summaries and verdicts are advisory. Local LLM failures do not block manual archive application.
 
@@ -34,7 +35,7 @@ Summary and commit-message fields are requested only when their corresponding ta
 
 ## Change delivery modes
 
-The independent **Change delivery** setting controls source evidence:
+The independent **Change delivery** setting controls source evidence for archive review, summaries, update commit messages, and dirty-tree checkpoint messages:
 
 - **Adaptive**;
 - **Full patch**;
@@ -57,6 +58,8 @@ Enable **Failed-check explanations** in **LLM tasks** to make the action availab
 Same-context analysis sends the prior result with the failed command and output rather than resending the complete patch.
 
 ## Commit messages
+
+When **Dirty-tree checkpoint message** is enabled and Zipflow creates a Git checkpoint for tracked local changes, it builds a diff of the current tracked working tree without staging or modifying it. The configured change-delivery policy decides whether the model receives a full patch, representative sample, capped batches, changed paths only, or file-by-file chunks. A failed or cancelled generation falls back to the deterministic `zipflow checkpoint <run-id>` message.
 
 The workflow commit-message source determines the preferred proposal, not the only available one. At commit time Zipflow can show distinct messages from:
 

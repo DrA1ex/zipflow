@@ -93,7 +93,7 @@ Zipflow separates two commit purposes:
 - a **checkpoint commit** before conflicting local changes are overwritten;
 - a **result commit** after the selected update is kept.
 
-Each purpose is configured independently.
+Each purpose is configured independently. When the global **Dirty-tree checkpoint message** LLM task is enabled, Zipflow can derive the checkpoint message from the tracked dirty-tree diff using the configured change-delivery policy. The working tree and user index remain unchanged while the message is generated and while the checkpoint ref is created.
 
 Result commits stage only paths applied by the current run. Protected `.zipflow/` paths and untracked paths ignored by Git are filtered before staging. Pre-existing staged changes block automatic commits so unrelated index contents cannot be included accidentally.
 

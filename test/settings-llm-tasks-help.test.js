@@ -52,7 +52,7 @@ test('saveSettings preserves existing LLM task selection when only an unrelated 
     ...DEFAULT_SETTINGS,
     llmProvider: 'ollama', llmModel: 'qwen',
     llmUseArchiveReview: true, llmUseSummary: false,
-    llmUseFailedChecks: true, llmUseCommitMessage: false,
+    llmUseFailedChecks: true, llmUseCommitMessage: false, llmUseDirtyTreeCommitMessage: true,
   });
   await saveSettings({ theme: 'matrix' });
 
@@ -62,6 +62,7 @@ test('saveSettings preserves existing LLM task selection when only an unrelated 
   assert.equal(settings.llmUseSummary, false);
   assert.equal(settings.llmUseFailedChecks, true);
   assert.equal(settings.llmUseCommitMessage, false);
+  assert.equal(settings.llmUseDirtyTreeCommitMessage, true);
 }));
 
 test('Settings help includes the full parameter context, selected option, and structured storage statistics', async () => withSettingsHome(async () => {
@@ -125,7 +126,7 @@ test('Settings help includes the full parameter context, selected option, and st
 test('LLM tasks are independent checkboxes and task-specific methods stay disabled until needed', async () => withSettingsHome(async () => {
   const { state, controller } = await settingsController({
     llmProvider: 'ollama', llmModel: 'qwen', llmUseArchiveReview: false,
-    llmUseSummary: true, llmUseFailedChecks: false, llmUseCommitMessage: true,
+    llmUseSummary: true, llmUseFailedChecks: false, llmUseCommitMessage: true, llmUseDirtyTreeCommitMessage: false,
   });
   await selectCategory(controller, 'localLlm');
   let view = settingsViewModel(state);
@@ -134,20 +135,23 @@ test('LLM tasks are independent checkboxes and task-specific methods stay disabl
 
   view = await openParameter(controller, 'llmTasks');
   assert.equal(state.settingsPanel.subpage, 'llmTasks');
-  assert.deepEqual(view.parameters.slice(0, 4).map((item) => [item.id, item.type, item.selected]), [
+  assert.deepEqual(view.parameters.slice(0, 5).map((item) => [item.id, item.type, item.selected]), [
     ['llmUseArchiveReview', 'toggle', false],
     ['llmUseSummary', 'toggle', true],
     ['llmUseFailedChecks', 'toggle', false],
     ['llmUseCommitMessage', 'toggle', true],
+    ['llmUseDirtyTreeCommitMessage', 'toggle', false],
   ]);
 
   await selectParameter(controller, 0);
   await selectParameter(controller, 1);
   await selectParameter(controller, 2);
+  await selectParameter(controller, 4);
   assert.equal(state.settings.llmUseArchiveReview, true);
   assert.equal(state.settings.llmUseSummary, false);
   assert.equal(state.settings.llmUseFailedChecks, true);
   assert.equal(state.settings.llmUseCommitMessage, true);
+  assert.equal(state.settings.llmUseDirtyTreeCommitMessage, true);
 
   await handleSettingsKey(controller, { name: 'escape' });
   view = settingsViewModel(state);
@@ -165,6 +169,7 @@ test('legacy LLM settings migrate to the equivalent independent task selection',
   assert.equal(enabled.llmUseSummary, true);
   assert.equal(enabled.llmUseFailedChecks, true);
   assert.equal(enabled.llmUseCommitMessage, true);
+  assert.equal(enabled.llmUseDirtyTreeCommitMessage, false);
   assert.equal(enabled.llmArchiveReview, 'patch');
   assert.equal(enabled.llmFailureAnalysis, 'same-context');
 
@@ -173,6 +178,7 @@ test('legacy LLM settings migrate to the equivalent independent task selection',
   assert.equal(disabled.llmUseSummary, true);
   assert.equal(disabled.llmUseFailedChecks, false);
   assert.equal(disabled.llmUseCommitMessage, true);
+  assert.equal(disabled.llmUseDirtyTreeCommitMessage, false);
   assert.equal(disabled.llmArchiveReview, 'structure');
   assert.equal(disabled.llmFailureAnalysis, 'new-context');
 });

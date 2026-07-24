@@ -5,7 +5,7 @@ import { formatByteSize } from '../utils/size.js';
 import { modelConfigSummary } from './settings-model.js';
 import { modelTestDescription, modelTestValue } from './settings-model-check.js';
 import { translateForState as t } from '../i18n/index.js';
-import { hasLlmChangeTasks, llmTasks } from '../llm/tasks.js';
+import { hasLlmPatchDeliveryTasks, llmTasks } from '../llm/tasks.js';
 
 export function settingsDefinitions(state) {
   const definitions = [
@@ -146,7 +146,7 @@ function localLlmParameters(state) {
   const models = state.settingsPanel?.models ?? [];
   const selected = models.find((item) => item.id === state.settings.llmModel || item.key === state.settings.llmModel);
   const tasks = llmTasks(state.settings);
-  const changeTasksDisabled = !hasLlmChangeTasks(state.settings);
+  const changeTasksDisabled = !hasLlmPatchDeliveryTasks(state.settings);
   return [
     choiceParameter('llmProvider', 'Provider', providerLabel(state.settings.llmProvider), 'Choose the local server Zipflow should contact.'),
     {
@@ -214,8 +214,10 @@ function llmTaskParameters(state) {
       'Generate a concise human-readable summary of the applied source changes.'),
     toggleParameter('llmUseFailedChecks', 'Failed-check explanations', tasks.failedChecks,
       'Offer a model explanation when a configured check fails.'),
-    toggleParameter('llmUseCommitMessage', 'Commit message', tasks.commitMessage,
-      'Generate a Git commit-message candidate without requiring any other LLM output.'),
+    toggleParameter('llmUseCommitMessage', 'Update commit message', tasks.commitMessage,
+      'Generate a Git commit-message candidate for the archive update without requiring any other LLM output.'),
+    toggleParameter('llmUseDirtyTreeCommitMessage', 'Dirty-tree checkpoint message', tasks.dirtyTreeCommitMessage,
+      'Generate the Git checkpoint message from the current uncommitted tracked changes before Zipflow applies an archive.'),
     { id: 'llmTasksBack', type: 'action', action: 'subpage-back', label: 'Back to Local LLM', value: '',
       description: 'Return to the Local LLM settings page.' },
   ];
@@ -227,7 +229,8 @@ function llmTasksSummary(settings) {
     tasks.archiveReview ? 'Archive review' : null,
     tasks.summary ? 'Summary' : null,
     tasks.failedChecks ? 'Failed checks' : null,
-    tasks.commitMessage ? 'Commit' : null,
+    tasks.commitMessage ? 'Update commit' : null,
+    tasks.dirtyTreeCommitMessage ? 'Dirty-tree commit' : null,
   ].filter(Boolean);
   return labels.length ? labels.join(' · ') : 'None selected';
 }

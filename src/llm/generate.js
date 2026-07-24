@@ -44,7 +44,7 @@ export async function generateChangeDescription({ settings, project, plan, patch
   const languages = {
     prompt: promptLanguage(settings), summary: summaryLanguage(settings), commit: commitLanguage(settings),
   };
-  const selectedTasks = llmTasks(settings);
+  const selectedTasks = options.tasks ?? llmTasks(settings);
   const tasks = {
     archiveReview: selectedTasks.archiveReview && settings.llmArchiveReview === 'patch',
     summary: selectedTasks.summary,
@@ -53,7 +53,8 @@ export async function generateChangeDescription({ settings, project, plan, patch
   if (!tasks.archiveReview && !tasks.summary && !tasks.commitMessage) return null;
   const outputSchema = responseSchema(tasks);
   const system = buildSystemPrompt(languages, tasks);
-  const fixedUser = buildUserPrompt(project, plan, { kind: 'change-list', content: createChangeList(plan) });
+  const changeContext = options.changeContext ?? 'Archive update changes';
+  const fixedUser = buildUserPrompt(project, plan, { kind: 'change-list', content: createChangeList(plan) }, changeContext);
   let session = options.session;
   if (!session) {
     notify({ type: 'phase', phase: 'model-info', label: 'Reading the selected model context limit' });
@@ -74,7 +75,7 @@ export async function generateChangeDescription({ settings, project, plan, patch
     fileCount: changedCount(plan),
   });
   notify({ type: 'delivery-mode', requestedMode, deliveryMode });
-  const context = { settings, project, plan, patchContent, profile, budget, system, tasks, deliveryMode };
+  const context = { settings, project, plan, patchContent, profile, budget, system, tasks, deliveryMode, changeContext };
   const generation = deliveryMode === 'chunked'
     ? await generateChunked(context, options, notify)
     : deliveryMode === 'capped'
@@ -154,7 +155,7 @@ async function generateFromPatch(context, options, notify, { deliveryMode = 'pat
         contextLength: context.budget.effectiveContextTokens,
         messages: [
           { role: 'system', content: context.system },
-          { role: 'user', content: buildUserPrompt(context.project, context.plan, { kind: payloadKind, content: fitted.content, coverage }) },
+          { role: 'user', content: buildUserPrompt(context.project, context.plan, { kind: payloadKind, content: fitted.content, coverage }, context.changeContext) },
         ],
       }, options, (event) => notify({ ...event, stage: 'generation' }));
       attempts.at(-1).completion = completionDiagnostics(completion);
@@ -196,7 +197,7 @@ async function generateFromChangeList(context, options, notify) {
     contextLength: context.budget.effectiveContextTokens,
     messages: [
       { role: 'system', content: context.system },
-      { role: 'user', content: buildUserPrompt(context.project, context.plan, { kind: 'change-list', content: changeList }) },
+      { role: 'user', content: buildUserPrompt(context.project, context.plan, { kind: 'change-list', content: changeList }, context.changeContext) },
     ],
   }, options, (event) => notify({ ...event, stage: 'generation' }));
   return {
@@ -233,7 +234,7 @@ async function generateChunked(context, options, notify, { capped = false } = {}
     contextLength: context.budget.effectiveContextTokens,
     messages: [
       { role: 'system', content: context.system },
-      { role: 'user', content: buildSynthesisPrompt(context.project, context.plan, notes) },
+      { role: 'user', content: buildSynthesisPrompt(context.project, context.plan, notes, context.changeContext) },
     ],
   }, options, (event) => notify({ ...event, stage: 'synthesis' }));
   attempts.push({ attempt: 'synthesis', completion: completionDiagnostics(completion) });
@@ -308,9 +309,10 @@ function buildSystemPrompt(languages, tasks) {
   ].join('\n\n');
 }
 
-function buildUserPrompt(project, plan, payload) {
+function buildUserPrompt(project, plan, payload, changeContext = 'Archive update changes') {
   const intro = [
     `Project: ${project.name}`,
+    `Change set: ${changeContext}`,
     `Project types: ${(project.workspaceLabels ?? project.labels ?? []).join(', ') || 'unknown'}`,
     `Plan counts: created=${plan.counts.created}, updated=${plan.counts.updated}, deleted=${plan.counts.deleted}`,
   ];
@@ -322,9 +324,10 @@ function buildUserPrompt(project, plan, payload) {
   return [...intro, '', 'CHANGED PATHS:', payload.content, '', 'No file contents are provided. Base the response only on path-level evidence and clearly avoid content-specific claims.'].join('\n');
 }
 
-function buildSynthesisPrompt(project, plan, notes) {
+function buildSynthesisPrompt(project, plan, notes, changeContext = 'Archive update changes') {
   return [
     `Project: ${project.name}`,
+    `Change set: ${changeContext}`,
     `Project types: ${(project.workspaceLabels ?? project.labels ?? []).join(', ') || 'unknown'}`,
     `Plan counts: created=${plan.counts.created}, updated=${plan.counts.updated}, deleted=${plan.counts.deleted}`,
     '', 'COMPLETE CHANGED PATH LIST:', createChangeList(plan),

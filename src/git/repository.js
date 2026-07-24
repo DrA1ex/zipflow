@@ -12,8 +12,8 @@ export async function initializeRepository(projectPath) {
   return { ok: Boolean(root), root, output: result.stdout.trim() };
 }
 
-export async function getGitStatus(projectPath) {
-  const result = await runGit(projectPath, ['status', '--porcelain=v1', '-z', '--untracked-files=all']);
+export async function getGitStatus(projectPath, { signal = null } = {}) {
+  const result = await runGit(projectPath, ['status', '--porcelain=v1', '-z', '--untracked-files=all'], { signal });
   const entries = parsePorcelain(result.stdout);
   return {
     entries,
@@ -90,23 +90,33 @@ export async function createCommit(projectPath, paths, message, { signal = null 
 }
 
 
-export async function createCheckpointRef(projectPath, runId, { signal = null } = {}) {
-  const status = await getGitStatus(projectPath);
+export async function createCheckpointRef(projectPath, runId, { signal = null, message = '' } = {}) {
+  const status = await getGitStatus(projectPath, { signal });
   const trackedEntries = status.entries.filter((item) => item.status !== '??');
   const untrackedPaths = status.entries.filter((item) => item.status === '??').map((item) => item.path);
   if (!trackedEntries.length) {
     return { ok: true, revision: null, ref: null, empty: true, paths: [], untrackedPaths };
   }
-  const created = await runGit(projectPath, ['stash', 'create', `zipflow checkpoint ${runId}`], { allowFailure: true, signal });
+  const checkpointMessage = String(message || `zipflow checkpoint ${runId}`).trim() || `zipflow checkpoint ${runId}`;
+  const created = await runGit(projectPath, ['stash', 'create', checkpointMessage], { allowFailure: true, signal });
   if (!created.ok) return { ok: false, reason: created.stderr.trim() || created.stdout.trim() || 'git stash create failed' };
-  const revision = created.stdout.trim();
-  if (!revision) return { ok: true, revision: null, ref: null, empty: true, paths: [], untrackedPaths };
+  const stashRevision = created.stdout.trim();
+  if (!stashRevision) return { ok: true, revision: null, ref: null, empty: true, paths: [], untrackedPaths };
+  const metadata = await runGit(projectPath, ['show', '-s', '--format=%T%n%P', stashRevision], { allowFailure: true, signal });
+  if (!metadata.ok) return { ok: false, reason: metadata.stderr.trim() || metadata.stdout.trim() || 'git checkpoint metadata failed' };
+  const [tree, parentLine = ''] = metadata.stdout.trim().split(/\r?\n/, 2);
+  const parents = parentLine.trim().split(/\s+/).filter(Boolean);
+  const committed = await runGit(projectPath, [
+    'commit-tree', tree, ...parents.flatMap((parent) => ['-p', parent]), '-m', checkpointMessage,
+  ], { allowFailure: true, signal });
+  if (!committed.ok) return { ok: false, reason: committed.stderr.trim() || committed.stdout.trim() || 'git checkpoint commit failed' };
+  const revision = committed.stdout.trim();
   const ref = `refs/zipflow/checkpoints/${runId}`;
   const updated = await runGit(projectPath, ['update-ref', ref, revision], { allowFailure: true, signal });
   if (!updated.ok) return { ok: false, reason: updated.stderr.trim() || updated.stdout.trim() || 'git update-ref failed' };
   return {
     ok: true, revision: revision.slice(0, 12), fullRevision: revision, ref,
-    paths: trackedEntries.map((item) => item.path), untrackedPaths,
+    paths: trackedEntries.map((item) => item.path), untrackedPaths, message: checkpointMessage,
   };
 }
 
