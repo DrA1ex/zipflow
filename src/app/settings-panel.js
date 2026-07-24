@@ -24,6 +24,7 @@ import {
   loadAutopilotReplayRuns, startHistoricalAutopilotSimulation,
 } from './settings-autopilot-replay.js';
 import { clearArchiveStorage, clearBackups, refreshSettingsStorage } from './settings-storage.js';
+import { checkForUpdatesNow } from './update-flow.js';
 import {
   canSearchSettingsChoices, filterSettingsChoices, handleSettingsChoiceSearchKey,
 } from './settings-choice-search.js';
@@ -68,6 +69,7 @@ export async function openSettings(controller, { categoryId = null } = {}) {
     storageStats: null,
     loadingStorage: false,
     storageError: null,
+    updateChecking: false,
     modal: null,
     modelConfig: null,
     choiceSearch: null,
@@ -377,6 +379,7 @@ async function activateParameter(controller) {
       state.status = parameter.label;
       controller.invalidate();
     } else if (parameter.action === 'storage-refresh') await refreshSettingsStorage(controller);
+    else if (parameter.action === 'update-check-now') await checkForUpdatesNow(controller);
     else if (parameter.action === 'model-test-connection') await testSelectedModel(controller);
     else if (parameter.action === 'model-test-replay') {
       state.status = 'Loading historical updates';

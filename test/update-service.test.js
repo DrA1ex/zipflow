@@ -46,6 +46,24 @@ test('update check stays silent for local and linked source installations', asyn
   assert.equal(called, false);
 });
 
+test('manual update checks still read the latest version for a local source installation', async () => {
+  let called = false;
+  const result = await checkForUpdate({
+    currentVersion: '1.3.0',
+    allowUnsupportedInstallation: true,
+    detectInstallation: async () => ({ mode: 'local' }),
+    run: async () => {
+      called = true;
+      return { ok: true, code: 0, stdout: '"1.3.1"\n', stderr: '' };
+    },
+  });
+
+  assert.equal(called, true);
+  assert.equal(result.status, 'available');
+  assert.equal(result.latestVersion, '1.3.1');
+  assert.equal(result.installSupported, false);
+});
+
 test('automatic update installs one validated version globally without a shell', async () => {
   const calls = [];
   const signal = new AbortController().signal;

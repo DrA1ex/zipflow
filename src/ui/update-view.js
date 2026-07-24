@@ -36,8 +36,13 @@ function updateContent(state, prompt, actions, rows, width, height, theme, anima
       Text(`${t(state, 'Installed version')}: ${prompt.currentVersion}`),
       Text(`${t(state, 'Available version')}: ${prompt.latestVersion}`),
       Text(''),
-      Text(color(theme, 'textMuted', t(state, 'The update is downloaded and installed through the official npm registry.')), { wrap: true }),
+      Text(color(theme, 'textMuted', t(state, prompt.installSupported === false
+        ? 'Automatic installation is available only when Zipflow is running from a global npm package.'
+        : 'The update is downloaded and installed through the official npm registry.')), { wrap: true }),
     );
+    if (prompt.installSupported === false) {
+      children.push(Text(color(theme, 'textMuted', `${t(state, 'Install command')}: ${prompt.installCommand}`), { wrap: true }));
+    }
   } else {
     children.push(Text(t(state, prompt.message, prompt.messageVariables ?? {}), { wrap: true }));
     if (prompt.detail) children.push(Text(color(theme, prompt.phase === 'failed' ? 'danger' : 'textMuted', t(state, prompt.detail)), { wrap: true }));
@@ -81,5 +86,6 @@ function updateTitle(prompt) {
 function updateFooter(prompt) {
   if (prompt.phase === 'installing') return prompt.cancelling ? 'Stopping safely' : 'Enter cancel · Esc cancel · Ctrl+C cancel operation';
   if (prompt.phase === 'complete') return 'Enter choose · ↑/↓ move';
+  if (prompt.phase === 'available' && prompt.installSupported === false) return 'Enter close · Esc close';
   return 'Enter choose · ↑/↓ move · Esc later';
 }

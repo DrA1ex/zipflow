@@ -7,7 +7,7 @@ import {
   deleteLlmApiToken, readLlmApiToken, SecureCredentialStoreError, writeLlmApiToken,
 } from '../security/credential-store.js';
 
-export const SETTINGS_VERSION = 19;
+export const SETTINGS_VERSION = 20;
 export const THEME_NAMES = Object.keys(themes);
 export const LLM_PROVIDERS = ['disabled', 'ollama', 'lmstudio'];
 export const LLM_LANGUAGES = ['English', 'Russian', 'German', 'French', 'Spanish', 'Chinese', 'Japanese'];
@@ -22,6 +22,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   version: SETTINGS_VERSION,
   interfaceLanguage: 'en',
   theme: 'ocean',
+  checkForUpdatesOnStartup: true,
   checkOutput: 'last-line',
   llmProvider: 'disabled',
   llmModel: '',
@@ -255,6 +256,7 @@ export function normalizeSettings(settings) {
   if (typeof value.interfaceLanguage !== 'string' || !value.interfaceLanguage.trim()) value.interfaceLanguage = DEFAULT_SETTINGS.interfaceLanguage;
   value.interfaceLanguage = value.interfaceLanguage.trim().toLowerCase();
   if (!THEME_NAMES.includes(value.theme)) value.theme = DEFAULT_SETTINGS.theme;
+  value.checkForUpdatesOnStartup = value.checkForUpdatesOnStartup !== false;
   if (!['compact', 'last-line'].includes(value.checkOutput)) value.checkOutput = DEFAULT_SETTINGS.checkOutput;
   if (!LLM_PROVIDERS.includes(value.llmProvider)) value.llmProvider = DEFAULT_SETTINGS.llmProvider;
   if (typeof value.llmModel !== 'string') value.llmModel = '';

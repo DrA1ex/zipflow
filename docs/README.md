@@ -22,7 +22,7 @@ This directory contains the detailed documentation kept out of the package READM
 ## Settings and maintenance
 
 - [Settings, history, and storage](settings-and-storage.md) — global settings, credentials, archive storage, backups, run history, analytics, and retention.
-- [Automatic updates](updates.md) — npm version checks, global installation, restart behavior, failures, and disabling the startup check.
+- [Automatic updates](updates.md) — configurable startup checks, manual version checks, global installation, restart behavior, and failures.
 - [Interface localization](i18n/README.md) — built-in and custom language packs and the canonical English catalog.
 
 ## Contributors

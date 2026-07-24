@@ -7,6 +7,7 @@ Press `Ctrl+B` to open global settings.
 Settings include:
 
 - Terlio semantic theme;
+- background update-check preference and an explicit **Check now** action;
 - compact or live running-check output;
 - local LLM provider, authentication, model, load configuration, and languages;
 - independent LLM tasks for archive review, summaries, failed-check explanations, update commit messages, and dirty-tree checkpoint messages;

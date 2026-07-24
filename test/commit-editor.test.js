@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { parseKey } from 'terlio.js';
 import { createInitialState } from '../src/app/state.js';
 import { ZipflowController } from '../src/app/controller.js';
 import { commitMessageEditorInitialValue, defaultCommitMessage } from '../src/app/run-postcheck.js';
@@ -20,7 +21,7 @@ test('JSON-looking LLM commit output is rejected as a commit message', () => {
   assert.equal(defaultCommitMessage(state), 'zipflow: apply run-1');
 });
 
-test('multiline commit editor accepts typing, deletion, and Ctrl+Enter line breaks', async () => {
+test('multiline commit editor uses Shift+Enter and Ctrl+J as line breaks', async () => {
   const state = fixtureState();
   const controller = new ZipflowController(state);
   controller.invalidate = () => {};
@@ -31,10 +32,50 @@ test('multiline commit editor accepts typing, deletion, and Ctrl+Enter line brea
   await controller.handleKey({ name: 'a', printable: true, text: 'a' });
   await controller.handleKey({ name: 'b', printable: true, text: 'b' });
   await controller.handleKey({ name: 'backspace' });
-  await controller.handleKey({ name: 'enter', ctrl: true });
+  await controller.handleKey({ name: 'enter', shift: true });
   await controller.handleKey({ name: 'c', printable: true, text: 'c' });
+  await controller.handleKey({ name: 'enter', ctrl: true, sequence: '\n' });
+  await controller.handleKey({ name: 'd', printable: true, text: 'd' });
 
-  assert.equal(state.editor.value, 'a\nc');
+  assert.equal(state.editor.value, 'a\nc\nd');
+});
+
+test('terminal Shift+Enter, Ctrl+J, and Command+Enter sequences keep editor semantics', async () => {
+  const state = fixtureState();
+  const controller = new ZipflowController(state);
+  controller.invalidate = () => {};
+  controller.showEditor('commit-message', {
+    label: 'Commit message', purpose: 'commit-message', multiline: true,
+  }, 'Subject');
+  let submissions = 0;
+  controller.submitCurrentEditor = async () => { submissions += 1; };
+
+  await controller.handleKey(parseKey('\x1b[13;2u'));
+  await controller.handleKey({ name: 'b', printable: true, text: 'B' });
+  await controller.handleKey(parseKey('\n'));
+  await controller.handleKey({ name: 'c', printable: true, text: 'C' });
+  await controller.handleKey(parseKey('\x1b[13;9u'));
+
+  assert.equal(state.editor.value, 'Subject\nB\nC');
+  assert.equal(submissions, 0);
+});
+
+test('modified Enter never submits a single-line editor', async () => {
+  const state = fixtureState();
+  const controller = new ZipflowController(state);
+  controller.invalidate = () => {};
+  controller.showEditor('archive-input', {
+    label: 'Archive path', purpose: 'archive-path', multiline: false,
+  }, '/tmp/update.zip');
+  let submissions = 0;
+  controller.submitCurrentEditor = async () => { submissions += 1; };
+
+  await controller.handleKey({ name: 'enter', ctrl: true, sequence: '\n' });
+  await controller.handleKey({ name: 'enter', shift: true });
+  await controller.handleKey({ name: 'enter', cmd: true });
+
+  assert.equal(submissions, 0);
+  assert.equal(state.editor.value, '/tmp/update.zip');
 });
 
 function fixtureState() {

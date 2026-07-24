@@ -95,6 +95,7 @@ test('new settings default to keeping source ZIPs for 30 days and 1 GB when arch
   assert.equal(DEFAULT_SETTINGS.archiveDirectory, '~/zipflow-archive');
   assert.equal(DEFAULT_SETTINGS.archiveRetentionDays, 30);
   assert.equal(DEFAULT_SETTINGS.archiveMaxBytes, 1_000_000_000);
+  assert.equal(DEFAULT_SETTINGS.checkForUpdatesOnStartup, true);
   const settings = normalizeSettings();
   assert.equal(settings.llmUseArchiveReview, false);
   assert.equal(settings.llmUseSummary, true);
@@ -117,7 +118,7 @@ test('settings keep categories on the left and the selected category page on the
   const output = renderToString(renderZipflow({ state, width: 110, height: 30 }), { width: 110, height: 30 });
 
   assert.equal(view.focus, 'categories');
-  assert.deepEqual(view.definitions.map((item) => item.id), ['language', 'theme', 'checkOutput', 'localLlm', 'sourceArchive', 'backups', 'managedHistory']);
+  assert.deepEqual(view.definitions.map((item) => item.id), ['language', 'theme', 'updates', 'checkOutput', 'localLlm', 'sourceArchive', 'backups', 'managedHistory']);
   assert.equal(view.direct, true);
   assert.equal(view.activeParameter.id, 'interfaceLanguage');
   assert.match(output, /CATEGORIES/);
@@ -142,6 +143,21 @@ test('a choice replaces only the right pane and returns to the originating param
   assert.equal(view.focus, 'parameters');
   assert.equal(view.parameters[view.parameterIndex].id, 'archivePolicy');
   assert.equal(state.settings.archivePolicy, 'keep');
+}));
+
+test('Updates settings can disable startup checks and expose Check now', async () => withSettingsHome(async () => {
+  const { state, controller } = await settingsController({ checkForUpdatesOnStartup: true });
+  await selectCategory(controller, 'updates');
+  let view = settingsViewModel(state);
+
+  assert.deepEqual(view.parameters.map((item) => item.id), ['checkForUpdatesOnStartup', 'checkUpdatesNow']);
+  assert.equal(view.parameters[0].selected, true);
+  assert.equal(view.parameters[1].label, 'Check now');
+
+  await selectParameter(controller, 0);
+  view = settingsViewModel(state);
+  assert.equal(state.settings.checkForUpdatesOnStartup, false);
+  assert.equal(view.parameters[0].selected, false);
 }));
 
 

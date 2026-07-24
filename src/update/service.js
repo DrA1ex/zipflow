@@ -22,9 +22,10 @@ export async function checkForUpdate({
   run = runProcess,
   detectInstallation = detectNpmGlobalInstallation,
   timeoutMs = 6_000,
+  allowUnsupportedInstallation = false,
 } = {}) {
   const installation = await detectInstallation({ packageName, run, timeoutMs: Math.min(timeoutMs, 3_000) });
-  if (installation.mode !== 'global-npm') {
+  if (installation.mode !== 'global-npm' && !allowUnsupportedInstallation) {
     return { status: 'unsupported', currentVersion, installation };
   }
 
@@ -55,8 +56,8 @@ export async function checkForUpdate({
   }
 
   return compareVersions(latestVersion, currentVersion) > 0
-    ? { status: 'available', currentVersion, latestVersion, installation }
-    : { status: 'current', currentVersion, latestVersion, installation };
+    ? { status: 'available', currentVersion, latestVersion, installation, installSupported: installation.mode === 'global-npm' }
+    : { status: 'current', currentVersion, latestVersion, installation, installSupported: installation.mode === 'global-npm' };
 }
 
 export async function installUpdate(version, {

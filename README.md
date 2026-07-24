@@ -53,7 +53,7 @@ Archive → Review → Apply → Checks → Finish
 - Optional local LLM integration through Ollama or LM Studio.
 - Manual, Guarded autopilot, and Full autopilot decision modes.
 - Run history, performance analytics, reports, stored patches, and ZIP export.
-- Startup update checks and one-step global npm updates.
+- Configurable startup update checks, manual version checks, and one-step global npm updates.
 - English and Russian interface coverage, with additional built-in and custom language packs.
 
 ## Useful controls

@@ -5,6 +5,7 @@ import { ZipflowController } from '../src/app/controller.js';
 import { createInitialState } from '../src/app/state.js';
 import {
   activateUpdateAction,
+  checkForUpdatesNow,
   installAvailableUpdate,
   startStartupUpdateCheck,
 } from '../src/app/update-flow.js';
@@ -105,6 +106,78 @@ test('startup update result does not interrupt an active operation', async () =>
   assert.equal(controller.state.updatePrompt, null);
   assert.equal(controller.state.updateCheck.status, 'available');
   operation.finish();
+});
+
+test('disabled automatic checks skip npm without disabling Check now', async () => {
+  let checks = 0;
+  const controller = controllerWith({
+    check: async (options) => {
+      checks += 1;
+      assert.equal(options?.allowUnsupportedInstallation, true);
+      return { status: 'current', currentVersion: '1.3.0', latestVersion: '1.3.0' };
+    },
+    install: async () => {},
+  });
+  controller.state.settings.checkForUpdatesOnStartup = false;
+
+  await startStartupUpdateCheck(controller);
+  assert.equal(checks, 0);
+
+  controller.state.settingsPanel = { updateChecking: false };
+  const toasts = [];
+  controller.toast = (...args) => { toasts.push(args); };
+  await checkForUpdatesNow(controller);
+
+  assert.equal(checks, 1);
+  assert.deepEqual(toasts[0], ['Zipflow is up to date', 'success', 4, 'Latest version: 1.3.0']);
+});
+
+test('manual update check opens the update modal when a newer version exists', async () => {
+  const controller = controllerWith({
+    check: async (options) => {
+      assert.equal(options?.allowUnsupportedInstallation, true);
+      return {
+        status: 'available', currentVersion: '1.3.0', latestVersion: '1.3.1',
+        installation: { mode: 'global-npm' }, installSupported: true,
+      };
+    },
+    install: async () => {},
+  });
+  controller.state.settingsPanel = { updateChecking: false };
+
+  await checkForUpdatesNow(controller);
+
+  assert.equal(controller.state.updatePrompt.phase, 'available');
+  assert.equal(controller.state.updatePrompt.latestVersion, '1.3.1');
+  assert.equal(controller.state.settingsPanel.updateChecking, false);
+});
+
+test('manual source check shows an informational update modal without an install action', async () => {
+  const controller = controllerWith({
+    check: async () => ({
+      status: 'available', currentVersion: '1.3.0', latestVersion: '1.3.1',
+      installation: { mode: 'local' }, installSupported: false,
+    }),
+    install: async () => { throw new Error('must not install'); },
+  });
+  controller.state.settingsPanel = { updateChecking: false };
+
+  await checkForUpdatesNow(controller);
+
+  assert.equal(controller.state.updatePrompt.installSupported, false);
+  const output = renderToString(renderUpdateOverlay({
+    content: Text('Settings'), state: controller.state, width: 100, height: 30,
+    theme: themes.ocean, animationFrame: 2,
+  }), { width: 100, height: 30 });
+  assert.match(output, /Automatic installation is available only/);
+  assert.doesNotMatch(output, /Update now/);
+  assert.match(output, /Close/);
+
+  await activateUpdateAction(controller, 'update-later');
+  controller.state.project = { root: '/project', name: 'project', labels: ['Node.js'], workspaceLabels: ['Node.js'], projects: [] };
+  controller.state.workflow = null;
+  controller.showHome();
+  assert.equal(controller.state.menuItems.some((item) => item.id === 'update-zipflow'), false);
 });
 
 

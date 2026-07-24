@@ -28,6 +28,7 @@ import { removeIfExists } from '../utils/fs.js';
 import { clearRunSettings } from './runtime-settings.js';
 import { cancelPendingLlmReview } from './run-llm-review.js';
 import { showOperationBusy } from './operation-feedback.js';
+import { isEditorLineBreak, isModifiedEnter, isPlainEnter } from './editor-enter.js';
 import { offerInterruptedRunRecovery } from './interrupted-run.js';
 import {
   beginMenuSearch, followLatestActivity, handleMenuSearchKey, showContextHelp,
@@ -482,7 +483,7 @@ export class ZipflowController {
       }
       return this.invalidate();
     }
-    if (this.state.screen === 'archive-input' && key.name === 'enter' && !key.ctrl && !String(this.state.editor.value ?? '').trim() && !this.state.pathSuggestions?.items?.length) {
+    if (this.state.screen === 'archive-input' && isPlainEnter(key) && !String(this.state.editor.value ?? '').trim() && !this.state.pathSuggestions?.items?.length) {
       if (await handleEmptyArchiveEnter(this)) return this.invalidate();
     }
     const reverseTab = (key.name === 'tab' && key.shift) || key.name === 'backtab' || key.name === 'shift-tab';
@@ -494,15 +495,18 @@ export class ZipflowController {
       movePathSuggestion(this.state, key.name === 'up' ? -1 : 1);
       return this.invalidate();
     }
-    if (pathEditor && ((key.name === 'tab' && !key.shift) || key.name === 'enter') && this.state.pathSuggestions?.items?.length) {
+    if (pathEditor && ((key.name === 'tab' && !key.shift) || isPlainEnter(key)) && this.state.pathSuggestions?.items?.length) {
       await acceptPathSuggestion(this, { submit: () => this.inputActions.run(() => this.submitCurrentEditor()), submitSelected: false });
       return this.invalidate();
     }
-    if (key.name === 'enter' && key.ctrl && this.state.editorContext?.multiline) {
+    if (isEditorLineBreak(key, { multiline: this.state.editorContext?.multiline })) {
       handleInputEditorKey(this.state.editor, key, { multiline: true });
       return this.invalidate();
     }
-    if (key.name === 'enter') {
+    if (isModifiedEnter(key)) {
+      return this.invalidate();
+    }
+    if (isPlainEnter(key)) {
       await this.inputActions.run(() => this.submitCurrentEditor());
       return this.invalidate();
     }
@@ -557,7 +561,7 @@ export class ZipflowController {
 }
 
 function availableUpdateMenuItem(result) {
-  if (result?.status !== 'available') return null;
+  if (result?.status !== 'available' || result.installSupported === false) return null;
   return {
     id: 'update-zipflow', label: 'Update Zipflow',
     description: 'Install the available version globally with npm.',
@@ -567,3 +571,4 @@ function availableUpdateMenuItem(result) {
 function isInterruptKey(key) {
   return key?.name === 'ctrl-c' || (key?.ctrl && key?.name === 'c');
 }
+

@@ -6,11 +6,13 @@ import { modelConfigSummary } from './settings-model.js';
 import { modelTestDescription, modelTestValue } from './settings-model-check.js';
 import { translateForState as t } from '../i18n/index.js';
 import { hasLlmPatchDeliveryTasks, llmTasks } from '../llm/tasks.js';
+import { ZIPFLOW_VERSION } from '../version.js';
 
 export function settingsDefinitions(state) {
   const definitions = [
     { id: 'language', label: 'Language', description: 'Choose the language used by Zipflow itself. Custom JSON language packs are loaded from ~/.zipflow/languages.', directParameterId: 'interfaceLanguage' },
     { id: 'theme', label: 'Theme', description: '', directParameterId: 'theme' },
+    { id: 'updates', label: 'Updates', description: 'Control background update checks and query the latest published npm version.' },
     { id: 'checkOutput', label: 'Running checks', description: '', directParameterId: 'checkOutput' },
     { id: 'localLlm', label: 'Local LLM', description: 'Provider, model, languages, review behavior, and authentication.' },
     { id: 'sourceArchive', label: 'Source archives', description: 'Retention and storage for completed source ZIPs.' },
@@ -27,6 +29,7 @@ export function settingsDefinitions(state) {
 export function settingsParameters(state, definition) {
   if (definition.id === 'language') return [choiceParameter('interfaceLanguage', 'Interface language', interfaceLanguageLabel(state), 'Choose the language used by Zipflow itself. Custom JSON language packs are loaded from ~/.zipflow/languages.')];
   if (definition.id === 'theme') return [choiceParameter('theme', 'Theme', titleCase(state.settings.theme), '')];
+  if (definition.id === 'updates') return updateParameters(state);
   if (definition.id === 'checkOutput') return [choiceParameter(
     'checkOutput', 'Output while running', outputLabel(state.settings.checkOutput),
     'Compact shows status only; last-line also shows the latest command output line.',
@@ -43,6 +46,26 @@ export function settingsParameters(state, definition) {
   if (definition.id === 'backups') return backupParameters(state);
   if (definition.id === 'managedHistory') return managedHistoryParameters(state);
   return [];
+}
+
+function updateParameters(state) {
+  const checking = Boolean(state.settingsPanel?.updateChecking);
+  return [
+    toggleParameter('checkForUpdatesOnStartup', 'Check automatically', state.settings.checkForUpdatesOnStartup,
+      'Check the official npm registry in the background when Zipflow starts.'),
+    actionRow('checkUpdatesNow', checking ? 'Checking for updates…' : 'Check now', updateCheckValue(state),
+      'Query the official npm registry and show the latest published Zipflow version.', {
+        action: 'update-check-now', disabled: checking, loading: checking,
+      }),
+  ];
+}
+
+function updateCheckValue(state) {
+  const result = state.updateCheck;
+  if (result?.status === 'available') return t(state, '{version} available', { version: result.latestVersion });
+  if (result?.status === 'current') return t(state, 'Latest {version}', { version: result.latestVersion });
+  if (result?.status === 'unavailable') return t(state, 'Last check failed');
+  return t(state, 'Not checked');
 }
 
 export function settingsChoices(state, parameter) {
@@ -381,6 +404,14 @@ function managedHistoryParameters(state) {
 
 export function settingsPageHelp(state, definition) {
   const loading = Boolean(state.settingsPanel?.loadingStorage);
+  if (definition.id === 'updates') {
+    const result = state.updateCheck;
+    return [
+      t(state, 'Update status'),
+      t(state, 'Installed version: {version}', { version: result?.currentVersion ?? ZIPFLOW_VERSION }),
+      t(state, 'Latest version: {version}', { version: result?.latestVersion ?? 'Not checked' }),
+    ];
+  }
   if (definition.id === 'sourceArchive') {
     const archives = state.settingsPanel?.storageStats?.archives ?? {};
     if (loading) return [t(state, 'Storage statistics'), t(state, 'Scanning source archive storage…')];
@@ -415,6 +446,7 @@ export function settingsPageHelp(state, definition) {
 
 export function settingsPageSummary(state, definition) {
   const loading = Boolean(state.settingsPanel?.loadingStorage);
+  if (definition.id === 'updates') return [updateCheckValue(state)];
   if (definition.id === 'sourceArchive') {
     const archives = state.settingsPanel?.storageStats?.archives ?? {};
     if (loading) return [t(state, 'Scanning source archive storage…')];

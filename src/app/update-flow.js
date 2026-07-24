@@ -1,7 +1,10 @@
 import { formatInstallCommand } from '../update/service.js';
+import { translateForState as t } from '../i18n/index.js';
 
 export async function startStartupUpdateCheck(controller) {
-  if (process.env.ZIPFLOW_DISABLE_UPDATE_CHECK === '1' || controller.state.updatePrompt) return null;
+  if (process.env.ZIPFLOW_DISABLE_UPDATE_CHECK === '1'
+    || controller.state.settings?.checkForUpdatesOnStartup === false
+    || controller.state.updatePrompt) return null;
   const inputGeneration = controller.state.inputGeneration;
   let result;
   try {
@@ -17,12 +20,44 @@ export async function startStartupUpdateCheck(controller) {
   return result;
 }
 
+export async function checkForUpdatesNow(controller) {
+  const panel = controller.state.settingsPanel;
+  if (panel?.updateChecking || controller.state.updatePrompt) return null;
+  if (panel) panel.updateChecking = true;
+  controller.invalidate();
+  let result;
+  try {
+    result = await controller.updateService.check({ allowUnsupportedInstallation: true });
+    controller.state.updateCheck = result;
+    if (result?.status === 'available') {
+      showAvailableUpdate(controller, result);
+      return result;
+    }
+    if (result?.status === 'current') {
+      controller.toast('Zipflow is up to date', 'success', 4, t(controller.state, 'Latest version: {version}', { version: result.latestVersion }));
+      return result;
+    }
+    controller.toast('Could not check for updates', 'warning', 4, result?.error?.message ?? 'The npm registry did not return a usable version.');
+    return result;
+  } catch (error) {
+    controller.toast('Could not check for updates', 'warning', 4, error.message);
+    return null;
+  } finally {
+    if (controller.state.settingsPanel) controller.state.settingsPanel.updateChecking = false;
+    controller.invalidate();
+  }
+}
+
 export function showAvailableUpdate(controller, result = controller.state.updateCheck) {
   if (!result || result.status !== 'available') return false;
+  const installSupported = result.installSupported !== undefined
+    ? Boolean(result.installSupported)
+    : !result.installation?.mode || result.installation.mode === 'global-npm';
   controller.state.updatePrompt = {
     phase: 'available',
     currentVersion: result.currentVersion,
     latestVersion: result.latestVersion,
+    installSupported,
     selectedIndex: 0,
     message: '',
     detail: '',
@@ -77,10 +112,12 @@ export async function handleUpdateDispatch(controller, action) {
 
 export function updateActions(prompt) {
   if (!prompt) return [];
-  if (prompt.phase === 'available') return [
-    { id: 'update-now', label: 'Update now', description: 'Install the available version globally with npm.' },
-    { id: 'update-later', label: 'Later', description: 'Keep using the current version and ask again on a future startup.' },
-  ];
+  if (prompt.phase === 'available') return prompt.installSupported === false
+    ? [{ id: 'update-later', label: 'Close', description: 'Close this message and continue using the current installation.' }]
+    : [
+      { id: 'update-now', label: 'Update now', description: 'Install the available version globally with npm.' },
+      { id: 'update-later', label: 'Later', description: 'Keep using the current version and ask again on a future startup.' },
+    ];
   if (prompt.phase === 'installing') return [
     { id: 'update-cancel', label: prompt.cancelling ? 'Cancelling update…' : 'Cancel update', description: 'Stop the active npm installation.', disabled: prompt.cancelling },
   ];
@@ -106,7 +143,7 @@ export async function activateUpdateAction(controller, itemId) {
 
 export async function installAvailableUpdate(controller) {
   const prompt = controller.state.updatePrompt;
-  if (!prompt || !prompt.latestVersion || prompt.phase === 'installing') return;
+  if (!prompt || !prompt.latestVersion || prompt.phase === 'installing' || prompt.installSupported === false) return;
   const operation = controller.beginOperation({
     kind: 'self-update',
     label: 'Installing Zipflow update',
