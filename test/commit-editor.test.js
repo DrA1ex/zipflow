@@ -85,3 +85,21 @@ test('concurrent Enter events create only one commit submission', async () => {
   await Promise.all([first, second]);
   assert.equal(submissions, 1);
 });
+
+test('plain and Shift-modified printable shortcuts are inserted while an editor is active', async () => {
+  const state = fixtureState();
+  const controller = new ZipflowController(state);
+  controller.invalidate = () => {};
+  controller.showEditor('commit-message', {
+    label: 'Commit message', purpose: 'commit-message', multiline: true,
+  }, '');
+
+  await controller.handleKey({ name: 'g', printable: true, text: 'g' });
+  await controller.handleKey({ name: 'g', printable: true, text: 'G', shift: true });
+  await controller.handleKey({ name: '?', printable: true, text: '?' });
+  await controller.handleKey({ name: '/', printable: true, text: '/' });
+  await controller.handleKey({ name: 'e', printable: true, text: 'e' });
+
+  assert.equal(state.editor.value, 'gG?/e');
+  assert.equal(state.screen, 'commit-message');
+});

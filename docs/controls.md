@@ -24,7 +24,7 @@ Ctrl+C      cancel the active operation; exit while idle
 ?           show context-sensitive help
 ```
 
-Controls are context-sensitive. The active screen can expose additional actions in its footer or help overlay. Multiline clipboard paste is delivered to editors as one edit operation: embedded line breaks are preserved in the commit-message editor and never interpreted as separate submit keys. Editor submission and menu activation are single-flight, so repeated input cannot start overlapping Git operations.
+Controls are context-sensitive. The active screen can expose additional actions in its footer or help overlay. While a text editor has focus, ordinary printable keys belong exclusively to the editor: single-key shortcuts such as `G`, `E`, `/`, and `?` are suspended, and `Shift` only changes the typed character. Shortcuts with explicit control modifiers, such as `Ctrl+C`, `Ctrl+B`, and `Ctrl+T`, retain their documented behavior. Multiline clipboard paste is delivered to editors as one edit operation: embedded line breaks are preserved in the commit-message editor and never interpreted as separate submit keys. Editor submission and menu activation are single-flight, so repeated input cannot start overlapping Git operations.
 
 ## Operation-aware cancellation
 

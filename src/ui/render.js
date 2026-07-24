@@ -36,6 +36,7 @@ import { translateForState as t } from '../i18n/index.js';
 import { wheelScrollDelta } from './wheel.js';
 import { overlayManagerWithoutToasts, renderZipflowToasts } from './toast-overlay.js';
 import { commandLocationLabel } from '../project/command-spec.js';
+import { isEditorScreen } from '../app/controller-screen-rules.js';
 
 export function renderZipflow({ state, width, height, animationFrame = 0 }) {
   const theme = themes[state.settings?.theme] ?? themes.ocean;
@@ -484,13 +485,6 @@ function preferredPromptHeight(state, width = 80, mainHeight = 20) {
   const requested = Math.max(7, desiredItems + chromeRows);
   const maximum = historyScreen ? Math.max(7, mainHeight - 4) : compactMaximum;
   return Math.min(maximum, requested);
-}
-
-function isEditorScreen(screen) {
-  return [
-    'project-path-input', 'project-entry-path', 'archive-input', 'custom-check-command', 'custom-check-name',
-    'commit-message', 'commit-template', 'deploy-command', 'export-path', 'initial-commit-message',
-  ].includes(screen);
 }
 
 function renderMenuSearchOverlay(state, content, width, height, promptHeight, theme) {

@@ -105,6 +105,9 @@ export class ZipflowController {
       return;
     }
     if (isSettingsScreen(this.state.screen)) return handleSettingsKey(this, normalized);
+    // Active text editors own ordinary and Shift-modified printable input.
+    // Route them before screen/global shortcuts such as G report, ? help, or / search.
+    if (isEditorScreen(this.state.screen)) return this.handleEditorKey(normalized);
     if (handleRunShortcut(this, normalized)) return this.invalidate();
     if (normalized.name === 'escape' && this.state.exportAbortController) {
       this.state.exportAbortController.abort();
@@ -166,7 +169,6 @@ export class ZipflowController {
         return this.invalidate();
       }
     }
-    if (isEditorScreen(this.state.screen)) return this.handleEditorKey(normalized);
     if (handleSetupShortcut(this, normalized) || handleExportShortcut(this, normalized)) return this.invalidate();
     if (normalized.name === 'up' || normalized.name === 'down') {
       this.moveSelection(normalized.name === 'up' ? -1 : 1);

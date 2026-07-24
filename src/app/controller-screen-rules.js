@@ -1,6 +1,6 @@
 export function isEditorScreen(screen) {
   return [
-    'project-path-input', 'archive-input', 'custom-check-command', 'custom-check-name',
+    'project-path-input', 'project-entry-path', 'archive-input', 'custom-check-command', 'custom-check-name',
     'commit-message', 'commit-template', 'deploy-command', 'export-path', 'initial-commit-message',
   ].includes(screen);
 }
