@@ -1,4 +1,4 @@
-import { chmod, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, readdir, rename, rm, stat } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 
@@ -35,14 +35,33 @@ export async function writeTextAtomic(target, value) {
 }
 
 async function writeAtomic(target, value) {
-  await ensureDir(path.dirname(target));
+  const parent = path.dirname(target);
+  await ensureDir(parent);
   const temporary = `${target}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
+  let handle = null;
   try {
-    await writeFile(temporary, value, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    handle = await open(temporary, 'wx', 0o600);
+    await handle.writeFile(value, 'utf8');
+    await handle.sync();
+    await handle.close();
+    handle = null;
     await rename(temporary, target);
-    await chmod(target, 0o600);
+    await syncDirectory(parent);
   } finally {
+    await handle?.close().catch(() => {});
     await rm(temporary, { force: true }).catch(() => {});
+  }
+}
+
+export async function syncDirectory(target) {
+  let handle = null;
+  try {
+    handle = await open(target, 'r');
+    await handle.sync();
+  } catch (error) {
+    if (!['EINVAL', 'ENOTSUP', 'EISDIR', 'EPERM'].includes(error?.code)) throw error;
+  } finally {
+    await handle?.close().catch(() => {});
   }
 }
 

@@ -92,3 +92,35 @@ test('automatic update rejects untrusted version strings before spawning npm', a
   );
   assert.equal(called, false);
 });
+
+test('semantic version comparison is exact for build metadata and large numeric identifiers', () => {
+  assert.equal(compareVersions('1.2.3+build.9', '1.2.3+build.1'), 0);
+  assert.equal(compareVersions('900719925474099300000.0.0', '900719925474099299999.9.9'), 1);
+  assert.equal(compareVersions('1.0.0-alpha.900719925474099300000', '1.0.0-alpha.900719925474099299999'), 1);
+  assert.equal(compareVersions('1.0.0-alpha', '1.0.0-alpha.1'), -1);
+  assert.equal(compareVersions('1.0.0-alpha.1', '1.0.0-alpha.beta'), -1);
+});
+
+test('invalid registry versions never reach npm installation commands', async () => {
+  for (const version of ['01.2.3', '1.02.3', '1.2.03', '1.0.0-alpha.01', '1.0', 'latest', '1.0.0+bad..build']) {
+    let called = false;
+    await assert.rejects(
+      installUpdate(version, { run: async () => { called = true; } }),
+      /Invalid Zipflow update version/,
+    );
+    assert.equal(called, false, version);
+  }
+
+  let installCalled = false;
+  const result = await checkForUpdate({
+    currentVersion: '1.3.1',
+    detectInstallation: async () => ({ mode: 'global-npm' }),
+    run: async () => ({ ok: true, code: 0, stdout: '"1.3.2; echo unsafe"', stderr: '' }),
+  });
+  assert.equal(result.status, 'unavailable');
+  await assert.rejects(
+    installUpdate(result.latestVersion, { run: async () => { installCalled = true; } }),
+    /Invalid Zipflow update version/,
+  );
+  assert.equal(installCalled, false);
+});

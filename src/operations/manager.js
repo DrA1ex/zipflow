@@ -83,6 +83,16 @@ export class OperationManager {
     };
   }
 
+  async run(options, callback) {
+    if (typeof callback !== 'function') throw new TypeError('Operation run requires a callback.');
+    const operation = this.begin(options);
+    try {
+      return await callback(operation);
+    } finally {
+      operation.finish();
+    }
+  }
+
   async interrupt() {
     const operation = this.current;
     if (!operation) return { handled: false, exited: true };

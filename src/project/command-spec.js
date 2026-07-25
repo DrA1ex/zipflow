@@ -6,20 +6,14 @@ export const COMMAND_DIRECTORY_SEPARATOR = '::';
 
 export function parseCommandSpec(value) {
   const raw = String(value ?? '').trim();
-  const separatorIndex = raw.indexOf(COMMAND_DIRECTORY_SEPARATOR);
-  if (separatorIndex < 0) {
-    return {
-      input: raw,
-      cwd: '.',
-      commandText: raw,
-      hasExplicitCwd: false,
-    };
-  }
+  const separatorIndex = commandDirectorySeparatorIndex(raw);
+  if (separatorIndex < 0) return rootCommand(raw);
   const cwdText = raw.slice(0, separatorIndex).trim();
+  if (!looksLikeCommandDirectory(cwdText)) return rootCommand(raw);
   const commandText = raw.slice(separatorIndex + COMMAND_DIRECTORY_SEPARATOR.length).trim();
   return {
     input: raw,
-    cwd: normalizeCommandCwd(cwdText),
+    cwd: normalizeCommandCwd(unquoteCommandDirectory(cwdText)),
     commandText,
     hasExplicitCwd: true,
   };
@@ -28,7 +22,7 @@ export function parseCommandSpec(value) {
 export function formatCommandSpec({ cwd = '.', commandText = '' } = {}) {
   const normalizedCwd = normalizeCommandCwd(cwd);
   const command = String(commandText ?? '').trim();
-  return normalizedCwd === '.' ? command : `${normalizedCwd}/ :: ${command}`;
+  return normalizedCwd === '.' ? command : `${quoteCommandDirectory(`${normalizedCwd}/`)} :: ${command}`;
 }
 
 export function normalizeCommandCwd(value) {
@@ -88,6 +82,62 @@ export function commandLocationLabel(cwd = '.') {
 
 export function commandPrefix(value) {
   const raw = String(value ?? '');
-  const separatorIndex = raw.indexOf(COMMAND_DIRECTORY_SEPARATOR);
-  return separatorIndex < 0 ? raw : raw.slice(0, separatorIndex);
+  const separatorIndex = commandDirectorySeparatorIndex(raw);
+  if (separatorIndex < 0) return raw;
+  const cwdText = raw.slice(0, separatorIndex).trim();
+  return looksLikeCommandDirectory(cwdText) ? raw.slice(0, separatorIndex) : raw;
+}
+
+function rootCommand(raw) {
+  return { input: raw, cwd: '.', commandText: raw, hasExplicitCwd: false };
+}
+
+function commandDirectorySeparatorIndex(value) {
+  let quote = '';
+  let escaped = false;
+  for (let index = 0; index < value.length - 1; index += 1) {
+    const character = value[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (character === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (character === quote) quote = '';
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      continue;
+    }
+    if (character === ':' && value[index + 1] === ':') return index;
+  }
+  return -1;
+}
+
+function looksLikeCommandDirectory(value) {
+  if (!value) return false;
+  if (isQuoted(value)) return value.length > 2;
+  return isSafeUnquotedDirectory(value);
+}
+
+function isQuoted(value) {
+  return value.length >= 2 && (value[0] === '"' || value[0] === "'") && value.at(-1) === value[0];
+}
+
+function unquoteCommandDirectory(value) {
+  if (!isQuoted(value)) return value;
+  if (value[0] === "'") return value.slice(1, -1);
+  try { return JSON.parse(value); } catch { return value; }
+}
+
+function quoteCommandDirectory(value) {
+  return isSafeUnquotedDirectory(value) ? value : JSON.stringify(value);
+}
+
+function isSafeUnquotedDirectory(value) {
+  return Boolean(value) && !/[\s"'`$;&|<>()[\]{}]/.test(value);
 }

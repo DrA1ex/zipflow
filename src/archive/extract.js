@@ -35,15 +35,15 @@ export async function extractArchive(archivePath, destination, { limits = DEFAUL
             } else {
               await mkdir(path.dirname(target), { recursive: true });
               const stream = await openEntryStream(zip, entry);
-              const output = createWriteStream(target, { mode: validated.mode || 0o644, flags: 'wx' });
+              const output = createWriteStream(target, { mode: validated.mode ?? 0o644, flags: 'wx' });
               if (signal) await pipeline(stream, output, { signal });
               else await pipeline(stream, output);
-              if (validated.mode) await chmod(target, validated.mode);
+              if (validated.mode !== null) await chmod(target, validated.mode);
               entries.push({
                 path: validated.path,
                 absolutePath: target,
                 size: entry.uncompressedSize,
-                mode: validated.mode || 0o644,
+                mode: validated.mode,
               });
             }
           }

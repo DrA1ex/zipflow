@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { chmod, rename, rm } from 'node:fs/promises';
+import { chmod, rename, rm, stat } from 'node:fs/promises';
 import { createBackup } from './backup.js';
 import { ensureDir, exists } from '../utils/fs.js';
 import { hashFile } from '../utils/hash.js';
@@ -32,9 +32,10 @@ export async function applyUpdatePlan({ runId, projectPath, plan, decisions = ne
       await ensureDir(path.dirname(target));
       await assertSafeProjectPath(projectPath, item.path);
       const temporary = `${target}.zipflow-${process.pid}-${shortToken(8)}.tmp`;
+      const mode = item.mode ?? (item.kind === 'updated' ? (await stat(target)).mode & 0o777 : 0o644);
       try {
-        await copyRegularFileNoFollow(item.sourcePath, temporary, { mode: item.mode || 0o644, signal, sourceLabel: 'Extracted archive file' });
-        if (item.mode) await chmod(temporary, item.mode);
+        await copyRegularFileNoFollow(item.sourcePath, temporary, { mode, signal, sourceLabel: 'Extracted archive file' });
+        await chmod(temporary, mode);
         await assertSafeProjectPath(projectPath, item.path);
         await rename(temporary, target);
       } finally {
@@ -107,8 +108,9 @@ async function restoreBackup(backup) {
     await assertSafeProjectPath(backup.manifest.projectPath, item.path);
     const temporary = `${currentPath}.zipflow-restore-${process.pid}-${shortToken(8)}.tmp`;
     try {
-      await copyRegularFileNoFollow(backupPath, temporary, { mode: item.mode || 0o600, sourceLabel: 'Backup file' });
-      if (item.mode) await chmod(temporary, item.mode);
+      const mode = item.mode ?? 0o600;
+      await copyRegularFileNoFollow(backupPath, temporary, { mode, sourceLabel: 'Backup file' });
+      await chmod(temporary, mode);
       await assertSafeProjectPath(backup.manifest.projectPath, item.path);
       await rename(temporary, currentPath);
     } finally {

@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { copyTextToClipboard, handleInputEditorKey } from 'terlio.js';
-import { runReportPath } from '../runs/store.js';
+import { cleanupRunStorage, runReportPath } from '../runs/store.js';
 import { revealFile } from '../utils/reveal.js';
 import { configureWorkspaceProjects, discoverProject } from '../project/detect.js';
 import { ensureZipflowHome, getZipflowHome, loadWorkflow } from '../workflow/store.js';
@@ -78,6 +78,7 @@ export class ZipflowController {
   async boot() {
     try {
       await ensureZipflowHome();
+      await cleanupRunStorage().catch(() => null);
       this.state.settings = await loadSettings();
       this.state.i18n = await configureI18n(this.state.settings.interfaceLanguage);
       this.state.project = await discoverProject(process.cwd());
@@ -199,6 +200,10 @@ export class ZipflowController {
 
   beginOperation(options) {
     return this.operations.begin(options);
+  }
+
+  runOperation(options, callback) {
+    return this.operations.run(options, callback);
   }
 
   showContextHelp() {

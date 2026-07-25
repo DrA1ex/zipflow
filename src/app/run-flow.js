@@ -143,7 +143,6 @@ export async function inspectArchivePath(controller, enteredPath, { allowDuplica
       previous = await findAppliedArchiveRun(state.project.root, digest);
       if (previous && state.workflow.autonomy?.mode === 'manual') {
         state.busy = false;
-        operation.finish();
         return showDuplicateWarning(controller, archivePath, digest, previous);
       }
       if (previous) controller.message('Previously applied archive detected', [
@@ -152,12 +151,13 @@ export async function inspectArchivePath(controller, enteredPath, { allowDuplica
     }
     return inspectArchive(controller, archivePath, digest, archiveInfo, operation, previous);
   } catch (error) {
-    operation.finish();
     if (error.code === 'cancelled') {
       controller.message('Archive inspection cancelled', ['No project files were changed.'], 'warning');
       return beginArchiveInput(controller);
     }
     throw error;
+  } finally {
+    operation.finish();
   }
 }
 
@@ -254,7 +254,6 @@ async function continueArchiveInspection(controller, { archivePath, archiveHash,
     state.pendingArchiveInspection = null;
     setProgress(controller, 7, 7, 'Plan ready');
     state.busy = false;
-    activeOperation.finish();
 
     controller.message('Archive inspected', [
       `${formatArchiveName(archivePath)} · ${extracted.fileCount} files${extracted.rootPrefix ? ` · root ${extracted.rootPrefix}/` : ''}`,
@@ -273,7 +272,6 @@ async function continueArchiveInspection(controller, { archivePath, archiveHash,
     if (requiresSafetyReview(state.archiveSafety)) return showArchiveSafetyReview(controller);
     return continueAfterSafety(controller);
   } catch (error) {
-    activeOperation.finish();
     if (error.code === 'cancelled') {
       controller.message('Archive inspection cancelled', ['No project files were changed.'], 'warning');
       await cancelRun(controller);
@@ -371,15 +369,19 @@ export async function startApply(controller, { checkpointCreated = false } = {})
 }
 
 export async function createCheckpoint(controller, { force = false, operation = null } = {}) {
-  const ownOperation = operation ? null : controller.beginOperation({ kind: 'git-checkpoint', label: 'Creating Git checkpoint' });
-  const activeOperation = operation ?? ownOperation;
+  if (!operation) {
+    return controller.runOperation(
+      { kind: 'git-checkpoint', label: 'Creating Git checkpoint' },
+      (activeOperation) => createCheckpoint(controller, { force, operation: activeOperation }),
+    );
+  }
   let paths = archiveConflictPaths(controller.state);
   if (!paths.length && force) {
     const status = await getGitStatus(controller.state.project.root).catch(() => null);
     paths = [...new Set([...(status?.staged ?? []), ...(status?.unstaged ?? [])].map((item) => item.path))].sort();
   }
-  if (!paths.length) { ownOperation?.finish(); return; }
-  const checkpoint = await createCheckpointSnapshot(controller, { operation: activeOperation });
+  if (!paths.length) return;
+  const checkpoint = await createCheckpointSnapshot(controller, { operation });
   if (!checkpoint.ok) throw new Error(`Checkpoint ref failed: ${checkpoint.reason}`);
   controller.state.run.checkpoint = {
     revision: checkpoint.revision,
@@ -395,7 +397,6 @@ export async function createCheckpoint(controller, { force = false, operation = 
     ...(checkpoint.ref ? [`Message: ${checkpoint.message}`] : []),
     'The working tree and user index were not modified; untracked conflicts remain protected by the normal file backup.',
   ], 'success');
-  ownOperation?.finish();
 }
 
 export async function retryArchive(controller) {

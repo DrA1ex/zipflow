@@ -119,3 +119,20 @@ test('controller keeps the current screen when an operation conflict reaches the
   assert.equal(toasts.length, 1);
   llm.finish();
 });
+
+test('scoped operations always release ownership after success and failure', async () => {
+  const manager = new OperationManager();
+  const value = await manager.run({ kind: 'success' }, async (operation) => {
+    assert.equal(manager.current.kind, 'success');
+    assert.equal(operation.signal.aborted, false);
+    return 42;
+  });
+  assert.equal(value, 42);
+  assert.equal(manager.current, null);
+
+  await assert.rejects(
+    manager.run({ kind: 'failure' }, async () => { throw new Error('checkpoint failed'); }),
+    /checkpoint failed/,
+  );
+  assert.equal(manager.current, null);
+});

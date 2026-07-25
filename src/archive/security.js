@@ -33,7 +33,11 @@ export function validateZipEntry(entry, limits = DEFAULT_ARCHIVE_LIMITS) {
     throw archiveError(`Archive is not allowed to modify .git: ${original}`);
   }
 
-  const unixMode = (entry.externalFileAttributes >>> 16) & 0xffff;
+  const rawUnixMode = (entry.externalFileAttributes >>> 16) & 0xffff;
+  const creatorSystem = (Number(entry.versionMadeBy) >>> 8) & 0xff;
+  const hasUnixMode = creatorSystem === 3 || creatorSystem === 19
+    || (entry.versionMadeBy == null && rawUnixMode !== 0);
+  const unixMode = hasUnixMode ? rawUnixMode : 0;
   const fileType = unixMode & 0o170000;
   const isDirectoryType = fileType === 0o040000;
   const isRegularType = fileType === 0o100000;
@@ -54,7 +58,7 @@ export function validateZipEntry(entry, limits = DEFAULT_ARCHIVE_LIMITS) {
     path: normalized,
     collisionKey: normalized.normalize('NFKC').toLocaleLowerCase('en-US'),
     directory: trailingSlash,
-    mode: unixMode & 0o777,
+    mode: hasUnixMode ? unixMode & 0o777 : null,
     skip: segments[0] === '__MACOSX',
   };
 }

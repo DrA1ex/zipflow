@@ -1,7 +1,12 @@
 #!/usr/bin/env node
-import { startZipflow } from '../src/index.js';
+import { ZIPFLOW_VERSION } from '../src/version.js';
 
-startZipflow().catch((error) => {
-  console.error(`Zipflow failed to start: ${error.message}`);
-  process.exitCode = 1;
-});
+if (process.argv.slice(2).some((argument) => argument === '--version' || argument === '-v')) {
+  process.stdout.write(`${ZIPFLOW_VERSION}\n`);
+} else {
+  const { startZipflow } = await import('../src/index.js');
+  startZipflow().catch((error) => {
+    console.error(`Zipflow failed to start: ${error.message}`);
+    process.exitCode = 1;
+  });
+}

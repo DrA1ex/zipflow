@@ -203,21 +203,20 @@ async function prepareExportPreview(controller, { custom = false } = {}) {
     });
     updateSelectedSize(state.exportDraft);
     state.busy = false;
-    state.exportAbortController = null;
-    operation.finish();
     if (custom) return showExportFiles(controller, 0, { origin: 'mode' });
     if (sensitive.length) return showSensitiveReview(controller);
     return showExportPreview(controller);
   } catch (error) {
     state.busy = false;
-    state.exportAbortController = null;
-    operation.finish();
     if (error.code === 'cancelled') {
       controller.toast('ZIP preview preparation cancelled', 'info');
       return showExportMode(controller);
     }
     controller.message('Could not prepare ZIP preview', [error.message], 'error', { collapsedSummary: `ZIP preview failed · ${error.message}` });
     return showExportMode(controller);
+  } finally {
+    state.exportAbortController = null;
+    operation.finish();
   }
 }
 

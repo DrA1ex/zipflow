@@ -49,6 +49,8 @@ npm run verify
 
 `npm run verify` performs source checks and runs the automated test suite. `npm publish` also runs this verification through `prepublishOnly`.
 
+`npm run test:package` creates the npm tarball, installs it into two isolated consumer directories, verifies the exact runtime dependency graph from `npm-shrinkwrap.json`, and runs the packaged `zipflow --version` smoke test.
+
 For the complete release gate, including inspection of the files npm would publish, run:
 
 ```bash
@@ -74,7 +76,7 @@ Before publishing, inspect exactly what npm will include:
 npm pack --dry-run
 ```
 
-The published package includes only the executable, runtime source files, `docs/`, README, and license. Tests, local state, development archives, and `package-lock.json` are not part of the npm tarball.
+The published package includes only the executable, runtime source files, `docs/`, README, license, changelog, and `npm-shrinkwrap.json`. Tests, local state, development archives, and `package-lock.json` are not part of the npm tarball.
 
 Create a local package tarball for installation testing:
 

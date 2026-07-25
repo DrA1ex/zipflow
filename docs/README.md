@@ -23,6 +23,7 @@ This directory contains the detailed documentation kept out of the package READM
 
 - [Settings, history, and storage](settings-and-storage.md) — global settings, credentials, archive storage, backups, run history, analytics, and retention.
 - [Automatic updates](updates.md) — configurable startup checks, manual version checks, global installation, restart behavior, and failures.
+- [Release hardening](release-hardening.md) — reproducible packages, cancellation, command paths, durable persistence, retention, and project locks.
 - [Interface localization](i18n/README.md) — built-in and custom language packs and the canonical English catalog.
 
 ## Contributors

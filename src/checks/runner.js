@@ -20,6 +20,7 @@ export async function runChecks({ workflow, projectPath, changedPaths, onUpdate 
         onOutput: (event) => onUpdate?.({ type: 'output', check, index, event, results }),
       });
     } catch (error) {
+      if (error?.code === 'cancelled') throw error;
       result = failureResult(error.message);
     }
     const normalized = {
@@ -58,18 +59,18 @@ async function runCheck(check, context) {
 
 async function runNodeSyntax(check, context) {
   const files = changedPathsForCwd(context.changedPaths, context.cwdRelative).filter((file) => /\.(cjs|mjs|js)$/.test(file));
-  return runPerFile(files, (file) => runProcess(process.execPath, ['--check', file], commandOptions(check, context)), 'No changed JavaScript files.');
+  return runPerFile(files, (file) => runProcess(process.execPath, nodeSyntaxArguments(file), commandOptions(check, context)), 'No changed JavaScript files.');
 }
 
 async function runPythonSyntax(check, context) {
   const files = changedPathsForCwd(context.changedPaths, context.cwdRelative).filter((file) => file.endsWith('.py'));
-  return runPerFile(files, (file) => runProcess(check.interpreter || 'python3', ['-m', 'py_compile', file], commandOptions(check, context)), 'No changed Python files.');
+  return runPerFile(files, (file) => runProcess(check.interpreter || 'python3', pythonSyntaxArguments(file), commandOptions(check, context)), 'No changed Python files.');
 }
 
 async function runGoFormat(check, context) {
   const files = changedPathsForCwd(context.changedPaths, context.cwdRelative).filter((file) => file.endsWith('.go'));
   if (!files.length) return successResult('No changed Go files.');
-  const result = await runProcess('gofmt', ['-d', ...files], commandOptions(check, context));
+  const result = await runProcess('gofmt', goFormatArguments(files), commandOptions(check, context));
   if (result.ok && result.stdout.trim()) return { ...result, ok: false, code: 1, stderr: 'gofmt found formatting differences.\n' };
   return result;
 }
@@ -110,4 +111,21 @@ function successResult(stdout = '') {
 
 function failureResult(stderr) {
   return { ok: false, code: 1, signal: null, timedOut: false, stdout: '', stderr, durationMs: 0 };
+}
+
+export function builtInPathArgument(value) {
+  const normalized = String(value ?? '').replaceAll('\\', '/').replace(/^\.\//, '');
+  return `./${normalized}`;
+}
+
+export function nodeSyntaxArguments(file) {
+  return ['--check', '--', builtInPathArgument(file)];
+}
+
+export function pythonSyntaxArguments(file) {
+  return ['-m', 'py_compile', builtInPathArgument(file)];
+}
+
+export function goFormatArguments(files) {
+  return ['-d', '--', ...files.map(builtInPathArgument)];
 }

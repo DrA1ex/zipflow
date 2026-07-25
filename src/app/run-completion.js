@@ -1,4 +1,4 @@
-import { saveRunRecord, runReportPath } from '../runs/store.js';
+import { pruneRunHistory, saveRunRecord, runReportPath } from '../runs/store.js';
 import { saveWorkflow } from '../workflow/store.js';
 import { displayPath } from '../utils/paths.js';
 import { compactPlanLine } from '../ui/format.js';
@@ -35,6 +35,7 @@ export async function completeNoChangeRun(controller, { reason = 'archive-match'
   ], 'success', { collapsible: false, collapsedSummary: manuallyExcluded ? 'No changes · all paths kept local' : 'No changes · archive already matches project' });
   await finalizeSourceArchive(controller);
   await releaseRunResources(controller);
+  await pruneRunHistory().catch(() => null);
   clearRunSettings(state);
   beginAnotherArchive(controller);
 }
@@ -52,6 +53,7 @@ export async function completeRun(controller, status) {
     controller.toast(`${backupCleanup.removed.length} old backup${backupCleanup.removed.length === 1 ? '' : 's'} removed`, 'info');
   }
   await releaseRunResources(controller);
+  await pruneRunHistory().catch(() => null);
   controller.message('Final summary', finalSummaryLines(state), 'summary', {
     collapsedSummary: `Run complete · ${appliedPlanLine(state)} · ${checkSummaryLine(state.run.checks)}`,
   });

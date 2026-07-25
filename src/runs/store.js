@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { readdir } from 'node:fs/promises';
+import { readdir, rm, stat } from 'node:fs/promises';
 import { ensureDir, readJson, writeJsonAtomic, writeTextAtomic } from '../utils/fs.js';
 import { getZipflowHome } from '../workflow/store.js';
 import { canonicalPath } from '../utils/paths.js';
@@ -126,4 +126,125 @@ export function runDirectory(runId) {
 
 export function runReportPath(runId) {
   return path.join(runDirectory(runId), 'report.txt');
+}
+
+export const DEFAULT_RUN_RETENTION_DAYS = 90;
+export const DEFAULT_RUN_STORAGE_BYTES = 512 * 1024 * 1024;
+
+const TERMINAL_RUN_STATUSES = new Set([
+  'cancelled', 'failed', 'no_changes', 'completed', 'completed_with_errors',
+  'interrupted_closed', 'rolled_back',
+]);
+
+export async function cleanupRunStorage(options = {}) {
+  const temporary = await removeOrphanedTemporaryDirectories(options);
+  const retention = await pruneRunHistory(options);
+  return { temporary, retention };
+}
+
+export async function removeOrphanedTemporaryDirectories({ activeRunIds = [] } = {}) {
+  const active = new Set(activeRunIds);
+  const tempRoot = path.join(getZipflowHome(), 'tmp');
+  let entries = [];
+  try {
+    entries = await readdir(tempRoot, { withFileTypes: true });
+  } catch (error) {
+    if (error.code === 'ENOENT') return [];
+    throw error;
+  }
+  const removed = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || active.has(entry.name)) continue;
+    const record = await loadRunRecord(entry.name).catch(() => null);
+    if (record && !TERMINAL_RUN_STATUSES.has(record.status)) continue;
+    await removeRunPath(path.join(tempRoot, entry.name));
+    removed.push(entry.name);
+  }
+  return removed;
+}
+
+export async function pruneRunHistory({
+  activeRunIds = [],
+  retentionDays = DEFAULT_RUN_RETENTION_DAYS,
+  maxBytes = DEFAULT_RUN_STORAGE_BYTES,
+  now = Date.now(),
+} = {}) {
+  const runsRoot = path.join(getZipflowHome(), 'runs');
+  let entries = [];
+  try {
+    entries = await readdir(runsRoot, { withFileTypes: true });
+  } catch (error) {
+    if (error.code === 'ENOENT') return { removed: [], totalBytes: 0 };
+    throw error;
+  }
+  const active = new Set(activeRunIds);
+  const candidates = [];
+  let totalBytes = 0;
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const directory = path.join(runsRoot, entry.name);
+    const [record, details] = await Promise.all([
+      loadRunRecord(entry.name).catch(() => null),
+      runDirectoryDetails(directory),
+    ]);
+    totalBytes += details.size;
+    const protectedRun = active.has(entry.name)
+      || Boolean(record?.important || record?.protected || record?.retained)
+      || Boolean(record && !TERMINAL_RUN_STATUSES.has(record.status));
+    candidates.push({
+      id: entry.name,
+      directory,
+      size: details.size,
+      timestamp: parsedTime(record?.createdAt) ?? details.mtimeMs,
+      protected: protectedRun,
+    });
+  }
+  candidates.sort((left, right) => left.timestamp - right.timestamp || left.id.localeCompare(right.id));
+  const removed = [];
+  const ageLimit = Math.max(0, Number(retentionDays)) * 24 * 60 * 60_000;
+  for (const candidate of candidates) {
+    if (candidate.protected || now - candidate.timestamp <= ageLimit) continue;
+    await removeRunPath(candidate.directory);
+    totalBytes -= candidate.size;
+    removed.push(candidate.id);
+    candidate.removed = true;
+  }
+  const storageLimit = Math.max(0, Number(maxBytes));
+  for (const candidate of candidates) {
+    if (totalBytes <= storageLimit) break;
+    if (candidate.protected || candidate.removed) continue;
+    await removeRunPath(candidate.directory);
+    totalBytes -= candidate.size;
+    removed.push(candidate.id);
+    candidate.removed = true;
+  }
+  return { removed, totalBytes: Math.max(0, totalBytes) };
+}
+
+async function runDirectoryDetails(directory) {
+  const info = await stat(directory);
+  return { size: await directorySize(directory), mtimeMs: info.mtimeMs };
+}
+
+async function directorySize(directory) {
+  let total = 0;
+  const entries = await readdir(directory, { withFileTypes: true });
+  for (const entry of entries) {
+    const target = path.join(directory, entry.name);
+    if (entry.isDirectory()) total += await directorySize(target);
+    else if (entry.isFile()) {
+      const info = await stat(target);
+      total += info.size;
+    }
+  }
+  return total;
+}
+
+async function removeRunPath(target) {
+  await rm(target, { recursive: true, force: true });
+}
+
+function parsedTime(value) {
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
 }

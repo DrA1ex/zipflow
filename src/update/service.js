@@ -124,7 +124,8 @@ export function compareVersions(left, right) {
   const b = parseVersion(right);
   if (!a || !b) throw new Error(`Cannot compare invalid versions: ${left}, ${right}`);
   for (const key of ['major', 'minor', 'patch']) {
-    if (a[key] !== b[key]) return a[key] > b[key] ? 1 : -1;
+    const comparison = compareNumericIdentifier(a[key], b[key]);
+    if (comparison) return comparison;
   }
   if (!a.prerelease.length && !b.prerelease.length) return 0;
   if (!a.prerelease.length) return 1;
@@ -136,23 +137,35 @@ export function compareVersions(left, right) {
     if (aPart === undefined) return -1;
     if (bPart === undefined) return 1;
     if (aPart === bPart) continue;
-    const aNumber = /^\d+$/.test(aPart) ? Number(aPart) : null;
-    const bNumber = /^\d+$/.test(bPart) ? Number(bPart) : null;
-    if (aNumber !== null && bNumber !== null) return aNumber > bNumber ? 1 : -1;
-    if (aNumber !== null) return -1;
-    if (bNumber !== null) return 1;
-    return aPart.localeCompare(bPart);
+    const aNumeric = /^\d+$/.test(aPart);
+    const bNumeric = /^\d+$/.test(bPart);
+    if (aNumeric && bNumeric) return compareNumericIdentifier(aPart, bPart);
+    if (aNumeric) return -1;
+    if (bNumeric) return 1;
+    return aPart < bPart ? -1 : 1;
   }
   return 0;
 }
 
 export function parseVersion(value) {
-  const match = String(value ?? '').trim().match(/^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/);
+  const source = String(value ?? '').trim();
+  const match = source.match(/^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/);
   if (!match) return null;
+  const prerelease = match[4] ? match[4].split('.') : [];
+  if (prerelease.some((identifier) => /^\d+$/.test(identifier) && identifier.length > 1 && identifier.startsWith('0'))) return null;
   return {
-    major: Number(match[1]), minor: Number(match[2]), patch: Number(match[3]),
-    prerelease: match[4] ? match[4].split('.') : [],
+    major: match[1],
+    minor: match[2],
+    patch: match[3],
+    prerelease,
+    build: match[5] ? match[5].split('.') : [],
   };
+}
+
+function compareNumericIdentifier(left, right) {
+  if (left.length !== right.length) return left.length > right.length ? 1 : -1;
+  if (left === right) return 0;
+  return left > right ? 1 : -1;
 }
 
 export function formatInstallCommand(version, {

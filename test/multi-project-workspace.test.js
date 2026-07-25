@@ -181,3 +181,25 @@ test('workflow version stores selected projects and migrates legacy workflows to
     await cleanup();
   }
 });
+
+test('command directory syntax ignores quoted separators and supports quoted relative directories', async () => {
+  const { root, cleanup } = await fixture();
+  try {
+    await mkdir(path.join(root, 'web app'), { recursive: true });
+    assert.deepEqual(parseCommandSpec(`python -c 'print("a::b")'`), {
+      input: `python -c 'print("a::b")'`, cwd: '.', commandText: `python -c 'print("a::b")'`, hasExplicitCwd: false,
+    });
+    assert.deepEqual(parseCommandSpec('echo a :: b'), {
+      input: 'echo a :: b', cwd: '.', commandText: 'echo a :: b', hasExplicitCwd: false,
+    });
+    assert.deepEqual(parseCommandSpec('"web app/" :: npm test'), {
+      input: '"web app/" :: npm test', cwd: 'web app', commandText: 'npm test', hasExplicitCwd: true,
+    });
+    assert.equal(formatCommandSpec({ cwd: 'web app', commandText: 'npm test' }), '"web app/" :: npm test');
+    assert.equal((await validateCommandSpec(root, '"web app/" :: npm test')).cwd, 'web app');
+    await assert.rejects(() => validateCommandSpec(root, '/tmp/ :: npm test'), /absolute|escapes|relative/i);
+    await assert.rejects(() => validateCommandSpec(root, '../outside/ :: npm test'), /escapes the project root/i);
+  } finally {
+    await cleanup();
+  }
+});

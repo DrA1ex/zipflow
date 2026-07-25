@@ -17,10 +17,13 @@ test('npm release metadata declares a public executable package and a verificati
   assert.deepEqual(packageJson.os, ['darwin', 'linux']);
   assert.ok(packageJson.keywords.includes('terminal'));
   assert.ok(packageJson.keywords.includes('rollback'));
-  assert.equal(packageJson.scripts?.prepublishOnly, 'npm run verify');
+  assert.equal(packageJson.scripts?.prepublishOnly, 'npm run verify && npm run test:package');
   assert.match(packageJson.scripts?.['release:check'] ?? '', /npm run verify/);
+  assert.match(packageJson.scripts?.['release:check'] ?? '', /npm run test:package/);
   assert.match(packageJson.scripts?.['release:check'] ?? '', /npm pack --dry-run/);
+  assert.equal(packageJson.scripts?.['test:package'], 'node ./scripts/verify-package-install.js');
   assert.ok(packageJson.files.includes('docs'));
+  assert.ok(packageJson.files.includes('npm-shrinkwrap.json'));
 
   const executable = await stat(path.join(root, 'bin/zipflow.js'));
   assert.notEqual(executable.mode & 0o111, 0);
