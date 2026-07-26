@@ -3,6 +3,7 @@ import { updateActions } from '../app/update-flow.js';
 import { localizeUiItem, translateForState as t } from '../i18n/index.js';
 import { selectRows } from './select-rows.js';
 import { wheelScrollDelta } from './wheel.js';
+import { bindScreenAction, captureScreenActionContext } from '../app/ui-action-context.js';
 
 export function renderUpdateOverlay({ content, state, width, height, theme, animationFrame = 0 }) {
   const prompt = state.updatePrompt;
@@ -29,6 +30,7 @@ export function renderUpdateOverlay({ content, state, width, height, theme, anim
 
 function updateContent(state, prompt, actions, rows, width, height, theme, animationFrame = 0) {
   const children = [];
+  const actionContext = captureScreenActionContext(state);
   if (prompt.phase === 'available') {
     children.push(
       Text(t(state, 'A newer Zipflow version is available.'), { wrap: true }),
@@ -62,7 +64,7 @@ function updateContent(state, prompt, actions, rows, width, height, theme, anima
       maxItemLines: 1,
       theme,
       pointerId: 'zipflow:update',
-      onSelect: (item, index) => state.dispatch?.({ type: 'update-activate', id: actions[index]?.id }),
+      onSelect: (item, index) => state.dispatch?.(bindScreenAction(actionContext, { type: 'update-activate', id: actions[index]?.id })),
       onWheel: (event) => {
         const delta = wheelScrollDelta(event);
         if (delta) state.dispatch?.({ type: 'update-move', delta });

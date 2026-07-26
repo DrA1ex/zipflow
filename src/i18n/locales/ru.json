@@ -1360,7 +1360,22 @@
     "Assessment:": "Оценка:",
     "Review:": "Проверка:",
     "Reviewed content:": "Проверено содержимое:",
-    "Changed-path manifest:": "Манифест изменённых путей:"
+    "Changed-path manifest:": "Манифест изменённых путей:",
+    "Open the stored plan, report, changed files, and backup state before deciding.": "Просмотреть сохранённый план, отчёт, изменённые файлы и состояние резервной копии перед решением.",
+    "Keep applied update and close run": "Оставить применённое обновление и закрыть запуск",
+    "Accept the project files exactly as they are now and finish this interrupted run.": "Принять текущее состояние файлов проекта и завершить прерванный запуск.",
+    "Roll back applied update": "Откатить применённое обновление",
+    "Restore the exact files captured before this update was applied.": "Восстановить точное состояние файлов до применения этого обновления.",
+    "Close interrupted run": "Закрыть прерванный запуск",
+    "Close the unfinished inspection without changing project files.": "Закрыть незавершённую проверку, не изменяя файлы проекта.",
+    "Resolve interrupted update": "Завершить прерванное обновление",
+    "The update is already present in the project.": "Обновление уже применено к проекту.",
+    "Choose Keep applied update to accept it, or Roll back to restore the previous files.": "Выберите «Оставить применённое обновление», чтобы принять его, или «Откатить», чтобы восстановить прежние файлы.",
+    "No project update was applied.": "Изменения к проекту не применялись.",
+    "Review the stored run or close it without changing files.": "Просмотрите сохранённый запуск или закройте его без изменения файлов.",
+    "Changes from this run are already present in the project. Keep them to accept the update, or roll them back from the stored backup.": "Изменения этого запуска уже применены к проекту. Оставьте их, чтобы принять обновление, или откатите из сохранённой резервной копии.",
+    "No applied update was recorded for this run. Review the interrupted run, then close it without changing project files.": "Для этого запуска не записано применённое обновление. Просмотрите прерванный запуск, затем закройте его без изменения файлов проекта.",
+    "The applied project files were accepted and the interrupted run was closed.": "Применённые изменения приняты, прерванный запуск закрыт."
   },
   "patterns": [
     {
@@ -1922,6 +1937,10 @@
     {
       "source": "{count} summary points",
       "target": "пунктов сводки: {count}"
+    },
+    {
+      "source": "Run {runId} stopped during {stage}.",
+      "target": "Запуск {runId} был остановлен на этапе «{stage}»."
     }
   ]
 }

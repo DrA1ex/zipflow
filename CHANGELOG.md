@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.3.13 — Interrupted recovery actions and selection copy
+
+- Keep interrupted-run recovery on screen during startup instead of immediately replacing it with archive input.
+- Clarify that an interrupted run with `applied` metadata is already present in the project and expose explicit keep or rollback actions.
+- Preserve the original interrupted stage across repeated launches.
+- Restore immediate clipboard copy when Activity or diff text selection is released.
+
+## 1.3.12 — Manual archive selection guard
+
+- Bind SelectList activation callbacks to the screen generation that rendered them.
+- Ignore delayed activations after asynchronous navigation so an Enter from archive discovery cannot choose an action on the duplicate-archive warning.
+- Apply the same stale-action guard to Settings, path completion, update, and historical replay selections.
+- Add regression coverage for the manual recent-archive to duplicate-warning transition.
+
 ## 1.3.11 — Runtime progress regression fixes
 
 - Cleared Zipflow's internal sanitized-environment marker when deployment commands intentionally inherit the full environment, while still providing the current project root.

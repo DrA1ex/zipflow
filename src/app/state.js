@@ -38,6 +38,7 @@ export function createInitialState() {
     updatePrompt: null,
     inputGeneration: 0,
     screenGeneration: 0,
+    menuActivationBarrier: null,
     pathSuggestionAbortController: null,
     progress: { value: 0, total: 1, detail: '' },
     checkRuntime: null,
@@ -127,6 +128,7 @@ export function transitionScreen(state, screen) {
   state.pathSuggestionAbortController = null;
   state.pathSuggestions = null;
   state.screen = next;
+  if (state.menuActivationBarrier?.screen !== next) state.menuActivationBarrier = null;
   state.screenGeneration = (Number(state.screenGeneration) || 0) + 1;
   return changed;
 }

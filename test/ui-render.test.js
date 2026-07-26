@@ -68,6 +68,14 @@ test('Activity has an in-app selection state and Ctrl+T enables native selection
 });
 
 
+
+test('Activity and diff selections copy immediately when the drag is released', async () => {
+  const source = await import('node:fs/promises').then(({ readFile }) => readFile(new URL('../src/ui/render.js', import.meta.url), 'utf8'));
+  assert.equal((source.match(/copyOnRelease:\s*true/g) ?? []).length, 2);
+  assert.match(source, /selection:\s*state\.activitySelection,[\s\S]*?copyOnRelease:\s*true/);
+  assert.match(source, /selection:\s*state\.diffSelection,[\s\S]*?copyOnRelease:\s*true/);
+});
+
 test('clicking a collapsed Activity block expands it without disabling text selection', async () => {
   const state = createInitialState();
   state.project = { name: 'fixture', root: '/tmp/fixture', labels: [], git: false };

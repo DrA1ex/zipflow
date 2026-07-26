@@ -35,6 +35,7 @@ import { ContextDock, contextText } from './context-dock.js';
 import { selectRowIndex, selectRows } from './select-rows.js';
 import { translateForState as t } from '../i18n/index.js';
 import { wheelScrollDelta } from './wheel.js';
+import { bindScreenAction, captureScreenActionContext } from '../app/ui-action-context.js';
 import { overlayManagerWithoutToasts, renderZipflowToasts } from './toast-overlay.js';
 import { renderUpdateOverlay } from './update-view.js';
 import { commandLocationLabel } from '../project/command-spec.js';
@@ -183,6 +184,7 @@ function renderTranscript(state, width, height, theme) {
       }
     },
     selection: state.activitySelection,
+    copyOnRelease: true,
     onSelectionChange: (text, _selection, event) => {
       if (text || event?.action !== 'release' || event?.button !== 'left') return;
       const row = Math.max(0, state.transcriptScroll + Math.trunc(Number(event.localY) || 0));
@@ -227,6 +229,7 @@ function renderCurrent(state, width, height, theme, animationFrame = 0) {
   state.menuPageSize = windowSize;
   const footerNode = ContextDock({ text: selectedContext, rows: contextRows, width: Math.max(20, width - 6), theme });
   const menuRows = selectRows(state.menuItems, (item) => menuItemLabel(item, state));
+  const actionContext = captureScreenActionContext(state);
   return WorkspacePane({
     title: ` ${screenTitle(state)} `,
     active: true,
@@ -248,7 +251,7 @@ function renderCurrent(state, width, height, theme, animationFrame = 0) {
         maxItemLines: 1,
         theme,
         pointerId: 'zipflow:menu',
-        onSelect: (item, index) => state.dispatch?.({ type: 'activate-index', index: selectRowIndex(item, index) }),
+        onSelect: (item, index) => state.dispatch?.(bindScreenAction(actionContext, { type: 'activate-index', index: selectRowIndex(item, index) })),
         onWheel: (event) => {
           const delta = wheelScrollDelta(event);
           if (delta) state.dispatch?.({ type: 'menu-move-selection', delta, wrap: false });
@@ -428,6 +431,7 @@ function renderDiffView(state, width, height, theme) {
     theme,
     pointerId: 'zipflow:diff',
     selection: state.diffSelection,
+    copyOnRelease: true,
     onWheel: (event) => {
       view.scroll = scrollBy(view.scroll, wheelScrollDelta(event), maxScroll);
       event.preventDefault();

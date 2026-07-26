@@ -11,6 +11,7 @@ import {
   color,
   renderNode,
 } from 'terlio.js';
+import { bindScreenAction, captureScreenActionContext } from '../app/ui-action-context.js';
 import { settingsViewModel } from '../app/settings-panel.js';
 import { settingsPageSummary } from '../app/settings-options.js';
 import { PathCompletionPopup } from './path-completion.js';
@@ -25,6 +26,7 @@ import { BINARY_TOOL_IDS } from '../security/binaries.js';
 const SETTINGS_CONTEXT_ROWS = 2;
 
 export function renderSettings(state, width, height, theme, animationFrame = 0) {
+  const actionContext = captureScreenActionContext(state);
   const view = settingsViewModel(state);
   const maxLeftWidth = Math.max(20, width - 28);
   const leftWidth = Math.max(20, Math.min(34, maxLeftWidth, Math.max(30, Math.floor(width * 0.3))));
@@ -46,7 +48,7 @@ export function renderSettings(state, width, height, theme, animationFrame = 0) 
       maxItemLines: 2,
       theme,
       pointerId: 'zipflow:settings-categories',
-      onSelect: (item, index) => state.dispatch?.({ type: 'settings-select-setting', index: selectRowIndex(item, index) }),
+      onSelect: (item, index) => state.dispatch?.(bindScreenAction(actionContext, { type: 'settings-select-setting', index: selectRowIndex(item, index) })),
       onWheel: (event) => {
         const delta = wheelScrollDelta(event);
         if (delta) state.dispatch?.({ type: 'settings-wheel', delta, wrap: false });
@@ -96,6 +98,7 @@ function renderChoiceSearch({ content, state, width, height, theme }) {
 }
 
 function renderSettingsPage(state, view, width, height, theme, animationFrame) {
+  const actionContext = captureScreenActionContext(state);
   const showingChoices = view.direct || view.focus === 'choices';
   const rawItems = showingChoices ? view.choices : view.parameters;
   const items = rawItems.map((item) => localizeUiItem(state, item));
@@ -145,10 +148,10 @@ function renderSettingsPage(state, view, width, height, theme, animationFrame) {
         maxItemLines: 1,
         theme,
         pointerId: showingChoices ? 'zipflow:settings-choices' : 'zipflow:settings-parameters',
-        onSelect: (item, index) => state.dispatch?.({
+        onSelect: (item, index) => state.dispatch?.(bindScreenAction(actionContext, {
           type: showingChoices ? 'settings-select-choice' : 'settings-select-parameter',
           index: selectRowIndex(item, index),
-        }),
+        })),
         onWheel: (event) => {
           const delta = wheelScrollDelta(event);
           if (delta) state.dispatch?.({ type: 'settings-wheel', delta, wrap: false });
@@ -161,6 +164,7 @@ function renderSettingsPage(state, view, width, height, theme, animationFrame) {
 }
 
 function renderModelConfigPage(state, view, width, height, theme, animationFrame) {
+  const actionContext = captureScreenActionContext(state);
   const choices = view.focus === 'choices';
   const items = (choices ? view.choices : view.parameters).map((item) => localizeUiItem(state, item));
   const model = view.model;
@@ -205,10 +209,10 @@ function renderModelConfigPage(state, view, width, height, theme, animationFrame
         maxItemLines: 1,
         theme,
         pointerId: choices ? 'zipflow:model-config-choices' : 'zipflow:model-config-parameters',
-        onSelect: (item, index) => state.dispatch?.({
+        onSelect: (item, index) => state.dispatch?.(bindScreenAction(actionContext, {
           type: choices ? 'settings-model-select-choice' : 'settings-model-select-parameter',
           index: selectRowIndex(item, index),
-        }),
+        })),
         onWheel: (event) => {
           const delta = wheelScrollDelta(event);
           if (delta) state.dispatch?.({ type: 'settings-wheel', delta, wrap: false });

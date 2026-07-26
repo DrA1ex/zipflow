@@ -51,8 +51,11 @@ test('startup recovery marks pending and executing autonomous decisions interrup
     const controller = new ZipflowController(state);
     controller.invalidate = () => {};
 
-    assert.equal(await offerInterruptedRunRecovery(controller), undefined);
+    assert.equal(await offerInterruptedRunRecovery(controller), true);
     assert.equal(state.screen, 'interrupted-run');
+    assert.deepEqual(state.menuItems.map((item) => item.id), ['interrupted-details', 'interrupted-keep', 'interrupted-rollback']);
+    assert.match(state.menuItems[1].label, /Keep applied update/);
+    assert.match(state.panelIntro.join('\n'), /already present.*project/i);
     assert.equal(state.run.status, 'interrupted');
     assert.deepEqual(state.run.decisions.map((item) => item.executionStatus), ['interrupted', 'interrupted']);
     assert.ok(state.run.decisions.every((item) => /not.*confirmed|stopped/i.test(item.executionError)));
@@ -60,6 +63,44 @@ test('startup recovery marks pending and executing autonomous decisions interrup
     const stored = await loadRunRecord(run.id);
     assert.equal(stored.status, 'interrupted');
     assert.deepEqual(stored.decisions.map((item) => item.executionStatus), ['interrupted', 'interrupted']);
+  } finally {
+    delete process.env.ZIPFLOW_HOME;
+  }
+});
+
+
+test('already interrupted runs keep their original stage and recovery actions on startup', async () => {
+  const home = await tempDir('zipflow-recovery-repeat-home-');
+  const root = await tempDir('zipflow-recovery-repeat-project-');
+  process.env.ZIPFLOW_HOME = home;
+  try {
+    await saveRunRecord({
+      version: 9,
+      id: 'run-interrupted-repeat',
+      projectPath: root,
+      projectName: 'fixture',
+      workflowName: 'fixture',
+      archivePath: path.join(root, 'update.zip'),
+      status: 'interrupted',
+      interruptedFrom: 'checks_running',
+      interruptedAt: '2026-07-26T10:00:00.000Z',
+      createdAt: '2026-07-26T09:00:00.000Z',
+      updatedAt: '2026-07-26T10:00:00.000Z',
+      applied: { paths: ['a.txt'], backupAvailable: true },
+      decisions: [],
+      autonomy: { mode: 'manual', paused: false, decisions: [], fallbackCount: 0 },
+    });
+    const state = createInitialState();
+    state.project = projectFixture(root);
+    state.workflow = workflowFixture();
+    const controller = new ZipflowController(state);
+    controller.invalidate = () => {};
+
+    assert.equal(await offerInterruptedRunRecovery(controller), true);
+    assert.equal(state.screen, 'interrupted-run');
+    assert.equal(state.run.interruptedFrom, 'checks_running');
+    assert.doesNotMatch(state.messages.at(-1).lines.join('\n'), /during interrupted/i);
+    assert.deepEqual(state.menuItems.map((item) => item.id), ['interrupted-details', 'interrupted-keep', 'interrupted-rollback']);
   } finally {
     delete process.env.ZIPFLOW_HOME;
   }

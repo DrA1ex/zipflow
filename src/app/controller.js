@@ -46,6 +46,7 @@ import {
 } from './path-suggestions.js';
 import { isEditorScreen, isPagedMenuScreen, isSearchableScreen, shouldRecordChoice } from './controller-screen-rules.js';
 import { InputActionGate } from './input-action-gate.js';
+import { isScreenActionCurrent } from './ui-action-context.js';
 import { insertPastedText, pastedTextFromKey } from '../ui/editor-paste.js';
 import { configureI18n, translateForState as t } from '../i18n/index.js';
 import { moveSelectableIndex, nearestSelectableIndex, pageSelectableIndex } from './list-navigation.js';
@@ -64,6 +65,7 @@ export class ZipflowController {
     this.activeLock = null;
     this.inputActions = new InputActionGate();
     this.activationKeyPending = false;
+    this.lastActivationInputAt = 0;
     this.updateService = updateService;
     this.restartRequested = false;
     this.persistFatalRecovery = persistFatalRecovery;
@@ -124,8 +126,14 @@ export class ZipflowController {
     if (isInterruptKey(normalized)) return this.handleInterrupt();
     if (normalized.name === 'escape' && this.state.activeOperation) return this.handleKeyNow(normalized);
     const exclusiveActivation = isExclusiveActivationKey(this.state, normalized);
-    if (exclusiveActivation && this.activationKeyPending) return Promise.resolve(false);
-    if (exclusiveActivation) this.activationKeyPending = true;
+    if (exclusiveActivation) {
+      const now = Date.now();
+      const previousActivationAt = this.lastActivationInputAt;
+      this.lastActivationInputAt = now;
+      if (this.shouldBlockMenuActivation(now, previousActivationAt)) return Promise.resolve(false);
+      if (this.activationKeyPending) return Promise.resolve(false);
+      this.activationKeyPending = true;
+    }
     const pending = this.handleKeyNow(normalized);
     return exclusiveActivation
       ? pending.finally(() => { this.activationKeyPending = false; })
@@ -182,6 +190,7 @@ export class ZipflowController {
     }
     if (normalized.printable && normalized.text === '?') return showContextHelp(this);
     if ((normalized.name === 'page-up' || normalized.name === 'page-down') && isPagedMenuScreen(this.state.screen)) {
+      this.clearMenuActivationBarrier();
       this.pageSelection(normalized.name === 'page-up' ? -1 : 1);
       return this.invalidate();
     }
@@ -194,6 +203,7 @@ export class ZipflowController {
       return this.invalidate();
     }
     if ((normalized.name === 'home' || normalized.name === 'end') && isPagedMenuScreen(this.state.screen)) {
+      this.clearMenuActivationBarrier();
       this.jumpSelection(normalized.name === 'home' ? 'first' : 'last');
       return this.invalidate();
     }
@@ -202,6 +212,7 @@ export class ZipflowController {
       return this.invalidate();
     }
     if (normalized.printable && normalized.text === '/' && isSearchableScreen(this.state.screen)) {
+      this.clearMenuActivationBarrier();
       beginMenuSearch(this);
       return this.invalidate();
     }
@@ -213,6 +224,7 @@ export class ZipflowController {
     }
     if (!this.state.busy && (handleSetupShortcut(this, normalized) || handleExportShortcut(this, normalized))) return this.invalidate();
     if (normalized.name === 'up' || normalized.name === 'down') {
+      this.clearMenuActivationBarrier();
       this.moveSelection(normalized.name === 'up' ? -1 : 1);
       return this.invalidate();
     }
@@ -278,6 +290,7 @@ export class ZipflowController {
   }
 
   dispatch(action) {
+    if (!isScreenActionCurrent(this.state, action)) return Promise.resolve(false);
     if (action?.type === 'update-activate' && action.id === 'update-cancel' && this.state.activeOperation?.kind === 'self-update') {
       return handleUpdateDispatch(this, action);
     }
@@ -301,6 +314,7 @@ export class ZipflowController {
       return;
     }
     if (action.type === 'menu-move-selection') {
+      this.clearMenuActivationBarrier();
       this.moveSelection(Number(action.delta) || 0, { wrap: action.wrap !== false });
       this.invalidate();
       return;
@@ -329,6 +343,7 @@ export class ZipflowController {
       return;
     }
     if (action.type === 'activate-index') {
+      this.clearMenuActivationBarrier();
       this.state.selectedIndex = action.index;
       await this.inputActions.run(() => this.activateSelected());
       this.invalidate();
@@ -417,6 +432,33 @@ export class ZipflowController {
       'Zipflow found the current project but no saved workflow.',
       'Setup will detect useful checks, choose safe update defaults, and show every selected parameter before saving.',
     ]);
+  }
+
+  guardMenuActivation(screen, quietMs = 700) {
+    this.state.menuActivationBarrier = {
+      screen: String(screen),
+      createdAt: Date.now(),
+      quietMs: Math.max(0, Number(quietMs) || 0),
+    };
+  }
+
+  clearMenuActivationBarrier() {
+    this.state.menuActivationBarrier = null;
+  }
+
+  shouldBlockMenuActivation(now, previousActivationAt) {
+    const barrier = this.state.menuActivationBarrier;
+    if (!barrier || barrier.screen !== this.state.screen) return false;
+    const quietMs = Math.max(0, Number(barrier.quietMs) || 0);
+    const screenIsFresh = now - Number(barrier.createdAt || 0) < quietMs;
+    const keyIsRepeating = previousActivationAt > 0 && now - previousActivationAt < quietMs;
+    if (screenIsFresh || keyIsRepeating) {
+      const status = 'Release Enter, then choose an action.';
+      if (this.state.status !== status) this.setStatus(status);
+      return true;
+    }
+    this.clearMenuActivationBarrier();
+    return false;
   }
 
   showMenu(screen, items, status = null, selectedIndex = null, intro = []) {

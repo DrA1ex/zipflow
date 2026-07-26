@@ -1360,7 +1360,22 @@
     "Assessment:": "Assessment:",
     "Review:": "Review:",
     "Reviewed content:": "Reviewed content:",
-    "Changed-path manifest:": "Changed-path manifest:"
+    "Changed-path manifest:": "Changed-path manifest:",
+    "Open the stored plan, report, changed files, and backup state before deciding.": "Open the stored plan, report, changed files, and backup state before deciding.",
+    "Keep applied update and close run": "Keep applied update and close run",
+    "Accept the project files exactly as they are now and finish this interrupted run.": "Accept the project files exactly as they are now and finish this interrupted run.",
+    "Roll back applied update": "Roll back applied update",
+    "Restore the exact files captured before this update was applied.": "Restore the exact files captured before this update was applied.",
+    "Close interrupted run": "Close interrupted run",
+    "Close the unfinished inspection without changing project files.": "Close the unfinished inspection without changing project files.",
+    "Resolve interrupted update": "Resolve interrupted update",
+    "The update is already present in the project.": "The update is already present in the project.",
+    "Choose Keep applied update to accept it, or Roll back to restore the previous files.": "Choose Keep applied update to accept it, or Roll back to restore the previous files.",
+    "No project update was applied.": "No project update was applied.",
+    "Review the stored run or close it without changing files.": "Review the stored run or close it without changing files.",
+    "Changes from this run are already present in the project. Keep them to accept the update, or roll them back from the stored backup.": "Changes from this run are already present in the project. Keep them to accept the update, or roll them back from the stored backup.",
+    "No applied update was recorded for this run. Review the interrupted run, then close it without changing project files.": "No applied update was recorded for this run. Review the interrupted run, then close it without changing project files.",
+    "The applied project files were accepted and the interrupted run was closed.": "The applied project files were accepted and the interrupted run was closed."
   },
   "patterns": [
     {
@@ -1922,6 +1937,10 @@
     {
       "source": "{count} summary points",
       "target": "{count} summary points"
+    },
+    {
+      "source": "Run {runId} stopped during {stage}.",
+      "target": "Run {runId} stopped during {stage}."
     }
   ]
 }

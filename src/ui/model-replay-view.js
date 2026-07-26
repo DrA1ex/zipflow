@@ -13,6 +13,7 @@ import {
   visibleLength,
   wrapText,
 } from 'terlio.js';
+import { bindScreenAction, captureScreenActionContext } from '../app/ui-action-context.js';
 import { ContextDock } from './context-dock.js';
 import { selectRowIndex, selectRows } from './select-rows.js';
 import { parseRichTextBlocks } from './rich-text.js';
@@ -44,6 +45,7 @@ export function renderModelReplayWorkspace({ content, state, width, height, them
 }
 
 function renderReplayPreview(state, workspace, width, height, theme) {
+  const actionContext = captureScreenActionContext(state);
   const counts = workspace.run?.plan?.counts ?? {};
   const autopilot = workspace.kind === 'autopilot';
   const items = [
@@ -73,12 +75,12 @@ function renderReplayPreview(state, workspace, width, height, theme) {
         windowSize: 2, getLabel: (item) => item.label,
         wrapItems: false, theme,
         pointerId: 'zipflow:model-replay-preview',
-        onSelect: (item, index) => state.dispatch?.({ type: 'model-replay-preview-select', index: selectRowIndex(item, index) }),
+        onSelect: (item, index) => state.dispatch?.(bindScreenAction(actionContext, { type: 'model-replay-preview-select', index: selectRowIndex(item, index) })),
         onWheel: (event) => {
           const delta = wheelScrollDelta(event);
           if (delta) {
             const index = Math.max(0, Math.min(items.length - 1, (workspace.previewIndex ?? 0) + delta));
-            state.dispatch?.({ type: 'model-replay-preview-select', index });
+            state.dispatch?.(bindScreenAction(actionContext, { type: 'model-replay-preview-select', index }));
           }
           event.preventDefault();
           event.stopPropagation?.();

@@ -137,12 +137,7 @@ export async function inspectArchivePath(controller, enteredPath, { allowDuplica
       let previous = null;
       if (!allowDuplicate) {
         previous = await findAppliedArchiveRun(state.project.root, digest);
-        if (previous && state.workflow.autonomy?.mode === 'manual') {
-          return showDuplicateWarning(controller, archivePath, digest, previous);
-        }
-        if (previous) controller.message('Previously applied archive detected', [
-          `Run ${previous.id} used the same ZIP. Autopilot will rebuild the plan against the current project state.`,
-        ], 'info', { collapsedSummary: `Repeated archive · comparing current project state` });
+        if (previous) return showDuplicateWarning(controller, archivePath, digest, previous);
       }
       return await inspectArchive(controller, source, archivePath, digest, archiveInfo, operation, previous);
     }, { signal: operation.signal });

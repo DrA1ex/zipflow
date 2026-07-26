@@ -10,7 +10,9 @@ export function showDuplicateWarning(controller, archivePath, archiveHash, previ
     formatArchiveName(archivePath),
     `Previously used: ${new Date(previous.createdAt).toLocaleString('en-GB')}`,
     previous.plan?.counts ? compactPlanLine({ counts: previous.plan.counts }) : 'Previous plan unavailable',
+    'No action will be taken until you explicitly choose one below.',
   ]);
+  controller.guardMenuActivation?.('archive-duplicate');
 }
 
 export async function activateDuplicate(controller, itemId, { beginArchiveInput, inspectArchivePath }) {
