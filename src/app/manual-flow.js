@@ -8,11 +8,13 @@ import { isLlmFailureAnalysisEnabled } from '../llm/tasks.js';
 import { saveLlmDiagnostics } from '../llm/diagnostics.js';
 import { createRunId } from '../utils/id.js';
 import { displayPath } from '../utils/paths.js';
-import { createActionRunRecord, runReportPath, saveRunRecord } from '../runs/store.js';
+import { createActionRunRecord, listProjectRuns, runReportPath, saveRunRecord } from '../runs/store.js';
 import { beginLlmProgress } from './llm-progress.js';
 import { commandLocationLabel } from '../project/command-spec.js';
 import { ensureProjectEnvironmentNotice } from './project-environment-notice.js';
 import { transitionScreen } from './state.js';
+import { buildRunAnalytics } from '../history/analytics.js';
+import { startRuntimeClock } from './runtime-progress.js';
 
 export function handlesManualScreen(screen) {
   return ['manual-checks-running', 'manual-checks-result', 'manual-deploy-running', 'manual-deploy-result'].includes(screen);
@@ -23,12 +25,17 @@ export async function beginManualChecks(controller) {
   const checks = state.workflow.checks.filter((check) => check.selected);
   if (!checks.length) return controller.message('No checks configured', ['Change the workflow to select at least one check.'], 'warning');
   await ensureProjectEnvironmentNotice(controller);
+  const estimate = await previousRuntimeEstimate(state).catch(() => ({ checksMs: 0, checksByName: {}, deployMs: 0 }));
   const operation = controller.beginOperation({ kind: 'manual-checks', label: 'Running manual checks' });
   const run = await createActionRunRecord({ id: createRunId(), project: state.project, workflow: state.workflow, action: 'manual-checks' });
   state.run = run;
   transitionScreen(state, 'manual-checks-running');
   state.status = 'Running tests';
-  state.checkRuntime = { checks, activeIndex: 0, results: [], lastLine: '', estimates: {} };
+  state.checkRuntime = {
+    checks, activeIndex: 0, results: [], lastLine: '', estimates: estimate.checksByName,
+    expectedMs: estimate.checksMs, elapsedMs: 0, activeStartedAt: null,
+  };
+  const stopClock = startRuntimeClock(controller, state.checkRuntime);
   controller.message('Manual checks starting', [`${checks.length} configured check${checks.length === 1 ? '' : 's'} will run against the current project files.`], 'process');
   controller.invalidate();
   try {
@@ -61,6 +68,7 @@ export async function beginManualChecks(controller) {
     ], cancelled ? 'warning' : 'error');
     return showManualChecksResult(controller);
   } finally {
+    stopClock();
     operation.finish();
   }
 }
@@ -69,12 +77,17 @@ export async function beginManualDeploy(controller) {
   const { state } = controller;
   if (!state.workflow.deploy?.commandText) return controller.message('Deployment is not configured', ['Change the workflow to choose a deploy command.'], 'warning');
   await ensureProjectEnvironmentNotice(controller);
+  const estimate = await previousRuntimeEstimate(state).catch(() => ({ checksMs: 0, checksByName: {}, deployMs: 0 }));
   const operation = controller.beginOperation({ kind: 'manual-deploy', label: 'Running manual deployment' });
   const run = await createActionRunRecord({ id: createRunId(), project: state.project, workflow: state.workflow, action: 'manual-deploy' });
   state.run = run;
   transitionScreen(state, 'manual-deploy-running');
   state.status = 'Deploying current version';
-  state.deployRuntime = { commandText: state.workflow.deploy.commandText, cwd: state.workflow.deploy.cwd || '.', lastLine: '' };
+  state.deployRuntime = {
+    commandText: state.workflow.deploy.commandText, cwd: state.workflow.deploy.cwd || '.', lastLine: '',
+    expectedMs: estimate.deployMs, elapsedMs: 0,
+  };
+  const stopClock = startRuntimeClock(controller, state.deployRuntime);
   controller.message('Manual deployment starting', [`${commandLocationLabel(state.workflow.deploy.cwd)} · ${state.workflow.deploy.commandText}`, 'This deploys the current local project without applying a ZIP archive.'], 'process');
   controller.invalidate();
   try {
@@ -113,6 +126,7 @@ export async function beginManualDeploy(controller) {
     ], cancelled ? 'warning' : 'error');
     return showManualDeployResult(controller);
   } finally {
+    stopClock();
     operation.finish();
   }
 }
@@ -213,7 +227,10 @@ function restoreResultScreen(controller) {
 
 function updateCheckRuntime(controller, event) {
   const runtime = controller.state.checkRuntime;
-  if (event.type === 'started') runtime.activeIndex = event.index;
+  if (event.type === 'started') {
+    runtime.activeIndex = event.index;
+    runtime.activeStartedAt = Date.now();
+  }
   if (event.type === 'output') runtime.lastLine = lastNonEmptyLine(event.event.text);
   if (event.type === 'finished') runtime.results = [...event.results];
   controller.invalidate();
@@ -227,6 +244,18 @@ function deployAsCheck(result) {
   if (!result || result.ok) return null;
   return { ...result, name: 'Deployment', commandText: result.commandText };
 }
+
+async function previousRuntimeEstimate(state) {
+  const runs = (await listProjectRuns(state.project.root, { limit: 40 }))
+    .filter((run) => run.id !== state.run?.id);
+  const analytics = buildRunAnalytics(runs);
+  return {
+    checksMs: analytics.checks.total.count ? analytics.checks.total.medianMs : 0,
+    checksByName: Object.fromEntries(analytics.checks.byName.map((item) => [item.name, item.medianMs])),
+    deployMs: analytics.deployment.count ? analytics.deployment.medianMs : 0,
+  };
+}
+
 
 function lastNonEmptyLine(value) {
   return String(value ?? '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean).at(-1) ?? '';

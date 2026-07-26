@@ -51,6 +51,8 @@ After required checks fail, the available choices depend on workflow configurati
 
 Guarded autopilot can resolve only routine recovery actions and cannot commit or deploy after failed checks. Full autopilot can do so only when the corresponding workflow capabilities are enabled.
 
+While checks or deployment are running, Zipflow keeps the latest non-empty command-output line visible when **Output while running → Last output line** is selected. When historical duration data exists, the progress bar advances against the median duration of earlier matching runs and stays below completion until the process actually ends. With no usable history, Zipflow shows an indeterminate loader instead of an invented percentage.
+
 ## Deployment policies
 
 A workflow can configure one deployment command with one of these policies:

@@ -18,7 +18,7 @@ import {
   FULL_AUTOPILOT_WARNING_VERSION, autonomyForMode, fullAutopilotWarningAcknowledged, fullAutopilotWarningRequired,
 } from '../src/autonomy/policies.js';
 import { activateAutonomy } from '../src/app/setup-autonomy.js';
-import { settingsChoices, settingsFieldDefinition, settingsParameters } from '../src/app/settings-options.js';
+import { settingsChoices, settingsFieldDefinition, settingsPageHelp, settingsParameters } from '../src/app/settings-options.js';
 import { gitHooksSettingAvailable } from '../src/git/hooks.js';
 import { normalizeSettings, SETTINGS_VERSION } from '../src/settings/store.js';
 import { runDeploy } from '../src/deploy/runner.js';
@@ -104,12 +104,15 @@ test('Binaries settings expose resolved status, path completion metadata, and al
   };
   const parameters = settingsParameters(state, { id: 'binaries' });
   const git = parameters.find((item) => item.binaryId === 'git');
-  assert.equal(git.value, 'Manual · Validated');
+  assert.equal(git.value, 'Manual · ✓');
   assert.match(git.description, /\/usr\/bin\/git/);
   assert.match(git.description, /git version 2\.44\.0/);
   assert.deepEqual(settingsChoices(state, git).map((item) => item.action), [
-    'binary-use-detected', 'binary-choose-path', 'binary-reset-auto', 'binary-test',
+    'binary-use-detected', 'binary-choose-path', 'binary-reset-auto',
   ]);
+  assert.equal(parameters.at(-1).action, 'binary-check-all');
+  assert.equal(parameters.at(-1).label, 'Check all');
+  assert.doesNotMatch(settingsPageHelp(state, { id: 'binaries' }).join('\n'), /\d+\/\d+|validated/i);
   const field = settingsFieldDefinition('binaryPath:git');
   assert.equal(field.path, true);
   assert.equal(field.directoriesOnly, false);

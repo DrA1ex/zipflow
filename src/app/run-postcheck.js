@@ -16,6 +16,7 @@ import { ensureProjectEnvironmentNotice } from './project-environment-notice.js'
 import { handleFailedChecksAutonomy } from './run-autonomy.js';
 import { commandLocationLabel } from '../project/command-spec.js';
 import { transitionScreen } from './state.js';
+import { startRuntimeClock } from './runtime-progress.js';
 import { autopilotPaused, resumeAutopilot } from './autonomy-flow.js';
 import {
   activateCommitChoice, continueAfterChecks, offerCommitAfterFailedChecks,
@@ -78,15 +79,19 @@ export async function startChecks(controller) {
   const { state } = controller;
   const runSettings = activeRunSettings(state);
   await ensureProjectEnvironmentNotice(controller, runSettings);
-  const operation = controller.beginOperation({ kind: 'checks', label: 'Running checks' });
   const checks = state.workflow.checks.filter((check) => check.selected);
-  const estimate = await previousCheckEstimate(state);
+  const estimate = await previousCheckEstimate(state).catch(() => null);
+  const operation = controller.beginOperation({ kind: 'checks', label: 'Running checks' });
   controller.message('Checks starting', [
     `${checks.length} selected check${checks.length === 1 ? '' : 's'} will run in workflow order${estimate?.totalLabel ? ` · historical median ${estimate.totalLabel}` : ''}.`,
     'Successful output stays compact; a failed command opens its useful output and copyable report.',
   ], 'process');
   transitionScreen(state, 'checks-running');
-  state.checkRuntime = { checks, activeIndex: 0, results: [], lastLine: '', estimates: estimate?.byName ?? {} };
+  state.checkRuntime = {
+    checks, activeIndex: 0, results: [], lastLine: '', estimates: estimate?.byName ?? {},
+    expectedMs: estimate?.totalMs ?? 0, elapsedMs: 0, activeStartedAt: null,
+  };
+  const stopClock = startRuntimeClock(controller, state.checkRuntime);
   state.status = 'Running checks';
   controller.invalidate();
   try {
@@ -97,7 +102,10 @@ export async function startChecks(controller) {
       settings: runSettings,
       signal: operation.signal,
       onUpdate: (event) => {
-        if (event.type === 'started') state.checkRuntime.activeIndex = event.index;
+        if (event.type === 'started') {
+          state.checkRuntime.activeIndex = event.index;
+          state.checkRuntime.activeStartedAt = Date.now();
+        }
         if (event.type === 'output') state.checkRuntime.lastLine = lastNonEmptyLine(event.event.text);
         if (event.type === 'finished') state.checkRuntime.results = [...event.results];
         controller.invalidate();
@@ -115,6 +123,7 @@ export async function startChecks(controller) {
     if (error.code === 'cancelled') return showChecksCancelled(controller);
     await failRun(controller, error);
   } finally {
+    stopClock();
     operation.finish();
   }
 }
@@ -263,6 +272,7 @@ async function previousCheckEstimate(state) {
   const analytics = buildRunAnalytics(runs);
   if (!analytics.checks.total.count) return null;
   return {
+    totalMs: analytics.checks.total.medianMs,
     totalLabel: estimateLabel(analytics.checks.total.medianMs),
     byName: Object.fromEntries(analytics.checks.byName.map((item) => [item.name, item.medianMs])),
   };

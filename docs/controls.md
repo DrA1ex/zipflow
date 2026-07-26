@@ -9,7 +9,7 @@ Space       toggle or select the current option
 Enter       select, toggle, continue, or submit an editor
             press twice on an empty archive field to scan the last-used folder
 Shift+Enter insert a new line in the commit-message editor
-Ctrl+J      insert a terminal line feed in a multiline editor without submitting
+Ctrl+J      insert a terminal line feed in a multiline editor without submitting; it does nothing elsewhere
 Esc         go back
 Tab         complete paths or switch Settings pane focus
 Shift+Tab   return to the parent path or move Settings focus backward

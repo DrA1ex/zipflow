@@ -3,7 +3,6 @@ import {
   clearBinaryResolutionCache,
   detectBinary,
   inspectAllBinaries,
-  inspectBinary,
   validateBinaryPath,
 } from '../security/binaries.js';
 import { updateSettings } from '../settings/store.js';
@@ -53,15 +52,6 @@ export async function resetBinaryToAutomatic(controller, toolId) {
   state.settings = await updateSettings({ binaryPaths }, { baseSettings: state.settings });
   await refreshSettingsBinaries(controller, { quiet: true });
   return state.settingsPanel?.binaries?.[toolId] ?? null;
-}
-
-export async function testConfiguredBinary(controller, toolId) {
-  clearBinaryResolutionCache();
-  const result = await inspectBinary(toolId, { settings: controller.state.settings, refresh: true });
-  controller.state.settingsPanel.binaries[toolId] = result;
-  controller.invalidate();
-  if (!result.valid) throw new Error(result.error || `${result.label} validation failed.`);
-  return result;
 }
 
 export async function saveBinaryPath(controller, toolId, entered) {

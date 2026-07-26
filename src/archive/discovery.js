@@ -20,10 +20,11 @@ export async function discoverRecentArchives({
     const archivePath = path.join(directory, entry.name);
     try {
       const info = await inspectDiscoveredArchive(archivePath);
-      const modifiedAt = normalizeModifiedAt(info.modifiedAt);
-      const ageMs = Math.max(0, Number(now) - modifiedAt.getTime());
+      const createdAt = normalizeArchiveDate(info.createdAt ?? info.modifiedAt);
+      const modifiedAt = normalizeArchiveDate(info.modifiedAt);
+      const ageMs = Math.max(0, Number(now) - createdAt.getTime());
       if (!Number.isFinite(ageMs) || ageMs > maxAgeMs) continue;
-      inspected.push({ archivePath, info, modifiedAt, ageMs });
+      inspected.push({ archivePath, info, createdAt, modifiedAt, ageMs });
     } catch {
       // Unsafe paths and files that disappear during the scan are not candidates.
     }
@@ -39,6 +40,7 @@ export async function discoverRecentArchives({
       candidates.push({
         path: item.archivePath,
         name: path.basename(item.archivePath),
+        createdAt: item.createdAt.toISOString(),
         modifiedAt: item.modifiedAt.toISOString(),
         ageMs: item.ageMs,
         size: item.info.size,
@@ -49,12 +51,12 @@ export async function discoverRecentArchives({
       // A malformed or unsafe ZIP is ignored here and remains rejected by normal inspection if entered manually.
     }
   }
-  return candidates.sort((a, b) => b.score - a.score || a.ageMs - b.ageMs).slice(0, limit);
+  return candidates.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || b.score - a.score).slice(0, limit);
 }
 
 
 
-function normalizeModifiedAt(value) {
+function normalizeArchiveDate(value) {
   const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
   if (Number.isNaN(date.getTime())) throw new Error('Archive candidate has an invalid modification time.');
   return date;
@@ -63,7 +65,8 @@ function normalizeModifiedAt(value) {
 async function inspectDiscoveredArchive(archivePath) {
   const info = await lstat(archivePath);
   if (info.isSymbolicLink() || !info.isFile()) throw new Error('Archive candidate is not a regular file.');
-  return { size: info.size, modifiedAt: info.mtime };
+  const birthtime = Number.isFinite(info.birthtimeMs) && info.birthtimeMs > 0 ? info.birthtime : null;
+  return { size: info.size, createdAt: birthtime ?? info.mtime, modifiedAt: info.mtime };
 }
 
 export async function listArchivePaths(archivePath, { signal = null, limits = DEFAULT_ARCHIVE_LIMITS } = {}) {

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.10 — Settings and live progress polish
+
+- Prevented `Ctrl+J` from activating Settings or ordinary menu items; it now inserts a line break only in explicitly multiline editors.
+- Reworked the Binaries page to use compact `✓`/`✗` states, validate automatically after a selection, show the valid/total count in the page title, and provide one final **Check all** action instead of per-tool test actions.
+- Enabled wrapped Settings category labels for longer translations and completed the Russian inherited-environment label plus additional Activity and live Local LLM translations.
+- Sorted double-Enter archive recommendations by creation time with the newest candidate first.
+- Restored specialized live screens for checks and deployment so current command output is visible again, and added median-based progress for checks, deployment, and Local LLM work with an indeterminate loader when no estimate exists.
+- Added regression coverage for Ctrl-J routing, Binaries layout, Russian wrapping and labels, archive ordering, live command output, estimated progress, and localized LLM Activity.
+
 ## 1.3.9 — Archive snapshot lifecycle repair
 
 - Kept the private ZIP snapshot alive for the complete asynchronous archive-inspection scope instead of deleting it immediately after returning the inspection Promise.

@@ -123,6 +123,8 @@ Replay and autopilot simulation show the selected historical update and safety s
 
 During generation, raw model output is streamed in Activity. By default that temporary block disappears when Zipflow produces its parsed result. Enable **Raw model responses → Keep raw responses** to retain the completed raw response as a collapsed Activity block immediately before the parsed explanation or review. The setting uses a two-option radio list. Both values are stored as booleans, so switching between **Hide raw responses** and **Keep raw responses** updates the marker immediately and persists across restarts.
 
+When prior runs provide a duration median for the same model, the live generation panel uses it as a progress estimate while continuing to show the current phase. Without history, the panel uses an indeterminate loader and states that no duration estimate is available; it never presents an unknown operation as already complete.
+
 ## Autopilot decisions
 
 Autopilot uses a separate strict structured contract. Zipflow supplies the current gate, state hashes, bounded context, and exact allowed actions. Invalid actions, low effective confidence, unavailable models, and state drift cause a fallback or return to manual control.

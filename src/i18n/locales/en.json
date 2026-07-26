@@ -1145,7 +1145,6 @@
     "Choose path": "Choose path",
     "Select and validate an absolute executable path with completion support.": "Select and validate an absolute executable path with completion support.",
     "Reset to automatic detection": "Reset to automatic detection",
-    "Test current executable": "Test current executable",
     "Review current files and create the first commit": "Review current files and create the first commit",
     "Enumerate committable files, exclude protected paths, and require a decision for files that may contain secrets or private data.": "Enumerate committable files, exclude protected paths, and require a decision for files that may contain secrets or private data.",
     "Exclude flagged files and create commit": "Exclude flagged files and create commit",
@@ -1178,7 +1177,6 @@
     "Environment policy": "Environment policy",
     "Sanitized passes normal system variables while omitting secret-like variables and agent sockets. Full inheritance preserves the complete parent environment.": "Sanitized passes normal system variables while omitting secret-like variables and agent sockets. Full inheritance preserves the complete parent environment.",
     "Automatic": "Automatic",
-    "Validated": "Validated",
     "Unavailable": "Unavailable",
     "Open to detect, choose, reset, or test the executable.": "Open to detect, choose, reset, or test the executable.",
     "No validated system executable was detected.": "No validated system executable was detected.",
@@ -1212,7 +1210,157 @@
     "1 project-local PATH entry was excluded from automatic detection.": "1 project-local PATH entry was excluded from automatic detection.",
     "{count} project-local PATH entries were excluded from automatic detection.": "{count} project-local PATH entries were excluded from automatic detection.",
     "Remove the manual override and search PATH while excluding executables inside the current project.": "Remove the manual override and search PATH while excluding executables inside the current project.",
-    "Internal calls use resolved absolute paths. Automatic detection excludes paths inside the current project; a manual override can deliberately select one and is shown with a warning.": "Internal calls use resolved absolute paths. Automatic detection excludes paths inside the current project; a manual override can deliberately select one and is shown with a warning."
+    "Internal calls use resolved absolute paths. Automatic detection excludes paths inside the current project; a manual override can deliberately select one and is shown with a warning.": "Internal calls use resolved absolute paths. Automatic detection excludes paths inside the current project; a manual override can deliberately select one and is shown with a warning.",
+    "Current output": "Current output",
+    "Running · duration estimate unavailable": "Running · duration estimate unavailable",
+    "Elapsed {elapsed} · expected median {expected}": "Elapsed {elapsed} · expected median {expected}",
+    "Working · duration estimate unavailable": "Working · duration estimate unavailable",
+    "Open to detect, choose, or reset the executable.": "Open to detect, choose, or reset the executable.",
+    "Checking all executables…": "Checking all executables…",
+    "Check all": "Check all",
+    "Validate every configured executable and refresh all status indicators.": "Validate every configured executable and refresh all status indicators.",
+    "Inherit full environment": "Inherit full environment",
+    "Archive already matches the project": "Archive already matches the project",
+    "Archive warnings, an adverse LLM verdict, or unresolved local conflicts require your review.": "Archive warnings, an adverse LLM verdict, or unresolved local conflicts require your review.",
+    "Autopilot returned control without changing Git state.": "Autopilot returned control without changing Git state.",
+    "Change the workflow to choose a deploy command.": "Change the workflow to choose a deploy command.",
+    "Change the workflow to select at least one check.": "Change the workflow to select at least one check.",
+    "Checks, commit, and deployment were skipped because no project files changed.": "Checks, commit, and deployment were skipped because no project files changed.",
+    "Choose the corrected or rebuilt ZIP file.": "Choose the corrected or rebuilt ZIP file.",
+    "Commit amended": "Commit amended",
+    "Conditions:": "Conditions:",
+    "Current local files were kept. Pending autonomous actions were not replayed.": "Current local files were kept. Pending autonomous actions were not replayed.",
+    "Delivery: archive sample guard": "Delivery: archive sample guard",
+    "Deployment will not run because required checks failed.": "Deployment will not run because required checks failed.",
+    "Each policy can be changed separately in Settings → Project command environment.": "Each policy can be changed separately in Settings → Project command environment.",
+    "Edit the configured workflow, open Decision mode, and enable Full autopilot again after reviewing the warning.": "Edit the configured workflow, open Decision mode, and enable Full autopilot again after reviewing the warning.",
+    "Every added, changed, and removed path was set to Keep local.": "Every added, changed, and removed path was set to Keep local.",
+    "Evidence:": "Evidence:",
+    "Full autopilot may still decide whether configured deployment should run.": "Full autopilot may still decide whether configured deployment should run.",
+    "Full autopilot requires renewed confirmation": "Full autopilot requires renewed confirmation",
+    "LLM error explanation cancelled": "LLM error explanation cancelled",
+    "LLM error explanation unavailable": "LLM error explanation unavailable",
+    "LLM explanation cancelled": "LLM explanation cancelled",
+    "LLM explanation unavailable": "LLM explanation unavailable",
+    "Local LLM · additional context reduction": "Local LLM · additional context reduction",
+    "Local LLM · cancelled": "Local LLM · cancelled",
+    "Local LLM · fallback used": "Local LLM · fallback used",
+    "Local LLM · verdict unavailable": "Local LLM · verdict unavailable",
+    "Local rollback cannot undo changes already made by a deployment command.": "Local rollback cannot undo changes already made by a deployment command.",
+    "Manual checks cancelled": "Manual checks cancelled",
+    "Manual checks could not run": "Manual checks could not run",
+    "Manual checks failed": "Manual checks failed",
+    "Manual checks passed": "Manual checks passed",
+    "Manual deployment cancelled": "Manual deployment cancelled",
+    "Manual deployment completed": "Manual deployment completed",
+    "Manual deployment could not run": "Manual deployment could not run",
+    "Manual deployment failed": "Manual deployment failed",
+    "No applied update was recorded for this run.": "No applied update was recorded for this run.",
+    "No changes selected": "No changes selected",
+    "No changes · all paths kept local": "No changes · all paths kept local",
+    "No changes · archive already matches project": "No changes · archive already matches project",
+    "No output": "No output",
+    "No project files were changed by the interrupted run.": "No project files were changed by the interrupted run.",
+    "No project files were changed.": "No project files were changed.",
+    "No result commit was recorded. Check the Git status before retrying.": "No result commit was recorded. Check the Git status before retrying.",
+    "No suitability verdict was returned; deterministic Zipflow safety checks remain active.": "No suitability verdict was returned; deterministic Zipflow safety checks remain active.",
+    "No summary recorded.": "No summary recorded.",
+    "No tracked local changes required a Git checkpoint.": "No tracked local changes required a Git checkpoint.",
+    "Project checks use a sanitized environment by default. Deployments inherit the full environment by default because they commonly need credentials and agent sockets.": "Project checks use a sanitized environment by default. Deployments inherit the full environment by default because they commonly need credentials and agent sockets.",
+    "Project state changed while the decision was pending; the proposed action was not executed.": "Project state changed while the decision was pending; the proposed action was not executed.",
+    "Reasons:": "Reasons:",
+    "Required check": "Required check",
+    "Result: Confidence or context quality was below the profile threshold; control returns to you.": "Result: Confidence or context quality was below the profile threshold; control returns to you.",
+    "Result: Project state changed while the model was deciding; the proposed action was not executed.": "Result: Project state changed while the model was deciding; the proposed action was not executed.",
+    "Risks:": "Risks:",
+    "Sanitized command environment": "Sanitized command environment",
+    "Successful output stays compact; a failed command opens its useful output and copyable report.": "Successful output stays compact; a failed command opens its useful output and copyable report.",
+    "The active LLM decision was cancelled. Continue from this checkpoint manually or resume autopilot later.": "The active LLM decision was cancelled. Continue from this checkpoint manually or resume autopilot later.",
+    "The active check process was stopped. The applied update remains available for retry, keeping, or rollback.": "The active check process was stopped. The applied update remains available for retry, keeping, or rollback.",
+    "The active check process was stopped. Zipflow remains open.": "The active check process was stopped. Zipflow remains open.",
+    "The active filesystem transaction was stopped and every touched path was restored from backup.": "The active filesystem transaction was stopped and every touched path was restored from backup.",
+    "The atomic commit was allowed to finish. Deployment was skipped.": "The atomic commit was allowed to finish. Deployment was skipped.",
+    "The atomic rewrite was allowed to finish. Deployment was skipped.": "The atomic rewrite was allowed to finish. Deployment was skipped.",
+    "The current Local LLM settings are used again. Esc skips only the LLM step and continues the update.": "The current Local LLM settings are used again. Esc skips only the LLM step and continues the update.",
+    "The deployment process was stopped. External effects may already exist.": "The deployment process was stopped. External effects may already exist.",
+    "The failed check remains available without an explanation.": "The failed check remains available without an explanation.",
+    "The local update may still be applied and its backup can be inspected before continuing.": "The local update may still be applied and its backup can be inspected before continuing.",
+    "The manual run report remains available without an explanation.": "The manual run report remains available without an explanation.",
+    "The next unresolved checkpoint may be decided by the configured local model.": "The next unresolved checkpoint may be decided by the configured local model.",
+    "The project update remains completed.": "The project update remains completed.",
+    "The project was not changed.": "The project was not changed.",
+    "The repository already contains unresolved merge conflicts. Zipflow will not continue autonomously.": "The repository already contains unresolved merge conflicts. Zipflow will not continue autonomously.",
+    "The rewrite backup ref remains available if Git changed before cancellation.": "The rewrite backup ref remains available if Git changed before cancellation.",
+    "The saved global policy was applied after the archive was verified.": "The saved global policy was applied after the archive was verified.",
+    "The saved global policy was applied after the update was kept.": "The saved global policy was applied after the update was kept.",
+    "The saved workflow allows conflict-free plans to continue after the normal backup.": "The saved workflow allows conflict-free plans to continue after the normal backup.",
+    "The source ZIP was moved or deleted and cannot be found at its recorded locations.": "The source ZIP was moved or deleted and cannot be found at its recorded locations.",
+    "The update can continue and project files have not been affected by this error.": "The update can continue and project files have not been affected by this error.",
+    "The update will remain applied. A commit, if created, records a run whose required checks failed.": "The update will remain applied. A commit, if created, records a run whose required checks failed.",
+    "The working tree and user index were not modified; untracked conflicts remain protected by the normal file backup.": "The working tree and user index were not modified; untracked conflicts remain protected by the normal file backup.",
+    "The working tree and user index were not modified; untracked files remain protected by the normal file backup.": "The working tree and user index were not modified; untracked files remain protected by the normal file backup.",
+    "This deploys the current local project without applying a ZIP archive.": "This deploys the current local project without applying a ZIP archive.",
+    "This workflow has no prior run to repeat.": "This workflow has no prior run to repeat.",
+    "This workflow has not applied an archive yet.": "This workflow has not applied an archive yet.",
+    "This workflow predates the current safety warning. No autonomous action was executed.": "This workflow predates the current safety warning. No autonomous action was executed.",
+    "Zipflow will not alter or commit across the user's staged index automatically.": "Zipflow will not alter or commit across the user's staged index automatically.",
+    "Zipflow commits squashed": "Zipflow commits squashed",
+    "Transport:": "Transport:",
+    "Model instance:": "Model instance:",
+    "already loaded": "already loaded",
+    "median": "median",
+    "chunks": "chunks",
+    "Delivery:": "Delivery:",
+    "batch": "batch",
+    "Coverage:": "Coverage:",
+    "of": "of",
+    "files with content": "files with content",
+    "paths in manifest": "paths in manifest",
+    "Patch coverage:": "Patch coverage:",
+    "files omitted": "files omitted",
+    "Patch:": "Patch:",
+    "tokens": "tokens",
+    "Omitted:": "Omitted:",
+    "files without excerpts": "files without excerpts",
+    "hunks": "hunks",
+    "Analysis:": "Analysis:",
+    "Model response:": "Model response:",
+    "Receiving a structured decision…": "Receiving a structured decision…",
+    "Decision:": "Decision:",
+    "Confidence:": "Confidence:",
+    "Summary:": "Summary:",
+    "High": "High",
+    "Medium": "Medium",
+    "Low": "Low",
+    "full patch": "full patch",
+    "representative sample": "representative sample",
+    "capped batches": "capped batches",
+    "changed paths only": "changed paths only",
+    "file-by-file chunks": "file-by-file chunks",
+    "adaptive": "adaptive",
+    "Using the already loaded model instance": "Using the already loaded model instance",
+    "The selected model will be loaded by the provider if needed": "The selected model will be loaded by the provider if needed",
+    "Retrying with a simpler JSON response format": "Retrying with a simpler JSON response format",
+    "Waiting for the model to process the patch": "Waiting for the model to process the patch",
+    "Model memory was exhausted · retrying with a smaller patch": "Model memory was exhausted · retrying with a smaller patch",
+    "Patch exceeded the model context · retrying with a smaller patch": "Patch exceeded the model context · retrying with a smaller patch",
+    "Stream connected · waiting for prompt processing": "Stream connected · waiting for prompt processing",
+    "Loading the selected model": "Loading the selected model",
+    "Model loaded · preparing the prompt": "Model loaded · preparing the prompt",
+    "Formatting the response internally": "Formatting the response internally",
+    "Receiving the model response": "Receiving the model response",
+    "The model is analyzing the patch": "The model is analyzing the patch",
+    "Cancelling local LLM generation": "Cancelling local LLM generation",
+    "Output limit reached · checking the generated draft": "Output limit reached · checking the generated draft",
+    "Parsing the model response": "Parsing the model response",
+    "Sending the patch to the local model": "Sending the patch to the local model",
+    "Retrying with a smaller patch excerpt": "Retrying with a smaller patch excerpt",
+    "Change delivery:": "Change delivery:",
+    "Adaptive delivery uses a full patch, representative sample, or capped batches according to the model context. Ctrl+C cancels this LLM operation.": "Adaptive delivery uses a full patch, representative sample, or capped batches according to the model context. Ctrl+C cancels this LLM operation.",
+    "Assessment:": "Assessment:",
+    "Review:": "Review:",
+    "Reviewed content:": "Reviewed content:",
+    "Changed-path manifest:": "Changed-path manifest:"
   },
   "patterns": [
     {
@@ -1598,6 +1746,182 @@
     {
       "source": "Message: {message}",
       "target": "Message: {message}"
+    },
+    {
+      "source": "Archive: {path}",
+      "target": "Archive: {path}"
+    },
+    {
+      "source": "Patch: {path}",
+      "target": "Patch: {path}"
+    },
+    {
+      "source": "Directory: {path}",
+      "target": "Directory: {path}"
+    },
+    {
+      "source": "Report: {path}",
+      "target": "Report: {path}"
+    },
+    {
+      "source": "Diagnostics: {path}",
+      "target": "Diagnostics: {path}"
+    },
+    {
+      "source": "{count} checks passed",
+      "target": "{count} checks passed"
+    },
+    {
+      "source": "{count} configured check will run against the current project files.",
+      "target": "{count} configured check will run against the current project files."
+    },
+    {
+      "source": "{count} configured checks will run against the current project files.",
+      "target": "{count} configured checks will run against the current project files."
+    },
+    {
+      "source": "{count} selected check will run in workflow order.",
+      "target": "{count} selected check will run in workflow order."
+    },
+    {
+      "source": "{count} selected checks will run in workflow order.",
+      "target": "{count} selected checks will run in workflow order."
+    },
+    {
+      "source": "{passed} passed · {failed} failed · {skipped} skipped",
+      "target": "{passed} passed · {failed} failed · {skipped} skipped"
+    },
+    {
+      "source": "{count} paths restored",
+      "target": "{count} paths restored"
+    },
+    {
+      "source": "Checks · {passed}/{total} passed",
+      "target": "Checks · {passed}/{total} passed"
+    },
+    {
+      "source": "Checks failed · {check}",
+      "target": "Checks failed · {check}"
+    },
+    {
+      "source": "Deployment · completed · {command}",
+      "target": "Deployment · completed · {command}"
+    },
+    {
+      "source": "Deployment · failed · {command}",
+      "target": "Deployment · failed · {command}"
+    },
+    {
+      "source": "Raw LLM response · {count} chunks",
+      "target": "Raw LLM response · {count} chunks"
+    },
+    {
+      "source": "Change delivery: {mode}",
+      "target": "Change delivery: {mode}"
+    },
+    {
+      "source": "Reviewed content from {current} of {total} changed files",
+      "target": "Reviewed content from {current} of {total} changed files"
+    },
+    {
+      "source": "Sending {count} changed paths without file contents",
+      "target": "Sending {count} changed paths without file contents"
+    },
+    {
+      "source": "Analyzing file batch {current} of {total}",
+      "target": "Analyzing file batch {current} of {total}"
+    },
+    {
+      "source": "File batch {current} of {total} analyzed",
+      "target": "File batch {current} of {total} analyzed"
+    },
+    {
+      "source": "Patch reduced to about {count} tokens",
+      "target": "Patch reduced to about {count} tokens"
+    },
+    {
+      "source": "Patch fits the model context at about {count} tokens",
+      "target": "Patch fits the model context at about {count} tokens"
+    },
+    {
+      "source": "Project/archive tree reduced to {count} entries",
+      "target": "Project/archive tree reduced to {count} entries"
+    },
+    {
+      "source": "Project/archive tree includes {count} entries",
+      "target": "Project/archive tree includes {count} entries"
+    },
+    {
+      "source": "Structured output was rejected · {reason}",
+      "target": "Structured output was rejected · {reason}"
+    },
+    {
+      "source": "Loading the selected model · {count}",
+      "target": "Loading the selected model · {count}"
+    },
+    {
+      "source": "Processing the patch · {count}",
+      "target": "Processing the patch · {count}"
+    },
+    {
+      "source": "{count} passed · {failed} failed · {skipped} skipped",
+      "target": "{count} passed · {failed} failed · {skipped} skipped"
+    },
+    {
+      "source": "Archive version selected for all {count} conflicts.",
+      "target": "Archive version selected for all {count} conflicts."
+    },
+    {
+      "source": "Local version selected for all {count} conflicts.",
+      "target": "Local version selected for all {count} conflicts."
+    },
+    {
+      "source": "{path} · use archive",
+      "target": "{path} · use archive"
+    },
+    {
+      "source": "{path} · keep local",
+      "target": "{path} · keep local"
+    },
+    {
+      "source": "{count} use archive · {total} keep local",
+      "target": "{count} use archive · {total} keep local"
+    },
+    {
+      "source": "Assessment: {value}",
+      "target": "Assessment: {value}"
+    },
+    {
+      "source": "Confidence: {value}",
+      "target": "Confidence: {value}"
+    },
+    {
+      "source": "Review: {value}",
+      "target": "Review: {value}"
+    },
+    {
+      "source": "Reviewed content: {current} of {total} changed files",
+      "target": "Reviewed content: {current} of {total} changed files"
+    },
+    {
+      "source": "Changed-path manifest: {current} of {total} files",
+      "target": "Changed-path manifest: {current} of {total} files"
+    },
+    {
+      "source": "Patch coverage: {count}% · {files} files omitted",
+      "target": "Patch coverage: {count}% · {files} files omitted"
+    },
+    {
+      "source": "Delivery: {value}",
+      "target": "Delivery: {value}"
+    },
+    {
+      "source": "Delivery: {value} · {count} batches",
+      "target": "Delivery: {value} · {count} batches"
+    },
+    {
+      "source": "{count} summary points",
+      "target": "{count} summary points"
     }
   ]
 }

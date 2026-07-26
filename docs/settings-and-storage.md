@@ -48,7 +48,7 @@ The default maximum rollback-backup storage remains 2 GB.
 
 ## Internal binaries
 
-The **Binaries** settings page shows the automatic or manual source, resolved absolute path, validation state, and version probe for every executable Zipflow invokes internally. Automatic detection excludes candidates inside the active project and project-local `node_modules/.bin` directories.
+The **Binaries** settings page shows the automatic or manual source, resolved absolute path, compact `✓`/`✗` validation state, and version probe for every executable Zipflow invokes internally. Its title shows how many configured tools are currently valid. Choosing a detected path, entering a manual path, or returning to automatic detection validates the resulting selection immediately; **Check all** refreshes every tool together. Automatic detection excludes candidates inside the active project and project-local `node_modules/.bin` directories.
 
 A manual absolute-path override remains available for tools outside `PATH` and can deliberately select a project-local executable. Zipflow validates that it is an executable file and clearly warns when the override bypasses automatic exclusions. The path editor completes files and directories with `Tab`, moves to the parent directory with `Shift+Tab`, and suppresses global single-key shortcuts while active. Resetting an entry returns it to automatic detection.
 

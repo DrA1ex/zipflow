@@ -1,5 +1,5 @@
 import { runDeploy } from '../deploy/runner.js';
-import { saveRunRecord } from '../runs/store.js';
+import { listProjectRuns, saveRunRecord } from '../runs/store.js';
 import { confirmRollback, performRollback, showRunDetails } from './run-rollback.js';
 import { failRun, releaseRunResources } from './run-lifecycle.js';
 import { activeRunSettings, clearRunSettings } from './runtime-settings.js';
@@ -10,6 +10,8 @@ import { autopilotPaused } from './autonomy-flow.js';
 import { captureRunExecutionState } from './run-state-integrity.js';
 import { commandLocationLabel } from '../project/command-spec.js';
 import { transitionScreen } from './state.js';
+import { buildRunAnalytics } from '../history/analytics.js';
+import { startRuntimeClock } from './runtime-progress.js';
 
 export async function continueToDeploy(controller) {
   const { state } = controller;
@@ -47,11 +49,16 @@ export async function startDeploy(controller, { fromCompleted = false, expectedS
   const { state } = controller;
   const runSettings = activeRunSettings(state);
   await ensureProjectEnvironmentNotice(controller, runSettings);
-  const operation = controller.beginOperation({ kind: 'deployment', label: 'Running deployment' });
   const deploy = state.workflow.deploy;
+  const expectedMs = await previousDeployEstimate(state).catch(() => 0);
   const beforeState = expectedState ?? await captureRunExecutionState(state);
+  const operation = controller.beginOperation({ kind: 'deployment', label: 'Running deployment' });
   transitionScreen(state, 'deploy-running');
-  state.deployRuntime = { commandText: deploy.commandText, cwd: deploy.cwd || '.', lastLine: '', fromCompleted };
+  state.deployRuntime = {
+    commandText: deploy.commandText, cwd: deploy.cwd || '.', lastLine: '', fromCompleted,
+    expectedMs, elapsedMs: 0,
+  };
+  const stopClock = startRuntimeClock(controller, state.deployRuntime);
   state.status = 'Deploying';
   controller.invalidate();
   try {
@@ -95,6 +102,7 @@ export async function startDeploy(controller, { fromCompleted = false, expectedS
     if (error.code === 'cancelled') return showDeployCancelled(controller);
     await failRun(controller, error);
   } finally {
+    stopClock();
     operation.finish();
   }
 }
@@ -159,6 +167,14 @@ function driftError(message) {
   error.code = 'state_drift';
   return error;
 }
+
+async function previousDeployEstimate(state) {
+  const runs = (await listProjectRuns(state.project.root, { limit: 40 }))
+    .filter((run) => run.id !== state.run?.id);
+  const analytics = buildRunAnalytics(runs);
+  return analytics.deployment.count ? analytics.deployment.medianMs : 0;
+}
+
 
 function lastNonEmptyLine(value) {
   return String(value ?? '').split('\n').map((line) => line.trim()).filter(Boolean).at(-1) ?? '';

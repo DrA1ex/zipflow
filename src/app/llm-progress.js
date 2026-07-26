@@ -3,6 +3,7 @@ import { activeRunSettings } from './runtime-settings.js';
 import { insertMessage } from './state.js';
 import { inferLanguage, standaloneCode } from '../ui/rich-text.js';
 import { BoundedByteBuffer } from '../utils/byte-buffer.js';
+import { translateForState as t } from '../i18n/index.js';
 export function beginLlmProgress(controller, { expectedMs = 0, presentation = 'review', preserveRaw = null } = {}) {
   const { state } = controller;
   const startedAt = Date.now();
@@ -201,29 +202,29 @@ function streamText(runtime, key) {
   return runtime?.[`${key}Buffer`]?.toString() ?? String(runtime?.[key] ?? '');
 }
 
-export function llmActivityLines(runtime, width = 100, theme = null, { renderCode = null } = {}) {
+export function llmActivityLines(runtime, width = 100, theme = null, { renderCode = null, state = null } = {}) {
   if (!runtime) return [];
-  if (runtime.presentation === 'decision') return decisionActivityLines(runtime, width, theme);
+  if (runtime.presentation === 'decision') return decisionActivityLines(runtime, width, theme, state);
   const lines = [
-    paint(theme, 'accent', `Local LLM · ${runtime.provider} · ${runtime.model}`),
-    runtime.transport ? `  Transport: ${runtime.transport} · POST ${runtime.endpoint}` : null,
-    runtime.loadedModel ? `  Model instance: ${runtime.requestModel} · already loaded` : null,
-    `  ${paint(theme, 'accent', runtime.label)} · ${formatElapsed(runtime.elapsedMs)}${runtime.expectedMs ? ` / median ${formatElapsed(runtime.expectedMs)}` : ''} · ${runtime.chunks} chunks`,
-    runtime.deliveryMode ? `  Delivery: ${deliveryLabel(runtime.deliveryMode)}${runtime.batchTotal ? ` · batch ${runtime.batchIndex}/${runtime.batchTotal}` : ''}` : null,
+    paint(theme, 'accent', `${t(state, 'Local LLM')} · ${runtime.provider} · ${runtime.model}`),
+    runtime.transport ? `  ${t(state, 'Transport:')} ${runtime.transport} · POST ${runtime.endpoint}` : null,
+    runtime.loadedModel ? `  ${t(state, 'Model instance:')} ${runtime.requestModel} · ${t(state, 'already loaded')}` : null,
+    `  ${paint(theme, 'accent', llmProgressLabel(state, runtime))} · ${formatElapsed(runtime.elapsedMs)}${runtime.expectedMs ? ` / ${t(state, 'median')} ${formatElapsed(runtime.expectedMs)}` : ''} · ${runtime.chunks} ${t(state, 'chunks')}`,
+    runtime.deliveryMode ? `  ${t(state, 'Delivery:')} ${t(state, deliveryLabel(runtime.deliveryMode))}${runtime.batchTotal ? ` · ${t(state, 'batch')} ${runtime.batchIndex}/${runtime.batchTotal}` : ''}` : null,
   ];
   const compact = lines.filter(Boolean);
   lines.length = 0;
   lines.push(...compact);
   if (runtime.coverage) {
     lines.push(
-      `  Coverage: ${formatNumber(runtime.coverage.reviewedFiles)} of ${formatNumber(runtime.coverage.totalFiles)} files with content · ${formatNumber(runtime.coverage.manifestFiles)} paths in manifest`,
-      `  Patch coverage: ${formatNumber(runtime.coverage.patchCoveragePercent)}% · ${formatNumber(runtime.coverage.omittedFiles)} files omitted`,
+      `  ${t(state, 'Coverage:')} ${formatNumber(runtime.coverage.reviewedFiles)} ${t(state, 'of')} ${formatNumber(runtime.coverage.totalFiles)} ${t(state, 'files with content')} · ${formatNumber(runtime.coverage.manifestFiles)} ${t(state, 'paths in manifest')}`,
+      `  ${t(state, 'Patch coverage:')} ${formatNumber(runtime.coverage.patchCoveragePercent)}% · ${formatNumber(runtime.coverage.omittedFiles)} ${t(state, 'files omitted')}`,
     );
   }
   if (runtime.patchBudget?.truncated) {
     lines.push(
-      `  Patch: ~${formatNumber(runtime.patchBudget.originalEstimatedTokens)} → ~${formatNumber(runtime.patchBudget.sentEstimatedTokens)} tokens`,
-      `  Omitted: ${runtime.patchBudget.omittedFiles} files without excerpts · ${runtime.patchBudget.omittedHunks} hunks`,
+      `  ${t(state, 'Patch:')} ~${formatNumber(runtime.patchBudget.originalEstimatedTokens)} → ~${formatNumber(runtime.patchBudget.sentEstimatedTokens)} ${t(state, 'tokens')}`,
+      `  ${t(state, 'Omitted:')} ${runtime.patchBudget.omittedFiles} ${t(state, 'files without excerpts')} · ${runtime.patchBudget.omittedHunks} ${t(state, 'hunks')}`,
     );
   }
   const textWidth = Math.max(28, width - 10);
@@ -234,31 +235,39 @@ export function llmActivityLines(runtime, width = 100, theme = null, { renderCod
     ? renderCode(previewSource(contentText, 8), contentLanguage, { width: textWidth + 4, indent: 4 })
     : null;
   const content = highlightedContent ?? preview(contentText, 8, textWidth).map((line) => `    ${line}`);
-  if (reasoning.length) lines.push(paint(theme, 'textMuted', '  Analysis:'), ...reasoning.map((line) => `    ${paint(theme, 'textMuted', line)}`));
-  if (content.length) lines.push(paint(theme, 'accent', '  Model response:'), ...content);
+  if (reasoning.length) lines.push(paint(theme, 'textMuted', `  ${t(state, 'Analysis:')}`), ...reasoning.map((line) => `    ${paint(theme, 'textMuted', line)}`));
+  if (content.length) lines.push(paint(theme, 'accent', `  ${t(state, 'Model response:')}`), ...content);
   lines.push('');
   return lines;
 }
 
-function decisionActivityLines(runtime, width, theme) {
-  const title = paint(theme, 'accent', `Autopilot decision · ${runtime.provider} · ${runtime.model}`);
+function decisionActivityLines(runtime, width, theme, state) {
+  const title = paint(theme, 'accent', `${t(state, 'Autopilot decision')} · ${runtime.provider} · ${runtime.model}`);
   const lines = [
     title,
-    `  ${paint(theme, 'accent', runtime.label)} · ${formatElapsed(runtime.elapsedMs)} · ${runtime.chunks} chunks`,
+    `  ${paint(theme, 'accent', llmProgressLabel(state, runtime))} · ${formatElapsed(runtime.elapsedMs)} · ${runtime.chunks} ${t(state, 'chunks')}`,
   ];
   const decision = partialDecision(streamText(runtime, 'content') || streamText(runtime, 'reasoning'));
   if (!decision.hasValues) {
-    lines.push(`  ${paint(theme, 'textMuted', 'Receiving a structured decision…')}`);
+    lines.push(`  ${paint(theme, 'textMuted', t(state, 'Receiving a structured decision…'))}`);
   } else {
-    if (decision.action) lines.push(`  ${paint(theme, 'accent', 'Decision:')} ${actionLabel(decision.action)}`);
-    if (decision.confidence !== null) lines.push(`  ${paint(theme, 'accent', 'Confidence:')} ${confidenceLabel(decision.confidence)}`);
-    if (decision.summary) lines.push(...wrappedField('Summary:', decision.summary, width, theme));
-    if (decision.evidence.length) lines.push(`  ${paint(theme, 'accent', 'Evidence:')}`, ...decision.evidence.flatMap((value) => wrappedBullet(value, width, theme)));
-    if (decision.risks.length) lines.push(`  ${paint(theme, 'accent', 'Risks:')}`, ...decision.risks.filter((value) => !isNoneValue(value)).flatMap((value) => wrappedBullet(value, width, theme, 'warning')));
-    if (decision.conditions.length) lines.push(`  ${paint(theme, 'accent', 'Conditions:')}`, ...decision.conditions.filter((value) => !isNoneValue(value)).flatMap((value) => wrappedBullet(value, width, theme)));
+    if (decision.action) lines.push(`  ${paint(theme, 'accent', t(state, 'Decision:'))} ${t(state, actionLabel(decision.action))}`);
+    if (decision.confidence !== null) lines.push(`  ${paint(theme, 'accent', t(state, 'Confidence:'))} ${t(state, confidenceLabel(decision.confidence))}`);
+    if (decision.summary) lines.push(...wrappedField(t(state, 'Summary:'), decision.summary, width, theme));
+    if (decision.evidence.length) lines.push(`  ${paint(theme, 'accent', t(state, 'Evidence:'))}`, ...decision.evidence.flatMap((value) => wrappedBullet(value, width, theme)));
+    if (decision.risks.length) lines.push(`  ${paint(theme, 'accent', t(state, 'Risks:'))}`, ...decision.risks.filter((value) => !isNoneValue(value)).flatMap((value) => wrappedBullet(value, width, theme, 'warning')));
+    if (decision.conditions.length) lines.push(`  ${paint(theme, 'accent', t(state, 'Conditions:'))}`, ...decision.conditions.filter((value) => !isNoneValue(value)).flatMap((value) => wrappedBullet(value, width, theme)));
   }
   lines.push('');
   return lines;
+}
+
+export function llmProgressLabel(state, runtime) {
+  if (!runtime) return '';
+  if (runtime.deliveryMode && String(runtime.label ?? '').startsWith('Change delivery:')) {
+    return `${t(state, 'Change delivery:')} ${t(state, deliveryLabel(runtime.deliveryMode))}`;
+  }
+  return t(state, runtime.label ?? '');
 }
 
 function wrappedField(label, value, width, theme, valueToken = null) {

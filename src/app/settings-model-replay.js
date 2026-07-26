@@ -6,6 +6,7 @@ import { listProjectRuns } from '../runs/store.js';
 import { exists } from '../utils/fs.js';
 import { beginHistoricalAutopilotSimulation } from './settings-autopilot-replay.js';
 import { BoundedByteBuffer } from '../utils/byte-buffer.js';
+import { isPlainEnter } from './editor-enter.js';
 
 
 export async function handleReplayDispatch(controller, action) {
@@ -169,7 +170,7 @@ async function handlePreviewKey(controller, workspace, key) {
     controller.invalidate();
     return true;
   }
-  if (key.name === 'enter' || key.name === 'space') {
+  if (isPlainEnter(key) || key.name === 'space') {
     if ((workspace.previewIndex ?? 0) === 1) {
       controller.state.settingsPanel.modelTestWorkspace = null;
       controller.invalidate();

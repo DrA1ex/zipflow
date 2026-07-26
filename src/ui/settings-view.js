@@ -20,6 +20,7 @@ import { ContextDock } from './context-dock.js';
 import { selectRowIndex, selectRows } from './select-rows.js';
 import { localizeUiItem, translateForState as t } from '../i18n/index.js';
 import { wheelScrollDelta } from './wheel.js';
+import { BINARY_TOOL_IDS } from '../security/binaries.js';
 
 const SETTINGS_CONTEXT_ROWS = 2;
 
@@ -40,8 +41,8 @@ export function renderSettings(state, width, height, theme, animationFrame = 0) 
       selectedIndex: view.categoryIndex,
       windowSize: Math.max(2, height - 6),
       getLabel: (item) => item.label,
-      wrapItems: false,
-      maxItemLines: 1,
+      wrapItems: true,
+      maxItemLines: 2,
       theme,
       pointerId: 'zipflow:settings-categories',
       onSelect: (item, index) => state.dispatch?.({ type: 'settings-select-setting', index: selectRowIndex(item, index) }),
@@ -100,9 +101,14 @@ function renderSettingsPage(state, view, width, height, theme, animationFrame) {
   const nestedChoice = showingChoices && !view.direct;
   const activeParameter = localizeUiItem(state, view.activeParameter);
   const selectedSetting = localizeUiItem(state, view.selectedSetting);
+  const binaryCount = selectedSetting.id === 'binaries'
+    ? `${Object.values(state.settingsPanel?.binaries ?? {}).filter((item) => item.valid).length}/${BINARY_TOOL_IDS.length}`
+    : '';
   const title = nestedChoice
     ? ` ${(activeParameter?.label ?? t(state, 'Choose')).toUpperCase()} `
-    : ` ${t(state, view.pageTitle ?? selectedSetting.label).toUpperCase()} `;
+    : selectedSetting.id === 'binaries'
+      ? ` ${t(state, selectedSetting.label).toUpperCase()} · ${binaryCount} `
+      : ` ${t(state, view.pageTitle ?? selectedSetting.label).toUpperCase()} `;
   const selectedParameter = !showingChoices ? items[view.parameterIndex] : null;
   const summary = nestedChoice ? [] : settingsPageSummary(state, view.selectedSetting);
   const pageContext = nestedChoice

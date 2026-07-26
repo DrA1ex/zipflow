@@ -117,6 +117,10 @@ export class ZipflowController {
     if (pathInputKeySupersedesCompletion(this.state, normalized)) {
       this.state.pathSuggestionAbortController?.abort?.('superseded-input');
     }
+    if (normalized.name === 'enter' && normalized.ctrl
+      && !(isEditorScreen(this.state.screen) && this.state.editorContext?.multiline)) {
+      return Promise.resolve(true);
+    }
     if (isInterruptKey(normalized)) return this.handleInterrupt();
     if (normalized.name === 'escape' && this.state.activeOperation) return this.handleKeyNow(normalized);
     const exclusiveActivation = isExclusiveActivationKey(this.state, normalized);
@@ -212,7 +216,7 @@ export class ZipflowController {
       this.moveSelection(normalized.name === 'up' ? -1 : 1);
       return this.invalidate();
     }
-    if (normalized.name === 'enter' || normalized.name === 'space') return this.inputActions.run(() => this.activateSelected());
+    if (isPlainEnter(normalized) || normalized.name === 'space') return this.inputActions.run(() => this.activateSelected());
     if (normalized.name === 'escape') {
       if (this.state.busy) {
         showOperationBusy(this, new OperationBusyError('navigation', this.state.activeOperation?.kind || 'operation'));
@@ -675,7 +679,7 @@ function pathInputKeySupersedesCompletion(state, key) {
 
 function isExclusiveActivationKey(state, key) {
   if (isEditorScreen(state.screen)) return isPlainEnter(key);
-  return key.name === 'enter' || key.name === 'space';
+  return isPlainEnter(key) || key.name === 'space';
 }
 
 function isInterruptKey(key) {

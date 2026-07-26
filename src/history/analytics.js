@@ -1,10 +1,11 @@
 import { modelAnalyticsLabel } from '../llm/model-identity.js';
 export function buildRunAnalytics(runs) {
-  const completed = runs.filter((run) => run.checks || run.llm);
+  const completed = runs.filter((run) => run.checks || run.llm || run.deploy);
   return {
     runCount: completed.length,
     checks: checkAnalytics(completed),
     llm: llmAnalytics(completed),
+    deployment: deploymentAnalytics(completed),
   };
 }
 
@@ -59,6 +60,16 @@ function llmAnalytics(runs) {
     })).sort((left, right) => right.count - left.count),
   };
 }
+
+function deploymentAnalytics(runs) {
+  const values = runs.flatMap((run) => run.deploy?.durationMs ? [{
+    durationMs: run.deploy.durationMs,
+    ok: Boolean(run.deploy.ok),
+    at: run.createdAt,
+  }] : []);
+  return summarize(values);
+}
+
 
 function summarize(values) {
   const durations = values.map((item) => item.durationMs).filter((value) => Number.isFinite(value) && value >= 0);

@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { handleInputEditorKey } from 'terlio.js';
+import { isModifiedEnter, isPlainEnter } from './editor-enter.js';
 import { loadManagedHistory, resetManagedHistory } from '../history/managed.js';
 import { updateSettings } from '../settings/store.js';
 import { ensureDir } from '../utils/fs.js';
@@ -28,7 +29,7 @@ import {
 import { clearArchiveStorage, clearBackups, refreshSettingsStorage } from './settings-storage.js';
 import { checkForUpdatesNow } from './update-flow.js';
 import {
-  refreshSettingsBinaries, resetBinaryToAutomatic, saveBinaryPath, testConfiguredBinary, useDetectedBinary,
+  refreshSettingsBinaries, resetBinaryToAutomatic, saveBinaryPath, useDetectedBinary,
 } from './settings-binaries.js';
 import {
   canSearchSettingsChoices, filterSettingsChoices, handleSettingsChoiceSearchKey,
@@ -178,7 +179,7 @@ export async function handleSettingsKey(controller, key) {
     controller.invalidate();
     return true;
   }
-  if (['enter', 'space', 'right'].includes(key.name)) {
+  if (isPlainEnter(key) || key.name === 'space' || key.name === 'right') {
     if (panel.focus === 'categories') return enterCategory(controller);
     if (panel.focus === 'parameters') return activateParameter(controller);
     return activateChoice(controller);
@@ -412,7 +413,12 @@ async function activateParameter(controller) {
       controller.invalidate();
     } else if (parameter.action === 'storage-refresh') await refreshSettingsStorage(controller);
     else if (parameter.action === 'update-check-now') await checkForUpdatesNow(controller);
-    else if (parameter.action === 'model-test-connection') await testSelectedModel(controller);
+    else if (parameter.action === 'binary-check-all') {
+      await refreshSettingsBinaries(controller);
+      const statuses = Object.values(state.settingsPanel?.binaries ?? {});
+      const valid = statuses.filter((item) => item.valid).length;
+      controller.toast(`${valid}/${statuses.length} executables available`, valid === statuses.length ? 'success' : 'warning');
+    } else if (parameter.action === 'model-test-connection') await testSelectedModel(controller);
     else if (parameter.action === 'model-test-replay') {
       state.status = 'Loading historical updates';
       await loadModelReplayRuns(controller);
@@ -523,17 +529,6 @@ async function activateChoice(controller) {
     const result = await resetBinaryToAutomatic(controller, option.binaryId);
     return returnAfterChoice(controller, parameter.id, result?.valid ? `${result.label} uses automatic detection` : 'Automatic detection reset');
   }
-  if (option.action === 'binary-test') {
-    try {
-      const result = await testConfiguredBinary(controller, option.binaryId);
-      return returnAfterChoice(controller, parameter.id, `${result.label} validated`);
-    } catch (error) {
-      state.status = error.message;
-      controller.toast(error.message, 'error');
-      controller.invalidate();
-      return true;
-    }
-  }
   if (option.settingId) {
     state.settings = await updateSettings({ [option.settingId]: option.value }, { baseSettings: state.settings });
     if (option.settingId === 'archivePolicy' && option.value === 'move') {
@@ -586,7 +581,7 @@ async function handleModalKey(controller, key) {
     controller.invalidate();
     return true;
   }
-  if (modal.field.path && ((key.name === 'tab' && !key.shift) || key.name === 'enter') && state.pathSuggestions?.items?.length) {
+  if (modal.field.path && ((key.name === 'tab' && !key.shift) || isPlainEnter(key)) && state.pathSuggestions?.items?.length) {
     selectPathSuggestion(state, state.pathSuggestions.selectedIndex);
     const item = state.pathSuggestions.items[state.pathSuggestions.selectedIndex];
     state.editor.set(item.insert);
@@ -594,7 +589,8 @@ async function handleModalKey(controller, key) {
     await refreshPathSuggestions(controller, { settingsModal: true });
     return true;
   }
-  if (key.name === 'enter') return submitSettingsEditor(controller);
+  if (isPlainEnter(key)) return submitSettingsEditor(controller);
+  if (isModifiedEnter(key)) return true;
   modal.error = null;
   const previousValue = state.editor.value;
   handleInputEditorKey(state.editor, key, { multiline: false });

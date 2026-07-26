@@ -232,6 +232,7 @@ test('Tab switches Settings panes without activating the focused item', async ()
   assert.equal(view.parameters[view.parameterIndex].id, 'archivePolicy');
   assert.equal(state.settings.archivePolicy, 'move');
 }));
+
 test('Escape from a nested value list returns to the same parameter without changing it', async () => withSettingsHome(async () => {
   const { state, controller } = await settingsController({ archivePolicy: 'move' });
   await selectCategory(controller, 'sourceArchive');

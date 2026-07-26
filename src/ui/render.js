@@ -5,6 +5,7 @@ import {
   OverlayHost,
   PointerRegion,
   ProgressBar,
+  Spinner,
   RequireViewport,
   ScrollPane,
   SelectList,
@@ -37,7 +38,9 @@ import { wheelScrollDelta } from './wheel.js';
 import { overlayManagerWithoutToasts, renderZipflowToasts } from './toast-overlay.js';
 import { renderUpdateOverlay } from './update-view.js';
 import { commandLocationLabel } from '../project/command-spec.js';
+import { llmProgressLabel } from '../app/llm-progress.js';
 import { isEditorScreen } from '../app/controller-screen-rules.js';
+import { estimatedProgress } from '../app/runtime-progress.js';
 
 export function renderZipflow({ state, width, height, animationFrame = 0 }) {
   const theme = themes[state.settings?.theme] ?? themes.ocean;
@@ -63,7 +66,7 @@ export function renderZipflow({ state, width, height, animationFrame = 0 }) {
     ? renderSettings(state, width, mainHeight, theme, animationFrame)
     : state.screen === 'diff-view'
       ? renderDiffView(state, width, mainHeight, theme)
-      : renderWorkflow(state, width, mainHeight, theme);
+      : renderWorkflow(state, width, mainHeight, theme, animationFrame);
   const shell = WorkspaceShell({
     title,
     subtitle,
@@ -117,12 +120,12 @@ function renderGlobalFooter({ left = [], right = [], width = 80, theme = null } 
   return Box({ border: true, borderColor: theme?.border, height: 3, padding: { left: 1, right: 1 } }, Text(line, { wrap: false }));
 }
 
-function renderWorkflow(state, width, mainHeight, theme) {
+function renderWorkflow(state, width, mainHeight, theme, animationFrame = 0) {
   const promptHeight = Math.min(mainHeight - 4, preferredPromptHeight(state, width, mainHeight));
   const historyHeight = Math.max(4, mainHeight - promptHeight);
   let content = Column({ height: mainHeight },
     renderTranscript(state, width, historyHeight, theme),
-    renderCurrent(state, width, promptHeight, theme),
+    renderCurrent(state, width, promptHeight, theme, animationFrame),
   );
   content = renderPathSuggestionsOverlay(state, content, width, mainHeight, promptHeight, theme);
   return renderMenuSearchOverlay(state, content, width, mainHeight, promptHeight, theme);
@@ -209,11 +212,11 @@ function renderTranscript(state, width, height, theme) {
   return BottomOverlay({ content: pane, overlay: indicator, height, bottom: 1, left: 2, right: 2, align: 'center', opaque: true });
 }
 
-function renderCurrent(state, width, height, theme) {
-  if (state.busy) return renderBusy(state, height, theme);
+function renderCurrent(state, width, height, theme, animationFrame = 0) {
+  if (['checks-running', 'manual-checks-running'].includes(state.screen)) return renderChecksRunning(state, height, theme, animationFrame);
+  if (['deploy-running', 'manual-deploy-running'].includes(state.screen)) return renderDeployRunning(state, height, theme, animationFrame);
+  if (state.busy) return renderBusy(state, height, theme, animationFrame);
   if (isEditorScreen(state.screen)) return renderEditor(state, width, height, theme);
-  if (['checks-running', 'manual-checks-running'].includes(state.screen)) return renderChecksRunning(state, height, theme);
-  if (['deploy-running', 'manual-deploy-running'].includes(state.screen)) return renderDeployRunning(state, height, theme);
   const intro = state.panelIntro ?? [];
   const selected = state.menuItems[state.selectedIndex];
   const inlineDescriptions = showsInlineDescriptions(state.screen);
@@ -303,7 +306,12 @@ function renderEditor(state, width, height, theme) {
   );
 }
 
-function renderBusy(state, height, theme) {
+function renderBusy(state, height, theme, animationFrame = 0) {
+  const llmRuntime = state.llmRuntime;
+  const detail = llmRuntime ? llmProgressLabel(state, llmRuntime) : state.progress?.detail;
+  const progressNodes = llmRuntime
+    ? runtimeProgressNodes(state, llmRuntime, theme, animationFrame)
+    : genericProgressNodes(state, state.progress, theme, animationFrame);
   return WorkspacePane({
     title: ` ${screenTitle(state)} `,
     active: true,
@@ -311,14 +319,14 @@ function renderBusy(state, height, theme) {
     theme,
     children: [
       Text(color(theme, 'title', t(state, state.busyLabel)), { wrap: true }),
-      ...(state.progress.detail ? [Text(color(theme, 'textMuted', t(state, state.progress.detail)), { wrap: true })] : []),
-      ProgressBar({ value: state.progress.value, total: Math.max(1, state.progress.total), width: 44, theme }),
+      ...(detail ? [Text(color(theme, 'textMuted', llmRuntime ? detail : t(state, detail)), { wrap: true })] : []),
+      ...progressNodes,
       Text(color(theme, 'textMuted', t(state, 'Zipflow is preserving the project state while this step runs.')), { wrap: true }),
     ],
   });
 }
 
-function renderChecksRunning(state, height, theme) {
+function renderChecksRunning(state, height, theme, animationFrame = 0) {
   const runtime = state.checkRuntime ?? { checks: [], activeIndex: 0 };
   const lines = runtime.checks.map((check, index) => {
     const result = runtime.results?.find((item) => item.id === check.id);
@@ -328,29 +336,58 @@ function renderChecksRunning(state, height, theme) {
     const duration = result ? ` ${formatDuration(result.durationMs)}` : estimate ? ` ~${formatDuration(estimate)}` : '';
     return `${color(theme, token, status.padEnd(5))} ${commandLocationLabel(check.cwd)} · ${check.name}${duration}`;
   });
-  if (state.settings.checkOutput === 'last-line' && runtime.lastLine) lines.push('', runtime.lastLine);
-  return runtimePane(` ${t(state, 'Running checks')} `, lines, height, theme);
+  if (state.settings.checkOutput === 'last-line' && runtime.lastLine) lines.push('', `${t(state, 'Current output')}: ${runtime.lastLine}`);
+  return runtimePane(` ${t(state, 'Running checks')} `, lines, height, theme, {
+    progressNodes: runtimeProgressNodes(state, runtime, theme, animationFrame),
+  });
 }
 
-function renderDeployRunning(state, height, theme) {
+function renderDeployRunning(state, height, theme, animationFrame = 0) {
   const runtime = state.deployRuntime ?? {};
   const lines = [
     `${color(theme, 'accent', 'RUN  ')} ${t(state, 'Deploy command')}`,
     `      ${t(state, 'Directory')}: ${commandLocationLabel(runtime.cwd)}`,
     runtime.commandText ? `      ${t(state, 'Command')}: ${runtime.commandText}` : '',
   ].filter(Boolean);
-  if (state.settings.checkOutput === 'last-line' && runtime.lastLine) lines.push('', runtime.lastLine);
-  return runtimePane(` ${t(state, 'Deploying')} `, lines, height, theme);
+  if (state.settings.checkOutput === 'last-line' && runtime.lastLine) lines.push('', `${t(state, 'Current output')}: ${runtime.lastLine}`);
+  return runtimePane(` ${t(state, 'Deploying')} `, lines, height, theme, {
+    progressNodes: runtimeProgressNodes(state, runtime, theme, animationFrame),
+  });
 }
 
-function runtimePane(title, lines, height, theme) {
+function runtimePane(title, lines, height, theme, { progressNodes = [] } = {}) {
   return WorkspacePane({
     title,
     active: true,
     height,
     theme,
-    children: lines.map((line) => Text(line, { wrap: !String(line).includes('\x1b[') })),
+    children: [
+      ...progressNodes,
+      ...lines.map((line) => Text(line, { wrap: !String(line).includes('\x1b[') })),
+    ],
   });
+}
+
+function runtimeProgressNodes(state, runtime, theme, animationFrame) {
+  const progress = estimatedProgress(runtime);
+  if (!progress.determinate) {
+    return [Spinner({ frame: animationFrame, label: t(state, 'Running · duration estimate unavailable'), theme })];
+  }
+  return [
+    Text(color(theme, 'textMuted', t(state, 'Elapsed {elapsed} · expected median {expected}', {
+      elapsed: formatDuration(progress.elapsedMs), expected: formatDuration(progress.expectedMs),
+    })), { wrap: false }),
+    ProgressBar({ value: progress.value, total: progress.total, width: 44, theme }),
+  ];
+}
+
+function genericProgressNodes(state, progress, theme, animationFrame) {
+  const value = Number(progress?.value) || 0;
+  const total = Number(progress?.total) || 0;
+  if (progress?.indeterminate || total <= 1 && value <= 0) {
+    return [Spinner({ frame: animationFrame, label: t(state, 'Working · duration estimate unavailable'), theme })];
+  }
+  return [ProgressBar({ value, total: Math.max(1, total), width: 44, theme })];
 }
 
 function renderDiffView(state, width, height, theme) {
@@ -472,12 +509,12 @@ function headerStats(state) {
 
 function preferredPromptHeight(state, width = 80, mainHeight = 20) {
   const compactMaximum = Math.max(7, Math.floor(mainHeight * 0.62));
-  if (state.busy) return Math.min(compactMaximum, 9);
-  if (state.screen === 'setup-review') return Math.min(compactMaximum, 8);
   if (['checks-running', 'manual-checks-running'].includes(state.screen)) {
     return Math.min(compactMaximum, Math.max(9, Math.min(12, (state.checkRuntime?.checks?.length ?? 0) + 5)));
   }
   if (['deploy-running', 'manual-deploy-running'].includes(state.screen)) return Math.min(compactMaximum, 9);
+  if (state.busy) return Math.min(compactMaximum, 9);
+  if (state.screen === 'setup-review') return Math.min(compactMaximum, 8);
   if (isEditorScreen(state.screen)) return Math.min(compactMaximum, state.editorContext?.multiline ? 13 : 9);
   const count = state.menuItems?.length ?? 0;
   const historyScreen = ['run-history', 'run-details', 'run-file-groups', 'run-file-list', 'run-analytics'].includes(state.screen);

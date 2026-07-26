@@ -1,6 +1,7 @@
 import { loadLmStudioModel, unloadLmStudioModel } from '../llm/client.js';
 import { updateSettings } from '../settings/store.js';
 import { moveSelectableIndex, normalizeSelectableIndex, pageSelectableIndex } from './list-navigation.js';
+import { isPlainEnter } from './editor-enter.js';
 
 export function openModelConfiguration(controller, model) {
   const { state } = controller;
@@ -70,7 +71,7 @@ export async function handleModelSettingsKey(controller, key) {
     controller.invalidate();
     return true;
   }
-  if (['enter', 'space', 'right'].includes(key.name)) {
+  if (isPlainEnter(key) || key.name === 'space' || key.name === 'right') {
     if (config.focus === 'choices') return activateModelChoice(controller);
     return activateModelParameter(controller);
   }

@@ -41,6 +41,32 @@ test('recent archive discovery reads ZIP entries without extraction and ranks pr
   }
 });
 
+test('recent archive recommendations put the newest created archive first', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'zipflow-discovery-order-'));
+  const projectRoot = path.join(root, 'project');
+  const archiveDir = path.join(root, 'archives');
+  await mkdir(projectRoot, { recursive: true });
+  await mkdir(archiveDir, { recursive: true });
+  await writeFile(path.join(projectRoot, 'package.json'), '{"name":"fixture"}\n');
+  const older = path.join(archiveDir, 'older.zip');
+  const newer = path.join(archiveDir, 'newer.zip');
+  await createZip(older, { 'fixture/package.json': '{"name":"older"}' });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  await createZip(newer, { 'fixture/package.json': '{"name":"newer"}' });
+
+  try {
+    const found = await discoverRecentArchives({
+      directory: archiveDir,
+      project: { root: projectRoot, git: false },
+      now: Date.now(),
+    });
+    assert.deepEqual(found.map((item) => item.name), ['newer.zip', 'older.zip']);
+    assert.ok(Date.parse(found[0].createdAt) >= Date.parse(found[1].createdAt));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 
 test('empty archive input requires a deliberate double Enter and opens matching candidates', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'zipflow-discovery-input-'));

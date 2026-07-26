@@ -66,20 +66,27 @@ export function settingsParameters(state, definition) {
 
 function binaryParameters(state) {
   const loading = Boolean(state.settingsPanel?.loadingBinaries);
-  return BINARY_TOOL_IDS.map((binaryId) => {
+  const parameters = BINARY_TOOL_IDS.map((binaryId) => {
     const definition = binaryDefinition(binaryId);
     const status = state.settingsPanel?.binaries?.[binaryId];
     const mode = status?.mode === 'manual' ? 'Manual' : 'Automatic';
-    const value = loading && !status ? 'Checking…' : `${mode} · ${status?.valid ? 'Validated' : 'Unavailable'}`;
+    const marker = loading && !status ? '…' : status?.valid ? '✓' : '✗';
+    const value = `${mode} · ${marker}`;
     const excludedCount = status?.excludedPaths?.length ?? 0;
     const exclusions = excludedCount === 1
       ? '1 project-local PATH entry was excluded from automatic detection.'
       : excludedCount > 1 ? `${excludedCount} project-local PATH entries were excluded from automatic detection.` : '';
     const description = status?.valid
       ? [status.resolvedPath, status.version, status.warning, exclusions].filter(Boolean).join(' · ')
-      : [status?.error || 'Open to detect, choose, reset, or test the executable.', exclusions].filter(Boolean).join(' · ');
+      : [status?.error || 'Open to detect, choose, or reset the executable.', exclusions].filter(Boolean).join(' · ');
     return { id: `binary:${binaryId}`, type: 'choice', binaryId, label: definition.label, value, description };
   });
+  parameters.push(actionRow(
+    'binary-check-all', loading ? 'Checking all executables…' : 'Check all', '',
+    'Validate every configured executable and refresh all status indicators.',
+    { action: 'binary-check-all', disabled: loading, loading },
+  ));
+  return parameters;
 }
 
 function binaryChoices(state, parameter) {
@@ -101,11 +108,6 @@ function binaryChoices(state, parameter) {
       id: `binary-reset:${parameter.binaryId}`, action: 'binary-reset-auto', binaryId: parameter.binaryId,
       label: 'Reset to automatic detection', description: detected?.resolvedPath || 'Remove the manual override and search PATH while excluding executables inside the current project.',
       disabled: !manual,
-    },
-    {
-      id: `binary-test:${parameter.binaryId}`, action: 'binary-test', binaryId: parameter.binaryId,
-      label: 'Test current executable',
-      description: status?.resolvedPath || status?.error || 'Validate the current executable and run its probe when available.',
     },
   ];
 }
@@ -491,13 +493,9 @@ export function settingsPageHelp(state, definition) {
       t(state, 'Latest version: {version}', { version: result?.latestVersion ?? 'Not checked' }),
     ];
   }
-  if (definition.id === 'binaries') {
-    const statuses = Object.values(state.settingsPanel?.binaries ?? {});
-    return [
-      `${statuses.filter((item) => item.valid).length}/${BINARY_TOOL_IDS.length} executables validated`,
-      'Internal calls use resolved absolute paths. Automatic detection excludes paths inside the current project; a manual override can deliberately select one and is shown with a warning.',
-    ];
-  }
+  if (definition.id === 'binaries') return [
+    'Internal calls use resolved absolute paths. Automatic detection excludes paths inside the current project; a manual override can deliberately select one and is shown with a warning.',
+  ];
   if (definition.id === 'commandEnvironment') return [
     `Checks: ${environmentPolicyLabel(state.settings.checkCommandEnvironment)}`,
     `Deployments: ${environmentPolicyLabel(state.settings.deployCommandEnvironment)}`,
@@ -537,13 +535,7 @@ export function settingsPageHelp(state, definition) {
 export function settingsPageSummary(state, definition) {
   const loading = Boolean(state.settingsPanel?.loadingStorage);
   if (definition.id === 'updates') return [updateCheckValue(state)];
-  if (definition.id === 'binaries') {
-    const statuses = Object.values(state.settingsPanel?.binaries ?? {});
-    return [
-      `${statuses.filter((item) => item.valid).length}/${BINARY_TOOL_IDS.length} executables validated`,
-      'Internal calls use resolved absolute paths. Automatic detection excludes paths inside the current project; a manual override can deliberately select one and is shown with a warning.',
-    ];
-  }
+  if (definition.id === 'binaries') return [];
   if (definition.id === 'commandEnvironment') return [
     `Checks: ${environmentPolicyLabel(state.settings.checkCommandEnvironment)}`,
     `Deployments: ${environmentPolicyLabel(state.settings.deployCommandEnvironment)}`,

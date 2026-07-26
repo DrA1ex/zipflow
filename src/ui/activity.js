@@ -28,6 +28,7 @@ export function buildTranscript(state, theme, width) {
     lines.push('');
   }
   if (state.llmRuntime) lines.push(...llmActivityLines(state.llmRuntime, width, theme, {
+    state,
     renderCode: (code, language, options = {}) => renderSyntaxLines(code, language, { ...options, theme }),
   }));
   const result = { lines, ranges };

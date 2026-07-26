@@ -1,4 +1,5 @@
 import { handleInputEditorKey } from 'terlio.js';
+import { isModifiedEnter, isPlainEnter } from './editor-enter.js';
 
 export function canSearchSettingsChoices(state) {
   return state.settingsPanel?.focus === 'choices' && state.settingsPanel?.activeParameterId === 'llmModel';
@@ -26,11 +27,12 @@ export function handleSettingsChoiceSearchKey(controller, key, moveChoice) {
     controller.invalidate();
     return true;
   }
-  if (key.name === 'enter') {
+  if (isPlainEnter(key)) {
     search.active = false;
     controller.invalidate();
     return true;
   }
+  if (isModifiedEnter(key)) return true;
   if (key.name === 'up' || key.name === 'down') {
     moveChoice(key.name === 'up' ? -1 : 1);
     controller.invalidate();
