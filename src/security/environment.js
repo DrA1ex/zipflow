@@ -17,7 +17,12 @@ export function createProjectCommandEnvironment(policy, {
   projectPath = '',
   cwd = projectPath || process.cwd(),
 } = {}) {
-  if (policy === 'inherit') return { ...baseEnv };
+  if (policy === 'inherit') {
+    const env = { ...baseEnv };
+    delete env.ZIPFLOW_COMMAND_ENVIRONMENT;
+    if (projectPath) env.ZIPFLOW_PROJECT_ROOT = path.resolve(projectPath);
+    return env;
+  }
   const env = {};
   for (const [key, value] of Object.entries(baseEnv ?? {})) {
     if (value === undefined) continue;

@@ -308,7 +308,9 @@ function renderEditor(state, width, height, theme) {
 
 function renderBusy(state, height, theme, animationFrame = 0) {
   const llmRuntime = state.llmRuntime;
-  const detail = llmRuntime ? llmProgressLabel(state, llmRuntime) : state.progress?.detail;
+  const operationDetail = state.progress?.detail ? t(state, state.progress.detail) : '';
+  const llmDetail = llmRuntime ? llmProgressLabel(state, llmRuntime) : '';
+  const details = [operationDetail, llmDetail].filter((value, index, values) => value && values.indexOf(value) === index);
   const progressNodes = llmRuntime
     ? runtimeProgressNodes(state, llmRuntime, theme, animationFrame)
     : genericProgressNodes(state, state.progress, theme, animationFrame);
@@ -319,7 +321,7 @@ function renderBusy(state, height, theme, animationFrame = 0) {
     theme,
     children: [
       Text(color(theme, 'title', t(state, state.busyLabel)), { wrap: true }),
-      ...(detail ? [Text(color(theme, 'textMuted', llmRuntime ? detail : t(state, detail)), { wrap: true })] : []),
+      ...details.map((detail) => Text(color(theme, 'textMuted', detail), { wrap: true })),
       ...progressNodes,
       Text(color(theme, 'textMuted', t(state, 'Zipflow is preserving the project state while this step runs.')), { wrap: true }),
     ],
@@ -375,10 +377,16 @@ function runtimeProgressNodes(state, runtime, theme, animationFrame) {
   }
   return [
     Text(color(theme, 'textMuted', t(state, 'Elapsed {elapsed} · expected median {expected}', {
-      elapsed: formatDuration(progress.elapsedMs), expected: formatDuration(progress.expectedMs),
+      elapsed: formatRuntimeDuration(progress.elapsedMs), expected: formatRuntimeDuration(progress.expectedMs),
     })), { wrap: false }),
     ProgressBar({ value: progress.value, total: progress.total, width: 44, theme }),
   ];
+}
+
+function formatRuntimeDuration(milliseconds = 0) {
+  const seconds = Math.max(0, Math.round(Number(milliseconds) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
 function genericProgressNodes(state, progress, theme, animationFrame) {

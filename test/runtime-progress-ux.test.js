@@ -31,7 +31,7 @@ test('running checks retain live output and historical progress while the operat
   };
 
   const output = stripAnsi(renderToString(renderZipflow({ state, width: 100, height: 28 }), { width: 100, height: 28 }));
-  assert.match(output, /RUN\s+Project root · npm run test/);
+  assert.match(output, /RUN\s+Root · npm run test/);
   assert.match(output, /Current output: test 42 passed/);
   assert.match(output, /Elapsed 3s · expected median 12s/);
   assert.doesNotMatch(output, /100%/);

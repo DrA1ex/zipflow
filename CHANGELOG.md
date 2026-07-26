@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.11 — Runtime progress regression fixes
+
+- Cleared Zipflow's internal sanitized-environment marker when deployment commands intentionally inherit the full environment, while still providing the current project root.
+- Kept operation details visible alongside Local LLM progress so applying and inspection screens retain their live stage text and streamed Activity output.
+- Rounded live elapsed and median durations to whole seconds for stable progress rendering.
+- Gave narrow Settings layouts enough category-pane width for two-line Russian labels instead of clipping the final line.
+- Corrected runtime progress regression expectations to use Zipflow's established `Root` command-location label.
+
 ## 1.3.10 — Settings and live progress polish
 
 - Prevented `Ctrl+J` from activating Settings or ordinary menu items; it now inserts a line break only in explicitly multiline editors.

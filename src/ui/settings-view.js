@@ -26,7 +26,8 @@ const SETTINGS_CONTEXT_ROWS = 2;
 
 export function renderSettings(state, width, height, theme, animationFrame = 0) {
   const view = settingsViewModel(state);
-  const leftWidth = Math.max(24, Math.min(34, Math.floor(width * 0.3)));
+  const maxLeftWidth = Math.max(20, width - 28);
+  const leftWidth = Math.max(20, Math.min(34, maxLeftWidth, Math.max(30, Math.floor(width * 0.3))));
   const rightWidth = Math.max(26, width - leftWidth - 2);
   const localizedDefinitions = view.definitions.map((item) => localizeUiItem(state, item));
   const categoryRows = selectRows(localizedDefinitions, (item) => oneLineLabel(item.label));
