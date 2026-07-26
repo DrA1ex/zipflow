@@ -2,6 +2,7 @@ import { color, wrapText } from 'terlio.js';
 import { activeRunSettings } from './runtime-settings.js';
 import { insertMessage } from './state.js';
 import { inferLanguage, standaloneCode } from '../ui/rich-text.js';
+import { BoundedByteBuffer } from '../utils/byte-buffer.js';
 export function beginLlmProgress(controller, { expectedMs = 0, presentation = 'review', preserveRaw = null } = {}) {
   const { state } = controller;
   const startedAt = Date.now();
@@ -17,6 +18,8 @@ export function beginLlmProgress(controller, { expectedMs = 0, presentation = 'r
     chunks: 0,
     reasoning: '',
     content: '',
+    reasoningBuffer: new BoundedByteBuffer(2 * 1024 * 1024),
+    contentBuffer: new BoundedByteBuffer(2 * 1024 * 1024),
     elapsedMs: 0,
     promptProgress: null,
     modelLoadProgress: null,
@@ -45,12 +48,14 @@ export function beginLlmProgress(controller, { expectedMs = 0, presentation = 'r
       clearInterval(timer);
       const finished = state.llmRuntime;
       state.llmRuntime = null;
-      if (keepRaw && finished && (String(finished.reasoning ?? '').trim() || String(finished.content ?? '').trim())) {
+      const finishedReasoning = streamText(finished, 'reasoning');
+      const finishedContent = streamText(finished, 'content');
+      if (keepRaw && finished && (finishedReasoning.trim() || finishedContent.trim())) {
         const lines = [];
-        if (String(finished.reasoning ?? '').trim()) lines.push('Analysis', ...String(finished.reasoning).replace(/\r\n/g, '\n').split('\n'));
-        if (String(finished.content ?? '').trim()) {
+        if (finishedReasoning.trim()) lines.push('Analysis', ...finishedReasoning.replace(/\r\n/g, '\n').split('\n'));
+        if (finishedContent.trim()) {
           if (lines.length) lines.push('');
-          const rawContent = String(finished.content).replace(/\r\n?/g, '\n');
+          const rawContent = finishedContent.replace(/\r\n?/g, '\n');
           const code = standaloneCode(rawContent);
           lines.push('Model response', ...(code
             ? [`\`\`\`${code.language}`, ...code.code.split('\n'), '```']
@@ -88,8 +93,8 @@ export function updateLlmProgress(controller, event) {
     runtime.deliveryMode = runtime.deliveryMode === 'capped' ? 'capped' : 'chunked';
     runtime.batchIndex = event.index;
     runtime.batchTotal = event.total;
-    runtime.content = '';
-    runtime.reasoning = '';
+    resetStreamBuffer(runtime, 'content');
+    resetStreamBuffer(runtime, 'reasoning');
     runtime.label = `Analyzing file batch ${event.index} of ${event.total}`;
   } else if (event.type === 'batch-complete') {
     runtime.label = `File batch ${event.index} of ${event.total} analyzed`;
@@ -151,8 +156,8 @@ export function updateLlmProgress(controller, event) {
   } else if (event.type === 'chunk') {
     runtime.chunks = event.chunks ?? runtime.chunks;
     if (!event.hiddenOutput) {
-      runtime.reasoning = event.reasoning ?? runtime.reasoning;
-      runtime.content = event.content ?? runtime.content;
+      appendStreamEvent(runtime, 'reasoning', event.reasoningDelta, event.reasoning);
+      appendStreamEvent(runtime, 'content', event.contentDelta, event.content);
     }
     if (event.contentDelta) {
       runtime.phase = 'answer';
@@ -172,6 +177,28 @@ export function updateLlmProgress(controller, event) {
       : 'Parsing the model response';
   }
   controller.invalidate();
+}
+
+
+function appendStreamEvent(runtime, key, delta, complete) {
+  const bufferKey = `${key}Buffer`;
+  if (!runtime[bufferKey]) runtime[bufferKey] = new BoundedByteBuffer(2 * 1024 * 1024);
+  if (delta) {
+    if (runtime[bufferKey].byteLength === 0 && complete != null && String(complete) !== String(delta)) runtime[bufferKey].append(complete);
+    else runtime[bufferKey].append(delta);
+  } else if (complete != null) {
+    runtime[bufferKey] = new BoundedByteBuffer(2 * 1024 * 1024);
+    runtime[bufferKey].append(complete);
+  }
+}
+
+function resetStreamBuffer(runtime, key) {
+  runtime[`${key}Buffer`] = new BoundedByteBuffer(2 * 1024 * 1024);
+  runtime[key] = '';
+}
+
+function streamText(runtime, key) {
+  return runtime?.[`${key}Buffer`]?.toString() ?? String(runtime?.[key] ?? '');
 }
 
 export function llmActivityLines(runtime, width = 100, theme = null, { renderCode = null } = {}) {
@@ -200,8 +227,8 @@ export function llmActivityLines(runtime, width = 100, theme = null, { renderCod
     );
   }
   const textWidth = Math.max(28, width - 10);
-  const reasoning = preview(runtime.reasoning, 5, textWidth);
-  const contentText = String(runtime.content ?? '').replace(/\r\n?/g, '\n');
+  const reasoning = preview(streamText(runtime, 'reasoning'), 5, textWidth);
+  const contentText = streamText(runtime, 'content').replace(/\r\n?/g, '\n');
   const contentLanguage = inferLanguage(contentText);
   const highlightedContent = renderCode && contentLanguage !== 'text'
     ? renderCode(previewSource(contentText, 8), contentLanguage, { width: textWidth + 4, indent: 4 })
@@ -219,7 +246,7 @@ function decisionActivityLines(runtime, width, theme) {
     title,
     `  ${paint(theme, 'accent', runtime.label)} · ${formatElapsed(runtime.elapsedMs)} · ${runtime.chunks} chunks`,
   ];
-  const decision = partialDecision(runtime.content || runtime.reasoning);
+  const decision = partialDecision(streamText(runtime, 'content') || streamText(runtime, 'reasoning'));
   if (!decision.hasValues) {
     lines.push(`  ${paint(theme, 'textMuted', 'Receiving a structured decision…')}`);
   } else {

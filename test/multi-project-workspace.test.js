@@ -161,7 +161,7 @@ test('workflow version stores selected projects and migrates legacy workflows to
     const project = await discoverProject(root);
     const workflow = createRecommendedWorkflow(project);
 
-    assert.equal(WORKFLOW_VERSION, 8);
+    assert.equal(WORKFLOW_VERSION, 9);
     assert.deepEqual(workflow.projects.map((entry) => entry.path), ['.', 'web']);
     assert.equal(workflow.checks.some((check) => check.cwd === 'web'), true);
 
@@ -173,7 +173,7 @@ test('workflow version stores selected projects and migrates legacy workflows to
       projectLabels: ['Node.js'],
       checks: [],
     });
-    assert.equal(migrated.version, 8);
+    assert.equal(migrated.version, 9);
     assert.deepEqual(migrated.projects, [{
       path: '.', typeIds: ['node'], labels: ['Node.js'], source: 'legacy', selected: true,
     }]);

@@ -8,7 +8,9 @@ import { loadSettings } from '../settings/store.js';
 import { displayPath } from '../utils/paths.js';
 import { ZIPFLOW_VERSION } from '../version.js';
 import { commandLocationLabel } from '../project/command-spec.js';
-import { appendMessage, setScreen } from './state.js';
+import {
+  appendMessage, applyOperationSnapshot, setScreen,
+} from './state.js';
 import {
   activateSetup, backSetup, beginSetup, handleSetupShortcut, handlesSetupScreen, submitSetupEditor,
 } from './setup-flow.js';
@@ -23,7 +25,7 @@ import { handleReplayDispatch } from './settings-model-replay.js';
 import { projectSummary } from '../ui/format.js';
 import { toggleActivityBlockAtRow, toggleActivityBlockAtScroll } from '../ui/activity.js';
 import { terminateActiveProcesses } from '../utils/process.js';
-import { OperationManager, isOperationBusyError } from '../operations/manager.js';
+import { OperationBusyError, OperationManager, isOperationBusyError } from '../operations/manager.js';
 import { removeIfExists } from '../utils/fs.js';
 import { clearRunSettings } from './runtime-settings.js';
 import { cancelPendingLlmReview } from './run-llm-review.js';
@@ -49,17 +51,29 @@ import { configureI18n, translateForState as t } from '../i18n/index.js';
 import { moveSelectableIndex, nearestSelectableIndex, pageSelectableIndex } from './list-navigation.js';
 import { createUpdateService } from '../update/service.js';
 import { handleUpdateDispatch, handleUpdateKey, showAvailableUpdate, startStartupUpdateCheck } from './update-flow.js';
+import { writeFatalRecoveryState } from './fatal-recovery.js';
 export class ZipflowController {
-  constructor(state, { updateService = createUpdateService() } = {}) {
+  constructor(state, {
+    updateService = createUpdateService(),
+    persistFatalRecovery = writeFatalRecoveryState,
+    stopProcesses = terminateActiveProcesses,
+    fatalWaitMs = 5_000,
+  } = {}) {
     this.state = state;
     this.runtime = null;
     this.activeLock = null;
     this.inputActions = new InputActionGate();
+    this.activationKeyPending = false;
     this.updateService = updateService;
     this.restartRequested = false;
+    this.persistFatalRecovery = persistFatalRecovery;
+    this.stopProcesses = stopProcesses;
+    this.fatalWaitMs = fatalWaitMs;
+    this.fatalCleanupActive = false;
+    this.fatalErrorPromise = null;
     this.operations = new OperationManager({
       onChange: (operation) => {
-        state.activeOperation = operation;
+        applyOperationSnapshot(state, operation);
         if (operation?.kind === 'llm-review') state.llmReviewCancelling = Boolean(operation.cancelling);
         if (operation?.kind === 'self-update' && state.updatePrompt?.phase === 'installing') {
           state.updatePrompt.cancelling = Boolean(operation.cancelling);
@@ -97,10 +111,24 @@ export class ZipflowController {
     }
   }
 
-  async handleKey(key) {
+  handleKey(key) {
     this.state.inputGeneration = (Number(this.state.inputGeneration) || 0) + 1;
     const normalized = key.printable && key.text === ' ' ? { ...key, name: 'space' } : key;
+    if (pathInputKeySupersedesCompletion(this.state, normalized)) {
+      this.state.pathSuggestionAbortController?.abort?.('superseded-input');
+    }
     if (isInterruptKey(normalized)) return this.handleInterrupt();
+    if (normalized.name === 'escape' && this.state.activeOperation) return this.handleKeyNow(normalized);
+    const exclusiveActivation = isExclusiveActivationKey(this.state, normalized);
+    if (exclusiveActivation && this.activationKeyPending) return Promise.resolve(false);
+    if (exclusiveActivation) this.activationKeyPending = true;
+    const pending = this.handleKeyNow(normalized);
+    return exclusiveActivation
+      ? pending.finally(() => { this.activationKeyPending = false; })
+      : pending;
+  }
+
+  async handleKeyNow(normalized) {
     if (this.state.updatePrompt) return handleUpdateKey(this, normalized);
     if (this.state.menuSearch?.active) return handleMenuSearchKey(this, normalized);
     if (normalized.ctrl && normalized.name === 't') {
@@ -119,7 +147,7 @@ export class ZipflowController {
     // Active text editors own ordinary and Shift-modified printable input.
     // Route them before screen/global shortcuts such as G report, ? help, or / search.
     if (isEditorScreen(this.state.screen)) return this.handleEditorKey(normalized);
-    if (handleRunShortcut(this, normalized)) return this.invalidate();
+    if (await handleRunShortcut(this, normalized)) return this.invalidate();
     if (normalized.name === 'escape' && this.state.exportAbortController) {
       this.state.exportAbortController.abort();
       this.setStatus('Cancelling ZIP preview preparation…');
@@ -139,7 +167,6 @@ export class ZipflowController {
       this.setStatus('Cancelling local LLM generation…');
       return;
     }
-    if (this.state.busy || ['checks-running', 'deploy-running', 'manual-checks-running', 'manual-deploy-running'].includes(this.state.screen)) return;
     if (normalized.printable && normalized.text?.toLowerCase() === 'g' && this.state.run?.id) {
       const report = runReportPath(this.state.run.id);
       try {
@@ -180,13 +207,19 @@ export class ZipflowController {
         return this.invalidate();
       }
     }
-    if (handleSetupShortcut(this, normalized) || handleExportShortcut(this, normalized)) return this.invalidate();
+    if (!this.state.busy && (handleSetupShortcut(this, normalized) || handleExportShortcut(this, normalized))) return this.invalidate();
     if (normalized.name === 'up' || normalized.name === 'down') {
       this.moveSelection(normalized.name === 'up' ? -1 : 1);
       return this.invalidate();
     }
     if (normalized.name === 'enter' || normalized.name === 'space') return this.inputActions.run(() => this.activateSelected());
-    if (normalized.name === 'escape') return this.back();
+    if (normalized.name === 'escape') {
+      if (this.state.busy) {
+        showOperationBusy(this, new OperationBusyError('navigation', this.state.activeOperation?.kind || 'operation'));
+        return;
+      }
+      return this.back();
+    }
   }
 
   startStartupUpdateCheck() {
@@ -199,11 +232,23 @@ export class ZipflowController {
   }
 
   beginOperation(options) {
+    if (this.state.activeOperation) {
+      throw new OperationBusyError(options?.kind || 'operation', this.state.activeOperation.kind || 'operation');
+    }
     return this.operations.begin(options);
   }
 
-  runOperation(options, callback) {
-    return this.operations.run(options, callback);
+  async runOperation(options, callback) {
+    if (typeof callback !== 'function') throw new TypeError('Operation run requires a callback.');
+    const operation = this.beginOperation(options);
+    try {
+      const result = await callback(operation);
+      operation.finish('completed');
+      return result;
+    } catch (error) {
+      operation.finish(error?.code === 'cancelled' ? 'cancelled' : 'failed');
+      throw error;
+    }
   }
 
   showContextHelp() {
@@ -228,8 +273,20 @@ export class ZipflowController {
     this.setStatus(`Cancelling ${operation?.label || 'the active operation'}…`);
   }
 
-  async dispatch(action) {
+  dispatch(action) {
+    if (action?.type === 'update-activate' && action.id === 'update-cancel' && this.state.activeOperation?.kind === 'self-update') {
+      return handleUpdateDispatch(this, action);
+    }
+    return this.dispatchNow(action);
+  }
+
+  async dispatchNow(action) {
     if (await handleUpdateDispatch(this, action)) return;
+    if (await handleReplayDispatch(this, action)) return;
+    if (this.state.activeOperation && action.type?.startsWith('settings-select-')) {
+      showOperationBusy(this, new OperationBusyError('settings action', this.state.activeOperation.kind));
+      return;
+    }
     if (action.type === 'activity-follow-latest') {
       followLatestActivity(this);
       this.invalidate();
@@ -256,7 +313,6 @@ export class ZipflowController {
       for (let index = 0; index < Math.abs(delta); index += 1) await handleSettingsKey(this, key);
       return;
     }
-    if (handleReplayDispatch(this, action)) return;
     if (action.type === 'path-move') {
       if (movePathSuggestion(this.state, Number(action.delta) || 0, { wrap: action.wrap !== false })) this.invalidate();
       return;
@@ -277,7 +333,11 @@ export class ZipflowController {
 
   async activateSelected() {
     const item = this.state.menuItems[this.state.selectedIndex];
-    if (!item || item.disabled) return;
+    if (!item) return;
+    if (item.disabled) {
+      if (this.state.activeOperation) showOperationBusy(this, new OperationBusyError(item.id, this.state.activeOperation.kind));
+      return;
+    }
     if (shouldRecordChoice(this.state.screen, item.id)) this.recordChoice(item.label);
     if (this.state.screen === 'home' || this.state.screen === 'new-project') return this.activateHome(item.id);
     if (handlesSetupScreen(this.state.screen)) return activateSetup(this, item.id);
@@ -364,7 +424,6 @@ export class ZipflowController {
       nextIndex = matchingIndex >= 0 ? matchingIndex : this.state.selectedIndex;
     }
     setScreen(this.state, screen, { items, selectedIndex: nextIndex ?? 0, status, intro });
-    this.state.busy = false;
     this.invalidate();
   }
 
@@ -405,23 +464,56 @@ export class ZipflowController {
       showOperationBusy(this, error);
       return;
     }
-    this.state.busy = false;
-    await this.activeLock?.release?.().catch(() => {});
-    this.activeLock = null;
-    this.recovery = { error, kind: 'unexpected' };
-    this.message('Unexpected error', [error.message], 'error', { collapsedSummary: `Unexpected error · ${error.message}` });
+    if (!this.fatalErrorPromise) {
+      this.fatalErrorPromise = this.handleFatalError(error).finally(() => {
+        this.fatalErrorPromise = null;
+      });
+    }
+    return this.fatalErrorPromise;
+  }
+
+  async handleFatalError(error) {
+    this.fatalCleanupActive = true;
+    const hadOperation = Boolean(this.operations.current);
+    if (hadOperation) await this.operations.requestCancellation().catch(() => {});
+    const safeBoundaryReached = await this.operations.waitForSafeBoundary({ timeoutMs: this.fatalWaitMs });
+    let recoveryWriteError = null;
+    try {
+      await this.persistFatalRecovery(this, error, { safeBoundaryReached });
+    } catch (writeError) {
+      recoveryWriteError = writeError;
+    }
+    await this.stopProcesses({ graceMs: 0 }).catch(() => {});
+    const ownershipEnded = await this.operations.waitForIdle({ timeoutMs: this.fatalWaitMs });
+    if (ownershipEnded) {
+      await this.activeLock?.release?.().catch(() => {});
+      this.activeLock = null;
+    }
+    this.recovery = { error, kind: 'unexpected', recoveryWriteError, ownershipEnded };
+    const details = [
+      error.message,
+      recoveryWriteError ? `Recovery state could not be written: ${recoveryWriteError.message}` : '',
+      ownershipEnded ? '' : 'The active operation did not reach a safe completion boundary. The project lock remains owned by this process.',
+    ].filter(Boolean);
+    this.message('Unexpected error', details, 'error', { collapsedSummary: `Unexpected error · ${error.message}` });
     this.showMenu('error', [
-      { id: 'copy-diagnostics', label: 'Copy diagnostics', description: 'Copy the error, current screen, project, and run information' },
-      ...(this.state.run ? [{ id: 'view-report', label: 'View run report', description: `Open stored details for ${this.state.run.id}` }] : []),
-      { id: 'back-home', label: 'Return to project', description: 'Return to the project without retrying the failed action' },
-      { id: 'exit', label: 'Exit' },
-    ], 'Error');
+      { id: 'copy-diagnostics', label: 'Copy diagnostics', description: 'Copy the error, current screen, project, and run information', allowDuringOperation: true },
+      ...(this.state.run ? [{ id: 'view-report', label: 'View run report', description: `Open stored details for ${this.state.run.id}`, allowDuringOperation: true }] : []),
+      ...(ownershipEnded ? [{ id: 'back-home', label: 'Return to project', description: 'Return to the project without retrying the failed action' }] : []),
+      { id: 'exit', label: 'Exit', allowDuringOperation: true },
+    ], ownershipEnded ? 'Error' : 'Fatal error · exit required');
+    this.fatalCleanupActive = !ownershipEnded;
   }
 
   async cleanup() {
-    await terminateActiveProcesses();
-    await this.activeLock?.release?.().catch(() => {});
-    this.activeLock = null;
+    await this.operations.requestCancellation().catch(() => {});
+    await this.operations.waitForSafeBoundary({ timeoutMs: this.fatalWaitMs });
+    await this.stopProcesses().catch(() => {});
+    const ownershipEnded = await this.operations.waitForIdle({ timeoutMs: this.fatalWaitMs });
+    if (ownershipEnded) {
+      await this.activeLock?.release?.().catch(() => {});
+      this.activeLock = null;
+    }
     if (this.state.run?.id) await removeIfExists(path.join(getZipflowHome(), 'tmp', this.state.run.id)).catch(() => {});
   }
 
@@ -571,6 +663,19 @@ function availableUpdateMenuItem(result) {
     id: 'update-zipflow', label: 'Update Zipflow',
     description: 'Install the available version globally with npm.',
   };
+}
+
+function pathInputKeySupersedesCompletion(state, key) {
+  const pathEditor = isPathEditorScreen(state.screen) || Boolean(state.settingsPanel?.modal?.field?.path);
+  if (!pathEditor) return false;
+  if (key?.paste || key?.name === 'paste') return true;
+  if (key?.printable) return true;
+  return ['backspace', 'delete'].includes(key?.name);
+}
+
+function isExclusiveActivationKey(state, key) {
+  if (isEditorScreen(state.screen)) return isPlainEnter(key);
+  return key.name === 'enter' || key.name === 'space';
 }
 
 function isInterruptKey(key) {

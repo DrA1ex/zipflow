@@ -18,6 +18,7 @@ import {
   showDeployPolicyStep, submitDeployEditor,
 } from './setup-deploy.js';
 import { activateAutonomy, autonomyReviewLines, showAutonomyStep } from './setup-autonomy.js';
+import { gitHooksSettingAvailable } from '../git/hooks.js';
 import { activateWorkflowRestart, cancelWorkflowSetup, showWorkflowRestartConfirmation } from './setup-restart.js';
 
 export async function beginSetup(controller, { fresh = false } = {}) {
@@ -63,6 +64,7 @@ export async function activateSetup(controller, itemId) {
   if (screen === 'setup-git-checkpoint') return activateCheckpoint(controller, itemId);
   if (screen === 'setup-git-result') return activateResultCommit(controller, itemId);
   if (screen === 'setup-git-message') return activateMessageStrategy(controller, itemId);
+  if (screen === 'setup-git-hooks') return activateGitHooks(controller, itemId);
   if (screen === 'setup-deploy') return activateDeployPolicy(controller, itemId, () => finishSetupSection(controller, () => showReviewStep(controller)));
   if (screen === 'setup-deploy-command') return activateDeployCommand(controller, itemId, () => finishSetupSection(controller, () => showReviewStep(controller)));
   if (screen === 'setup-review') return activateReview(controller, itemId);
@@ -80,7 +82,7 @@ export async function submitSetupEditor(controller) {
     if (!template) return controller.setStatus('Enter a commit message template.');
     state.draft.git.fixedMessage = template;
     controller.message('Commit template saved', [template], 'success');
-    return finishSetupSection(controller, () => showDeployPolicyStep(controller));
+    return continueAfterGitConfiguration(controller);
   }
   if (purpose === 'deploy-command') return await submitDeployEditor(controller, () => finishSetupSection(controller, () => showReviewStep(controller)));
 }
@@ -109,6 +111,7 @@ export async function backSetup(controller) {
   if (screen === 'setup-git-checkpoint') return isEditingSection(controller, 'git') ? showWorkflowSections(controller) : previousBeforeCheckpoint(controller);
   if (screen === 'setup-git-result') return showCheckpointStep(controller);
   if (screen === 'setup-git-message') return showResultCommitStep(controller);
+  if (screen === 'setup-git-hooks') return controller.state.draft.git.resultCommit === 'never' ? showResultCommitStep(controller) : showMessageStrategyStep(controller);
   if (screen === 'setup-deploy') return isEditingSection(controller, 'deploy') ? showWorkflowSections(controller) : previousBeforeDeploy(controller);
   if (screen === 'setup-deploy-command') return showDeployPolicyStep(controller);
   if (screen === 'setup-review') return controller.state.setupEditing ? showWorkflowSections(controller, 'review') : showDeployPolicyStep(controller);
@@ -160,7 +163,7 @@ function showWorkflowSections(controller, selectedSection = null) {
     { id: 'section-policy', label: 'Update policy', description: workflow.policy.label },
     { id: 'section-autonomy', label: 'Decision mode', description: workflow.autonomy?.mode === 'full' ? 'Full autopilot · Dangerous' : workflow.autonomy?.mode === 'guarded' ? 'Guarded autopilot' : 'Manual' },
     { id: 'section-archive', label: 'Archive mode', description: workflow.archive.mode === 'overlay' ? 'Overlay · missing files stay untouched' : deletionReviewLabel(workflow.deletion.scope) },
-    ...(controller.state.project.git ? [{ id: 'section-git', label: 'Git', description: `${checkpointLabel(workflow.git.checkpoint)} · ${resultCommitLabel(workflow.git.resultCommit)}` }] : []),
+    ...(controller.state.project.git ? [{ id: 'section-git', label: 'Git', description: `${checkpointLabel(workflow.git.checkpoint)} · ${resultCommitLabel(workflow.git.resultCommit)} · ${gitHooksLabel(workflow.git.hooks)}` }] : []),
     { id: 'section-deploy', label: 'Deployment', description: deployPolicyDescription(workflow.deploy.policy) },
     { id: 'section-review', label: 'Review and save', description: 'Review every section before replacing the active workflow' },
     { id: 'section-restart', label: 'Start over', description: 'Build a new workflow from recommendations. The current workflow stays active until the new one is saved.' },
@@ -301,7 +304,7 @@ function activateResultCommit(controller, itemId) {
     return showResultCommitStep(controller);
   }
   if (itemId === 'result-continue') {
-    if (controller.state.draft.git.resultCommit === 'never') return finishSetupSection(controller, () => showDeployPolicyStep(controller));
+    if (controller.state.draft.git.resultCommit === 'never') return continueAfterGitConfiguration(controller);
     return showMessageStrategyStep(controller);
   }
 }
@@ -332,8 +335,32 @@ function activateMessageStrategy(controller, itemId) {
         instructions: ['Available values: {runId}, {archiveName}, {projectName}, {date}, {time}.'],
       }, controller.state.draft.git.fixedMessage);
     }
-    return finishSetupSection(controller, () => showDeployPolicyStep(controller));
+    return continueAfterGitConfiguration(controller);
   }
+}
+
+function showGitHooksStep(controller) {
+  const value = controller.state.draft.git.hooks === 'allow' ? 'allow' : 'disabled';
+  controller.showMenu('setup-git-hooks', [
+    choice('hooks-disabled', value === 'disabled', 'Disable Git hooks for Zipflow commits', 'Use a trusted empty hooks directory for automatic and manually confirmed Zipflow commits. This is the safe default.'),
+    choice('hooks-allow', value === 'allow', 'Allow project Git hooks', 'Run the repository’s configured Git hooks during Zipflow commits. Hook code can execute arbitrary local commands.'),
+    { id: 'hooks-continue', label: 'Continue', description: `Selected: ${gitHooksLabel(value)}` },
+  ], 'Git hooks for Zipflow commits', setupContinueIndex(controller, 'setup-git-hooks', 2), [
+    'This option is available only after a workflow has been configured. Initial setup always keeps Git hooks disabled.',
+  ]);
+}
+
+function activateGitHooks(controller, itemId) {
+  if (itemId === 'hooks-disabled' || itemId === 'hooks-allow') {
+    controller.state.draft.git.hooks = itemId === 'hooks-allow' ? 'allow' : 'disabled';
+    return showGitHooksStep(controller);
+  }
+  if (itemId === 'hooks-continue') return finishSetupSection(controller, () => showDeployPolicyStep(controller));
+}
+
+function continueAfterGitConfiguration(controller) {
+  if (gitHooksSettingAvailable(controller.state)) return showGitHooksStep(controller);
+  return showDeployPolicyStep(controller);
 }
 
 function showReviewStep(controller) {
@@ -393,6 +420,7 @@ function workflowReviewLines(state, workflow) {
     `  Checkpoint: ${checkpointLabel(workflow.git.checkpoint)}`,
     `  Result commit: ${resultCommitLabel(workflow.git.resultCommit)}`,
     ...(workflow.git.resultCommit === 'never' ? [] : [`  Message: ${messageStrategyLabel(workflow.git.messageStrategy)}`]),
+    `  Hooks: ${gitHooksLabel(workflow.git.hooks)}`,
   );
   else lines.push('', 'GIT', '  Repository not initialized · Zipflow file backups remain enabled');
   lines.push(
@@ -421,6 +449,7 @@ function previousBeforeCheckpoint(controller) {
 
 function previousBeforeDeploy(controller) {
   if (!controller.state.project.git) return previousBeforeCheckpoint(controller);
+  if (gitHooksSettingAvailable(controller.state)) return showGitHooksStep(controller);
   return controller.state.draft.git.resultCommit === 'never' ? showResultCommitStep(controller) : showMessageStrategyStep(controller);
 }
 
@@ -465,6 +494,10 @@ function resultCommitLabel(value) {
   if (value === 'auto') return 'Automatic after successful checks';
   if (value === 'never') return 'No result commit';
   return 'Ask after successful checks';
+}
+
+function gitHooksLabel(value) {
+  return value === 'allow' ? 'Project hooks enabled' : 'Hooks disabled';
 }
 
 function messageStrategyLabel(value) {

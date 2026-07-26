@@ -24,7 +24,7 @@ export function validateZipEntry(entry, limits = DEFAULT_ARCHIVE_LIMITS) {
   if (!contentSegments.length || contentSegments.some((segment) => !segment || segment === '.' || segment === '..')) {
     throw archiveError(`Archive path escapes the project or is ambiguous: ${original}`);
   }
-  for (const segment of contentSegments) validatePortableSegment(segment, original);
+  for (const segment of contentSegments) validatePathSegment(segment, original);
   const normalized = path.posix.normalize(original).replace(/\/$/, '').normalize('NFC');
   if (normalized.length > limits.maxPathLength) throw archiveError(`Archive path is too long: ${original}`);
   const segments = normalized.split('/');
@@ -56,7 +56,7 @@ export function validateZipEntry(entry, limits = DEFAULT_ARCHIVE_LIMITS) {
   }
   return {
     path: normalized,
-    collisionKey: normalized.normalize('NFKC').toLocaleLowerCase('en-US'),
+    collisionKey: collisionKey(normalized, limits),
     directory: trailingSlash,
     mode: hasUnixMode ? unixMode & 0o777 : null,
     skip: segments[0] === '__MACOSX',
@@ -64,16 +64,14 @@ export function validateZipEntry(entry, limits = DEFAULT_ARCHIVE_LIMITS) {
 }
 
 
-function validatePortableSegment(segment, original) {
-  if (segment.endsWith(' ') || segment.endsWith('.')) {
-    throw archiveError(`Archive path has a platform-ambiguous trailing character: ${original}`);
-  }
-  if (segment.includes(':')) throw archiveError(`Archive path uses an alternate-stream or drive separator: ${original}`);
+function validatePathSegment(segment, original) {
   if (Buffer.byteLength(segment, 'utf8') > 255) throw archiveError(`Archive path segment is too long: ${original}`);
-  const stem = segment.split('.', 1)[0].normalize('NFKC').toLocaleUpperCase('en-US');
-  if (/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/.test(stem)) {
-    throw archiveError(`Archive path uses a reserved device name: ${original}`);
-  }
+}
+
+function collisionKey(value, limits) {
+  const normalized = value.normalize('NFC');
+  const caseInsensitive = limits.caseInsensitivePaths ?? (process.platform === 'darwin' || process.platform === 'win32');
+  return caseInsensitive ? normalized.toLocaleLowerCase('en-US') : normalized;
 }
 
 function archiveError(message) {

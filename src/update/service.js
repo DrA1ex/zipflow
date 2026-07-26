@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { lstat, realpath } from 'node:fs/promises';
+import { lstat, readFile, realpath } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { runProcess } from '../utils/process.js';
 import { ZIPFLOW_VERSION } from '../version.js';
@@ -12,6 +12,7 @@ export function createUpdateService(options = {}) {
   return {
     check: (overrides = {}) => checkForUpdate({ ...options, ...overrides }),
     install: (version, overrides = {}) => installUpdate(version, { ...options, ...overrides }),
+    verify: (verification, overrides = {}) => verifyInstalledUpdate(verification, { ...options, ...overrides }),
   };
 }
 
@@ -23,13 +24,15 @@ export async function checkForUpdate({
   detectInstallation = detectNpmGlobalInstallation,
   timeoutMs = 6_000,
   allowUnsupportedInstallation = false,
+  resolveBinary = null,
 } = {}) {
-  const installation = await detectInstallation({ packageName, run, timeoutMs: Math.min(timeoutMs, 3_000) });
+  const installation = await detectInstallation({ packageName, run, timeoutMs: Math.min(timeoutMs, 3_000), resolveBinary });
   if (installation.mode !== 'global-npm' && !allowUnsupportedInstallation) {
     return { status: 'unsupported', currentVersion, installation };
   }
 
-  const result = await run('npm', [
+  const npm = await resolveUpdateBinary('npm', { run, resolveBinary });
+  const result = await run(npm, [
     'view', `${packageName}@latest`, 'version', '--json',
     `--registry=${registry}`,
     '--fetch-retries=0',
@@ -67,6 +70,7 @@ export async function installUpdate(version, {
   timeoutMs = 10 * 60_000,
   signal = null,
   onOutput = null,
+  resolveBinary = null,
 } = {}) {
   const normalized = normalizeVersion(version);
   if (!normalized) throw new Error(`Invalid Zipflow update version: ${version}`);
@@ -75,7 +79,8 @@ export async function installUpdate(version, {
     `--registry=${registry}`,
     '--no-audit', '--no-fund', '--silent',
   ];
-  const result = await run('npm', args, {
+  const npm = await resolveUpdateBinary('npm', { run, resolveBinary });
+  const result = await run(npm, args, {
     timeoutMs,
     signal,
     onOutput,
@@ -89,13 +94,89 @@ export async function installUpdate(version, {
   };
 }
 
+
+export async function verifyInstalledUpdate({
+  previousVersion,
+  targetVersion,
+  installation = null,
+} = {}, {
+  packageName = ZIPFLOW_PACKAGE_NAME,
+  run = runProcess,
+  detectInstallation = detectNpmGlobalInstallation,
+  timeoutMs = 6_000,
+  nodePath = process.execPath,
+  resolveBinary = null,
+} = {}) {
+  const previous = normalizeVersion(previousVersion);
+  const target = normalizeVersion(targetVersion);
+  if (!target) throw new Error(`Invalid Zipflow verification target: ${targetVersion}`);
+  const detected = installation?.installedPath
+    ? installation
+    : await detectInstallation({ packageName, run, timeoutMs: Math.min(timeoutMs, 3_000), resolveBinary });
+  const installedPath = detected?.installedPath;
+  if (!installedPath) {
+    return uncertainVerification({ previous, target, installation: detected }, 'The global Zipflow package path could not be resolved.');
+  }
+
+  let packageMetadata;
+  try {
+    packageMetadata = JSON.parse(await readFile(path.join(installedPath, 'package.json'), 'utf8'));
+  } catch (error) {
+    return uncertainVerification({ previous, target, installation: detected, installedPath }, `The installed package metadata is unavailable: ${error.message}`);
+  }
+  const packageVersion = normalizeVersion(packageMetadata.version);
+  const relativeBin = packageExecutable(packageMetadata.bin, packageName);
+  if (!relativeBin) {
+    return uncertainVerification({ previous, target, installation: detected, installedPath, packageVersion }, 'The installed package does not define a Zipflow executable.');
+  }
+  const executablePath = path.resolve(installedPath, relativeBin);
+  if (!pathInside(installedPath, executablePath)) {
+    return uncertainVerification({ previous, target, installation: detected, installedPath, packageVersion, executablePath }, 'The installed package executable points outside the Zipflow package directory.');
+  }
+  try {
+    const executableStats = await lstat(executablePath);
+    if (!executableStats.isFile() || executableStats.isSymbolicLink()) throw new Error('not a regular package file');
+    const [packageRealPath, executableRealPath] = await Promise.all([realpath(installedPath), realpath(executablePath)]);
+    if (!pathInside(packageRealPath, executableRealPath)) throw new Error('resolves outside the package directory');
+  } catch (error) {
+    return uncertainVerification({ previous, target, installation: detected, installedPath, packageVersion, executablePath }, `The installed Zipflow executable is unavailable: ${error.message}`);
+  }
+
+  const probe = await run(nodePath, [executablePath, '--version'], {
+    timeoutMs,
+    inheritEnv: false,
+    env: updateProbeEnvironment(),
+  }).catch((error) => ({ ok: false, stderr: error.message, error }));
+  const probeVersion = probe?.ok
+    ? normalizeVersion(String(probe.stdout ?? '').trim().split(/\r?\n/).filter(Boolean).at(-1))
+    : '';
+  const base = {
+    previousVersion: previous || null,
+    targetVersion: target,
+    packageVersion: packageVersion || null,
+    probeVersion: probeVersion || null,
+    executablePath,
+    executableExists: true,
+    installation: detected,
+    probe,
+  };
+  if (packageVersion === target && probeVersion === target) return { ...base, status: 'updated' };
+  if (previous && packageVersion === previous && probeVersion === previous) return { ...base, status: 'unchanged' };
+  const detail = !probe?.ok
+    ? `The installed executable probe failed: ${String(probe?.stderr || probe?.stdout || 'unknown error').trim()}`
+    : `Installed package version ${packageVersion || 'unknown'} and executable version ${probeVersion || 'unknown'} do not agree with the expected state.`;
+  return { ...base, status: 'uncertain', detail };
+}
+
 export async function detectNpmGlobalInstallation({
   packageName = ZIPFLOW_PACKAGE_NAME,
   packageRoot = PACKAGE_ROOT,
   run = runProcess,
   timeoutMs = 3_000,
+  resolveBinary = null,
 } = {}) {
-  const result = await run('npm', ['root', '-g', '--silent'], {
+  const npm = await resolveUpdateBinary('npm', { run, resolveBinary });
+  const result = await run(npm, ['root', '-g', '--silent'], {
     timeoutMs,
     env: npmEnvironment(),
   });
@@ -207,4 +288,51 @@ function updateCommandError(message, result) {
   error.exitCode = result?.code;
   error.commandResult = result;
   return error;
+}
+
+
+function pathInside(root, target) {
+  const relative = path.relative(path.resolve(root), path.resolve(target));
+  return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+}
+
+function packageExecutable(bin, packageName) {
+  if (typeof bin === 'string') return bin;
+  if (!bin || typeof bin !== 'object') return '';
+  if (typeof bin[packageName] === 'string') return bin[packageName];
+  return Object.values(bin).find((value) => typeof value === 'string') ?? '';
+}
+
+function uncertainVerification(base, detail) {
+  return {
+    previousVersion: base.previous || null,
+    targetVersion: base.target,
+    packageVersion: base.packageVersion || null,
+    probeVersion: null,
+    executablePath: base.executablePath || null,
+    executableExists: false,
+    installedPath: base.installedPath || null,
+    installation: base.installation ?? null,
+    status: 'uncertain',
+    detail,
+  };
+}
+
+function updateProbeEnvironment() {
+  return {
+    HOME: process.env.HOME ?? '',
+    USERPROFILE: process.env.USERPROFILE ?? '',
+    TMPDIR: process.env.TMPDIR ?? '',
+    TMP: process.env.TMP ?? '',
+    TEMP: process.env.TEMP ?? '',
+    LANG: process.env.LANG ?? 'C',
+    LC_ALL: process.env.LC_ALL ?? '',
+  };
+}
+
+async function resolveUpdateBinary(toolId, { run, resolveBinary }) {
+  if (typeof resolveBinary === 'function') return resolveBinary(toolId);
+  if (run !== runProcess) return toolId;
+  const { resolveInternalBinary } = await import('../security/binaries.js');
+  return resolveInternalBinary(toolId);
 }

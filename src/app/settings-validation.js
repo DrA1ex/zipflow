@@ -4,6 +4,7 @@ import { expandHome } from '../utils/paths.js';
 import { parseByteSize } from '../utils/size.js';
 
 export async function validateSettingValue(field, entered) {
+  if (field.binaryId) return entered;
   if (field.id === 'archiveDirectory') {
     if (!entered) throw new Error('Enter an archive directory.');
     const absolute = path.resolve(expandHome(entered));

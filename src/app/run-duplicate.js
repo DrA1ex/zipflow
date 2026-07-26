@@ -18,10 +18,7 @@ export async function activateDuplicate(controller, itemId, { beginArchiveInput,
   if (!pending) return beginArchiveInput(controller);
   if (itemId === 'duplicate-choose-another') return beginArchiveInput(controller);
   if (itemId === 'duplicate-apply-again') {
-    return inspectArchivePath(controller, pending.archivePath, {
-      allowDuplicate: true,
-      archiveHash: pending.archiveHash,
-    });
+    return inspectArchivePath(controller, pending.archivePath, { allowDuplicate: true });
   }
   if (itemId === 'duplicate-view-run') {
     const run = pending.previous;

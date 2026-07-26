@@ -7,18 +7,19 @@ Zipflow treats every input ZIP as untrusted. The selected archive must be a regu
 Archive inspection rejects:
 
 - path traversal, absolute paths, drive-relative paths, and backslash escape variants;
-- Windows device names and alternate data streams;
 - `.git` entries;
 - encrypted entries;
 - symbolic links, devices, sockets, FIFOs, and other unsupported special entries;
 - duplicate paths;
-- case-insensitive and Unicode-equivalent collisions;
+- exact duplicates, Unicode-normalized collisions, and case collisions on case-insensitive target filesystems;
 - file-versus-directory parent conflicts;
 - excessive path depth or entry counts;
 - oversized expanded data;
 - suspicious compression ratios.
 
-The archive is extracted into an isolated temporary directory only after entry validation.
+Zipflow opens the selected ZIP without following a leaf symlink, copies it into a private run directory while calculating SHA-256, and closes the original descriptor. Central-directory inspection and extraction independently open that immutable private snapshot, so ZIP readers never share descriptor ownership and pathname replacement cannot substitute different bytes.
+
+The archive is extracted into an isolated temporary directory only after entry validation and a coarse disk-space preflight.
 
 ## Project filesystem boundary
 
@@ -78,9 +79,11 @@ Autonomous decisions also record state hashes. If the project changes while the 
 
 ## Transactional application
 
-Zipflow creates a path-specific backup before changing the project. The apply operation writes only selected changes.
+Zipflow creates a path-specific backup before changing the project. It builds the backup in a temporary directory, verifies every copied file against the reviewed pre-apply hash, writes the completed metadata, and publishes the directory atomically. The apply operation writes only selected changes.
 
-If application fails after touching files, Zipflow restores every affected path from the backup before reporting the error.
+Before either automatic recovery or a requested rollback changes the project, every required backup file is hashed again. Missing or modified backup content stops recovery with an exact integrity error instead of restoring untrusted bytes. If application fails after touching files and the backup remains valid, Zipflow restores every affected path before reporting the error.
+
+Before extraction and apply, Zipflow rejects clear storage shortages using expanded archive data, existing files that need backup, replacement temporaries, metadata, and a fixed safety margin. This estimate is intentionally coarse and does not claim to model filesystem compression, sparse files, snapshots, or every rollback byte.
 
 Cancellation is deferred during atomic filesystem steps until the current step can finish or be restored. This prevents `Ctrl+C` from leaving a partially applied project.
 
@@ -97,6 +100,10 @@ Each purpose is configured independently. When the global **Dirty-tree checkpoin
 
 Result commits stage only paths applied by the current run. Protected `.zipflow/` paths and untracked paths ignored by Git are filtered before staging. Pre-existing staged changes block automatic commits so unrelated index contents cannot be included accidentally.
 
+Automatic Zipflow commits disable repository hooks by default with a command-scoped trusted empty `core.hooksPath`; the repository configuration is not changed. A configured workflow can explicitly allow its project hooks in the Git settings section. The option is not offered during first-run setup, and migrated workflows remain disabled until deliberately changed. Commit review always reports the active policy.
+
+The initial repository commit enumerates candidates before staging. `.git/` and `.zipflow/` are always excluded. Credential-like files and private keys are excluded by default; generated directories, local databases, and large files are shown as review warnings. The review lists every omitted path and provides an explicit include-all override. Unflagged projects keep the direct first-commit flow.
+
 Full autopilot can amend or squash only eligible unpublished Zipflow commits exposed by the application. The model cannot choose arbitrary commit hashes. Zipflow never pushes or force-pushes.
 
 ## Rollback
@@ -106,6 +113,10 @@ Rollback restores the exact contents that existed immediately before the run. It
 Rollback validates the project/run binding and backup manifest before writing. It is blocked when an affected path changed after the run, preventing newer work from being overwritten silently.
 
 Backup retention can make old runs no longer rollback-capable. History reports this as **Rollback unavailable** instead of failing only after an attempt.
+
+## Project command environment
+
+Checks default to the global sanitized environment, while deployment defaults to the inherited environment. The policies are configured independently. Sanitization preserves the ordinary execution context and project-local package binaries while removing common credential values and agent sockets; it reduces accidental leakage but is not a sandbox.
 
 ## Deployment boundary
 

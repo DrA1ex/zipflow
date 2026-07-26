@@ -6,6 +6,7 @@ import { continueToDeploy } from './run-deploy-flow.js';
 import { completeRun } from './run-completion.js';
 import { waitForPendingLlmReview } from './run-llm-review.js';
 import { autopilotPaused, resumeAutopilot } from './autonomy-flow.js';
+import { gitHooksAllowed } from '../git/hooks.js';
 
 export { commitMessageCandidates, commitMessageEditorInitialValue, defaultCommitMessage } from './commit-options.js';
 
@@ -53,8 +54,13 @@ export function showCommitPrompt(controller) {
     id: 'finish-no-commit', label: 'Continue without commit',
     description: failedChecks ? 'Keep the update without a commit.' : 'Continue to the configured deployment step.',
   });
-  controller.showMenu('commit', items, failedChecks ? 'Commit kept changes' : 'Commit result', 0,
-    failedChecks ? ['Required checks failed. The run will remain completed with errors.'] : []);
+  const context = [
+    ...(failedChecks ? ['Required checks failed. The run will remain completed with errors.'] : []),
+    gitHooksAllowed(state.workflow)
+      ? 'Project Git hooks are enabled for this workflow and may execute local commands during the commit.'
+      : 'Git hooks are disabled for this Zipflow commit.',
+  ];
+  controller.showMenu('commit', items, failedChecks ? 'Commit kept changes' : 'Commit result', 0, context);
 }
 
 export async function activateCommitChoice(controller, itemId) {
@@ -90,7 +96,7 @@ export async function createResultCommit(controller, message) {
   const { state } = controller;
   const operation = controller.beginOperation({ kind: 'git-commit', label: 'Creating Git commit', critical: true });
   try {
-    const result = await createCommit(state.project.root, state.run.applied.paths, message, { signal: operation.signal });
+    const result = await createCommit(state.project.root, state.run.applied.paths, message, { signal: operation.signal, allowHooks: gitHooksAllowed(state.workflow) });
     if (!result.ok) {
       controller.message('Commit was not created', [result.reason], 'error');
       return showCommitPrompt(controller);
@@ -120,8 +126,8 @@ export async function rewriteResultCommit(controller, kind, candidate, message) 
   const operation = controller.beginOperation({ kind: 'git-rewrite', label: kind === 'amend' ? 'Amending Git commit' : 'Squashing Git commits', critical: true });
   try {
     const result = kind === 'amend'
-      ? await amendZipflowCommit(state.project.root, { runId: state.run.id, paths: state.run.applied.paths, message, candidate, signal: operation.signal })
-      : await squashZipflowCommits(state.project.root, { runId: state.run.id, paths: state.run.applied.paths, message, candidate, signal: operation.signal });
+      ? await amendZipflowCommit(state.project.root, { runId: state.run.id, paths: state.run.applied.paths, message, candidate, signal: operation.signal, allowHooks: gitHooksAllowed(state.workflow) })
+      : await squashZipflowCommits(state.project.root, { runId: state.run.id, paths: state.run.applied.paths, message, candidate, signal: operation.signal, allowHooks: gitHooksAllowed(state.workflow) });
     if (!result.ok) {
       controller.message('Commit rewrite was not created', [result.reason], 'error');
       return showCommitPrompt(controller);

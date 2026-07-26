@@ -1,3 +1,5 @@
+export const FULL_AUTOPILOT_WARNING_VERSION = 1;
+
 export const AUTONOMY_MODES = Object.freeze({
   manual: {
     id: 'manual',
@@ -54,6 +56,7 @@ export function autonomyForMode(mode) {
     maxDecisionRetries: 1,
     maxCheckRetries: 1,
     maxDeployRetries: 1,
+    fullWarningAcknowledgedVersion: 0,
     capabilities: { ...profile.capabilities },
   };
 }
@@ -79,6 +82,15 @@ export function isAutopilotEnabled(workflow) {
 
 export function canAutonomy(workflow, capability) {
   return Boolean(isAutopilotEnabled(workflow) && workflow.autonomy.capabilities?.[capability]);
+}
+
+export function fullAutopilotWarningAcknowledged(workflow) {
+  return workflow?.autonomy?.mode !== 'full'
+    || Number(workflow?.autonomy?.fullWarningAcknowledgedVersion ?? 0) >= FULL_AUTOPILOT_WARNING_VERSION;
+}
+
+export function fullAutopilotWarningRequired(workflow) {
+  return workflow?.autonomy?.mode === 'full' && !fullAutopilotWarningAcknowledged(workflow);
 }
 
 export function confidenceThreshold(mode) {

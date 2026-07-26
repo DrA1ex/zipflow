@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { renderToString, themes } from 'terlio.js';
-import { createInitialState, appendMessage, setScreen } from '../src/app/state.js';
+import { createInitialState, appendMessage, applyOperationSnapshot, setScreen, transitionScreen } from '../src/app/state.js';
 import { renderZipflow } from '../src/ui/render.js';
 import { transcriptLines } from '../src/ui/activity.js';
 import { ZipflowController } from '../src/app/controller.js';
@@ -95,8 +95,8 @@ test('clicking a collapsed Activity block expands it without disabling text sele
 test('Activity renders incremental local LLM progress and streamed text', () => {
   const state = createInitialState();
   state.project = { name: 'fixture', root: '/tmp/fixture', labels: ['Node.js'], git: true };
-  state.busy = true;
-  state.screen = 'applying';
+  applyOperationSnapshot(state, { kind: 'archive-inspection', label: 'Inspecting archive', cancellable: true });
+  transitionScreen(state, 'applying');
   state.busyLabel = 'Inspecting archive';
   state.progress = { value: 5, total: 7, detail: 'Streaming summary' };
   state.llmRuntime = {

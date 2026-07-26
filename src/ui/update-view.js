@@ -45,7 +45,7 @@ function updateContent(state, prompt, actions, rows, width, height, theme, anima
     }
   } else {
     children.push(Text(t(state, prompt.message, prompt.messageVariables ?? {}), { wrap: true }));
-    if (prompt.detail) children.push(Text(color(theme, prompt.phase === 'failed' ? 'danger' : 'textMuted', t(state, prompt.detail)), { wrap: true }));
+    if (prompt.detail) children.push(Text(color(theme, ['failed', 'uncertain'].includes(prompt.phase) ? 'danger' : 'textMuted', t(state, prompt.detail)), { wrap: true }));
     if (prompt.phase === 'installing') {
       children.push(Text(''), Spinner({ frame: animationFrame, label: t(state, prompt.cancelling ? 'Stopping safely' : 'Running npm install'), theme }));
     }
@@ -79,6 +79,7 @@ function updateContent(state, prompt, actions, rows, width, height, theme, anima
 function updateTitle(prompt) {
   if (prompt.phase === 'installing') return 'Updating Zipflow';
   if (prompt.phase === 'failed') return 'Update failed';
+  if (prompt.phase === 'uncertain') return 'Update state uncertain';
   if (prompt.phase === 'complete') return 'Update installed';
   return 'Zipflow update available';
 }
@@ -86,6 +87,7 @@ function updateTitle(prompt) {
 function updateFooter(prompt) {
   if (prompt.phase === 'installing') return prompt.cancelling ? 'Stopping safely' : 'Enter cancel · Esc cancel · Ctrl+C cancel operation';
   if (prompt.phase === 'complete') return 'Enter choose · ↑/↓ move';
+  if (prompt.phase === 'uncertain') return 'Enter exit · Esc exit';
   if (prompt.phase === 'available' && prompt.installSupported === false) return 'Enter close · Esc close';
   return 'Enter choose · ↑/↓ move · Esc later';
 }

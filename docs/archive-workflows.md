@@ -4,8 +4,8 @@
 
 Zipflow performs archive analysis before changing project files:
 
-1. Validate the selected ZIP as a regular, non-symlink file.
-2. Inspect and extract it into an isolated temporary directory.
+1. Open the selected ZIP once as a regular, non-symlink file and capture its descriptor identity and SHA-256.
+2. Inspect and extract it from that same descriptor into an isolated temporary directory after a capacity preflight.
 3. Reject unsafe or ambiguous archive entries.
 4. Determine whether a wrapper directory should be treated as the project root.
 5. Read supported archive metadata.
@@ -15,7 +15,7 @@ Zipflow performs archive analysis before changing project files:
 9. Evaluate deterministic age and snapshot-shrink warnings.
 10. Present the plan, warnings, conflicts, and diffs for review or an enabled autopilot gate.
 
-Nothing is written to the project during these steps.
+Nothing is written to the project during these steps. Zipflow revalidates the opened source identity and hash before accepting the extraction, so a pathname replacement cannot change the archive used for planning.
 
 ### LLM review while the plan is open
 

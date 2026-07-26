@@ -6,7 +6,7 @@ import { loadRunRecord, runReportPath, saveRunRecord } from '../runs/store.js';
 import { compactPlanLine, compactPlanMeta, formatArchiveName, planSummary, runStatusLabel } from '../ui/format.js';
 import { restoreManagedHistory } from '../history/managed.js';
 import { loadStoredFileDiff, runChangedGroups } from '../diff/stored-patch.js';
-import { setScreen } from './state.js';
+import { setScreen, transitionScreen } from './state.js';
 import { formatCompletionForClipboard } from '../runs/text-report.js';
 
 export async function showLastRun(controller) {
@@ -124,8 +124,7 @@ export async function confirmRollback(controller, run) {
 export async function performRollback(controller, { automatic = false } = {}) {
   const { state } = controller;
   const operation = controller.beginOperation({ kind: 'rollback', label: 'Rolling back update', critical: true });
-  state.busy = true;
-  state.screen = 'rolling-back';
+  transitionScreen(state, 'rolling-back');
   state.busyLabel = 'Rolling back update';
   state.progress = { value: 0, total: 1, detail: 'Preparing' };
   controller.invalidate();
@@ -141,12 +140,10 @@ export async function performRollback(controller, { automatic = false } = {}) {
     state.run.rollback = { status: 'completed', at: new Date().toISOString(), restored: result.restored };
     state.run.status = 'rolled_back';
     state.run = await saveRunRecord(state.run);
-    state.busy = false;
     controller.message('Rollback completed', [`${result.restored} paths restored`], 'success');
     if (automatic) return { ok: true, run: state.run, restored: result.restored };
     return showRunDetails(controller, state.run, { origin: controller.state.runDetailsOrigin });
   } catch (error) {
-    state.busy = false;
     controller.message('Rollback failed', [error.message], 'error');
     if (automatic) return { ok: false, error };
     return showRunDetails(controller, state.run, { origin: controller.state.runDetailsOrigin });

@@ -34,7 +34,15 @@ export async function writeTextAtomic(target, value) {
   await writeAtomic(target, value);
 }
 
-async function writeAtomic(target, value) {
+export async function writeJsonDurableAtomic(target, value) {
+  await writeAtomic(target, `${JSON.stringify(value, null, 2)}\n`, { durable: true });
+}
+
+export async function writeTextDurableAtomic(target, value) {
+  await writeAtomic(target, value, { durable: true });
+}
+
+async function writeAtomic(target, value, { durable = false } = {}) {
   const parent = path.dirname(target);
   await ensureDir(parent);
   const temporary = `${target}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
@@ -42,14 +50,24 @@ async function writeAtomic(target, value) {
   try {
     handle = await open(temporary, 'wx', 0o600);
     await handle.writeFile(value, 'utf8');
-    await handle.sync();
+    if (durable) await handle.sync();
     await handle.close();
     handle = null;
     await rename(temporary, target);
-    await syncDirectory(parent);
+    if (durable) await syncDirectory(parent);
   } finally {
     await handle?.close().catch(() => {});
     await rm(temporary, { force: true }).catch(() => {});
+  }
+}
+
+export async function syncFile(target) {
+  let handle = null;
+  try {
+    handle = await open(target, 'r');
+    await handle.sync();
+  } finally {
+    await handle?.close().catch(() => {});
   }
 }
 

@@ -31,7 +31,7 @@ test('version 1 workflows load with deployment and archive-message defaults', as
     });
 
     const loaded = await loadWorkflow(projectPath);
-    assert.equal(loaded.version, 8);
+    assert.equal(loaded.version, 9);
     assert.equal(loaded.deploy.policy, 'disabled');
     assert.deepEqual(loaded.projects, [{ path: '.', typeIds: ['node'], labels: ['Node.js'], source: 'legacy', selected: true }]);
     assert.equal(loaded.autonomy.mode, 'manual');
@@ -44,7 +44,7 @@ test('version 1 workflows load with deployment and archive-message defaults', as
     assert.equal(loaded.archive.allowGitIgnoredIncomingFiles, 'no');
 
     const saved = await saveWorkflow(loaded);
-    assert.equal(saved.version, 8);
+    assert.equal(saved.version, 9);
   } finally {
     delete process.env.ZIPFLOW_HOME;
   }

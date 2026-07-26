@@ -115,12 +115,14 @@ test('concurrent Enter events create only one commit submission', async () => {
   }, 'Subject');
   let submissions = 0;
   let release;
+  let markStarted;
   const blocker = new Promise((resolve) => { release = resolve; });
-  controller.submitCurrentEditor = async () => { submissions += 1; await blocker; };
+  const started = new Promise((resolve) => { markStarted = resolve; });
+  controller.submitCurrentEditor = async () => { submissions += 1; markStarted(); await blocker; };
 
   const first = controller.handleKey({ name: 'enter' });
   const second = controller.handleKey({ name: 'enter' });
-  await Promise.resolve();
+  await started;
   assert.equal(submissions, 1);
   release();
   await Promise.all([first, second]);

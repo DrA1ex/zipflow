@@ -18,7 +18,6 @@ export async function cancelRun(controller) {
 
 export async function failRun(controller, error, { retry = null, continueWithoutLlm = null, kind = null } = {}) {
   const { state } = controller;
-  state.busy = false;
   const runWasApplied = Boolean(state.run?.applied);
   if (state.run) {
     state.run.status = 'failed';
@@ -57,7 +56,9 @@ function classifyFailure(error, state) {
 
 export async function releaseRunResources(controller) {
   controller.state.pendingArchiveInspection = null;
-  await controller.activeLock?.release?.();
-  controller.activeLock = null;
+  if (!controller.fatalCleanupActive) {
+    await controller.activeLock?.release?.();
+    controller.activeLock = null;
+  }
   if (controller.state.run?.id) await removeIfExists(path.join(getZipflowHome(), 'tmp', controller.state.run.id));
 }

@@ -134,7 +134,7 @@ test('rollback rejects a tampered manifest that points at another project', asyn
   }
 });
 
-test('portable ZIP validation rejects Windows device names, drive-relative paths, and alternate streams', async () => {
+test('ZIP validation rejects absolute drive paths without imposing Windows-only filename rules', async () => {
   const { validateZipEntry } = await import('../src/archive/security.js');
   const regular = (fileName) => ({
     fileName,
@@ -143,10 +143,10 @@ test('portable ZIP validation rejects Windows device names, drive-relative paths
     uncompressedSize: 1,
     compressedSize: 1,
   });
-  assert.throws(() => validateZipEntry(regular('CON.txt')), /reserved device name/);
-  assert.throws(() => validateZipEntry(regular('C:relative.txt')), /absolute path|alternate-stream|drive separator/);
-  assert.throws(() => validateZipEntry(regular('config.txt:secret')), /alternate-stream|drive separator/);
-  assert.throws(() => validateZipEntry(regular('trailing-dot./file.txt')), /trailing character/);
+  assert.throws(() => validateZipEntry(regular('C:relative.txt')), /absolute path/);
+  assert.equal(validateZipEntry(regular('CON.txt')).path, 'CON.txt');
+  assert.equal(validateZipEntry(regular('config.txt:secret')).path, 'config.txt:secret');
+  assert.equal(validateZipEntry(regular('trailing-dot./file.txt')).path, 'trailing-dot./file.txt');
 });
 
 test('ZIP export refuses to replace a symbolic-link output path', async () => {

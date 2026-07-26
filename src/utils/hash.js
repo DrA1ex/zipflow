@@ -19,6 +19,20 @@ export async function hashFile(target, { signal = null } = {}) {
   return hash.digest('hex');
 }
 
+export async function hashFileHandle(handle, { signal = null, chunkSize = 1024 * 1024 } = {}) {
+  const hash = createHash('sha256');
+  const buffer = Buffer.allocUnsafe(Math.max(4096, Number(chunkSize) || 1024 * 1024));
+  let position = 0;
+  while (true) {
+    if (signal?.aborted) throw Object.assign(new Error('Operation cancelled.'), { code: 'cancelled' });
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, position);
+    if (!bytesRead) break;
+    hash.update(buffer.subarray(0, bytesRead));
+    position += bytesRead;
+  }
+  return hash.digest('hex');
+}
+
 export function shortToken(bytes = 3) {
   return randomBytes(bytes).toString('hex').toUpperCase();
 }

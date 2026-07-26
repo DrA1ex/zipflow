@@ -1,7 +1,9 @@
 import { runProcess, runShell } from '../utils/process.js';
 import { resolveCommandCwd } from '../project/command-spec.js';
+import { resolveInternalBinary } from '../security/binaries.js';
+import { createProjectCommandEnvironment } from '../security/environment.js';
 
-export async function runChecks({ workflow, projectPath, changedPaths, onUpdate = null, signal = null }) {
+export async function runChecks({ workflow, projectPath, changedPaths, settings = null, onUpdate = null, signal = null }) {
   const checks = workflow.checks.filter((check) => check.selected);
   const results = [];
   for (let index = 0; index < checks.length; index += 1) {
@@ -16,6 +18,7 @@ export async function runChecks({ workflow, projectPath, changedPaths, onUpdate 
         cwd,
         cwdRelative: check.cwd || '.',
         changedPaths,
+        settings,
         signal,
         onOutput: (event) => onUpdate?.({ type: 'output', check, index, event, results }),
       });
@@ -59,18 +62,21 @@ async function runCheck(check, context) {
 
 async function runNodeSyntax(check, context) {
   const files = changedPathsForCwd(context.changedPaths, context.cwdRelative).filter((file) => /\.(cjs|mjs|js)$/.test(file));
-  return runPerFile(files, (file) => runProcess(process.execPath, nodeSyntaxArguments(file), commandOptions(check, context)), 'No changed JavaScript files.');
+  const executable = await resolveInternalBinary('node', { settings: context.settings });
+  return runPerFile(files, (file) => runProcess(executable, nodeSyntaxArguments(file), commandOptions(check, context)), 'No changed JavaScript files.');
 }
 
 async function runPythonSyntax(check, context) {
   const files = changedPathsForCwd(context.changedPaths, context.cwdRelative).filter((file) => file.endsWith('.py'));
-  return runPerFile(files, (file) => runProcess(check.interpreter || 'python3', pythonSyntaxArguments(file), commandOptions(check, context)), 'No changed Python files.');
+  const executable = await resolveInternalBinary('python', { settings: context.settings });
+  return runPerFile(files, (file) => runProcess(executable, pythonSyntaxArguments(file), commandOptions(check, context)), 'No changed Python files.');
 }
 
 async function runGoFormat(check, context) {
   const files = changedPathsForCwd(context.changedPaths, context.cwdRelative).filter((file) => file.endsWith('.go'));
   if (!files.length) return successResult('No changed Go files.');
-  const result = await runProcess('gofmt', goFormatArguments(files), commandOptions(check, context));
+  const executable = await resolveInternalBinary('gofmt', { settings: context.settings });
+  const result = await runProcess(executable, goFormatArguments(files), commandOptions(check, context));
   if (result.ok && result.stdout.trim()) return { ...result, ok: false, code: 1, stderr: 'gofmt found formatting differences.\n' };
   return result;
 }
@@ -99,6 +105,11 @@ function changedPathsForCwd(changedPaths, cwdRelative) {
 function commandOptions(check, context) {
   return {
     cwd: context.cwd,
+    env: createProjectCommandEnvironment(context.settings?.checkCommandEnvironment, {
+      projectPath: context.projectPath,
+      cwd: context.cwd,
+    }),
+    inheritEnv: false,
     timeoutMs: check.timeoutMs || 600_000,
     onOutput: context.onOutput,
     signal: context.signal,

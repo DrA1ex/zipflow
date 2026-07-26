@@ -5,10 +5,11 @@ import { collectCustomExportPaths, collectExportPaths, classifyCustomExportPaths
 import { inspectPotentiallySensitivePaths, sensitivePathMap } from '../export/sensitive.js';
 import { createProjectArchive } from '../export/create.js';
 import { displayPath } from '../utils/paths.js';
-import { runProcess } from '../utils/process.js';
+import { revealFile } from '../utils/reveal.js';
 import { rememberExportPath } from '../settings/recent.js';
 import { exists } from '../utils/fs.js';
 import { defaultArchivePath, normalizeOutputArchivePath } from '../export/output-path.js';
+import { transitionScreen } from './state.js';
 import {
   enterTreeDirectory, exportTreeItems, initializeExportTree, leaveTreeDirectory,
   nextDirectoryItemIndex, selectAllTreePaths, toggleTreeEntry, treeLocationLabel,
@@ -157,8 +158,7 @@ async function prepareExportPreview(controller, { custom = false } = {}) {
   const { state } = controller;
   const operation = controller.beginOperation({ kind: 'export-preview', label: 'Preparing ZIP preview' });
   state.exportAbortController = { abort: () => operation.abort() };
-  state.busy = true;
-  state.screen = 'export-running';
+  transitionScreen(state, 'export-running');
   state.busyLabel = 'Preparing ZIP preview';
   state.progress = { value: 0, total: 1, detail: 'Scanning project files' };
   controller.invalidate();
@@ -202,12 +202,10 @@ async function prepareExportPreview(controller, { custom = false } = {}) {
       sensitiveAcknowledged: custom || sensitive.length === 0,
     });
     updateSelectedSize(state.exportDraft);
-    state.busy = false;
     if (custom) return showExportFiles(controller, 0, { origin: 'mode' });
     if (sensitive.length) return showSensitiveReview(controller);
     return showExportPreview(controller);
   } catch (error) {
-    state.busy = false;
     if (error.code === 'cancelled') {
       controller.toast('ZIP preview preparation cancelled', 'info');
       return showExportMode(controller);
@@ -420,9 +418,7 @@ function updateSelectedSize(draft) {
 async function openArchiveLocation(controller) {
   const target = controller.state.exportDraft.result.outputPath;
   try {
-    if (process.platform === 'darwin') await runProcess('open', ['-R', target]);
-    else if (process.platform === 'linux') await runProcess('xdg-open', [path.dirname(target)]);
-    else return controller.setStatus('Opening the containing folder is not supported on this platform.');
+    await revealFile(target, { settings: controller.state.settings });
     controller.toast('Opened archive location', 'success');
   } catch (error) {
     controller.message('Could not open archive location', [error.message], 'warning');
@@ -440,8 +436,7 @@ function showExportPath(controller) {
 async function createArchive(controller) {
   const { state } = controller;
   const operation = controller.beginOperation({ kind: 'export-create', label: 'Creating ZIP archive' });
-  state.busy = true;
-  state.screen = 'export-running';
+  transitionScreen(state, 'export-running');
   state.busyLabel = 'Creating ZIP archive';
   state.progress = { value: 0, total: 1, detail: 'Collecting files' };
   controller.invalidate();
@@ -460,7 +455,6 @@ async function createArchive(controller) {
     });
     state.exportDraft.result = result;
     state.settings = await rememberExportPath(state, result.outputPath);
-    state.busy = false;
     controller.message('ZIP archive created', [
       displayPath(result.outputPath),
       `${result.fileCount} files · ${formatBytes(result.size)}`,
@@ -477,7 +471,6 @@ async function createArchive(controller) {
       displayPath(result.outputPath),
     ]);
   } catch (error) {
-    state.busy = false;
     if (error.code === 'cancelled') controller.toast('ZIP creation cancelled', 'info');
     else controller.message('Could not create ZIP archive', [error.message], 'error');
     showExportMode(controller);

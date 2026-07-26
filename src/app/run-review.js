@@ -2,7 +2,7 @@ import { loadPlanItemDiff } from '../diff/file.js';
 import { loadStoredFileDiff } from '../diff/stored-patch.js';
 import { rememberDiffMode } from '../settings/recent.js';
 import { compactPlanLine, compactPlanMeta } from '../ui/format.js';
-import { setScreen } from './state.js';
+import { isScreenGenerationCurrent, screenGenerationToken, setScreen } from './state.js';
 import { autopilotPaused, resumeAutopilot } from './autonomy-flow.js';
 import {
   isPlanItemSelected, planItemDecision, planSelectionSummary, setPlanGroupDecision, setPlanItemDecision,
@@ -104,15 +104,17 @@ export function handleReviewKey(controller, key) {
     if (key.name === 'm' || key.name === 'tab' || key.name === 'left' || key.name === 'right') {
       state.diffView.mode = state.diffView.mode === 'unified' ? 'side-by-side' : 'unified';
       state.diffView.pendingHunkJump = true;
-      void rememberDiffMode(state, state.diffView.mode).catch(() => {});
-      controller.setStatus(`Diff mode: ${state.diffView.mode}`);
-      return true;
+      return rememberDiffMode(state, state.diffView.mode)
+        .catch(() => {})
+        .then(() => {
+          controller.setStatus(`Diff mode: ${state.diffView.mode}`);
+          return true;
+        });
     }
     const printableName = String(key.text ?? key.name ?? '').toLowerCase();
     if (['j', 'k', '{', '}'].includes(printableName) && state.diffView.files?.length > 1) {
       const delta = printableName === 'j' || printableName === '}' ? 1 : -1;
-      void moveDiffFile(controller, delta).catch((error) => controller.handleUnexpected(error));
-      return true;
+      return moveDiffFile(controller, delta).then(() => true);
     }
     if (['n', 'p', ']', '['].includes(printableName)) {
       const delta = printableName === 'n' || printableName === ']' ? 1 : -1;
@@ -132,6 +134,10 @@ export function handleReviewKey(controller, key) {
     }
   }
   if (state.screen === 'plan-files' && key.name === 'space') {
+    if (llmReviewActive(state)) {
+      controller.setStatus('Wait for the LLM review to finish or cancel it before changing the file selection.');
+      return true;
+    }
     const item = state.menuItems[state.selectedIndex];
     if (item?.id?.startsWith('plan-file:')) {
       const category = state.planReview?.category;
@@ -144,10 +150,14 @@ export function handleReviewKey(controller, key) {
     }
   }
   if (state.screen === 'conflict-file' && key.printable) {
+    if (llmReviewActive(state)) {
+      controller.setStatus('Wait for the LLM review to finish or cancel it before changing conflict decisions.');
+      return true;
+    }
     const name = String(key.text ?? key.name ?? '').toLowerCase();
-    if (name === 'a') return runShortcut(controller, 'conflict-use-archive'), true;
-    if (name === 'l') return runShortcut(controller, 'conflict-keep-local'), true;
-    if (name === 'd') return runShortcut(controller, 'conflict-view-diff'), true;
+    if (name === 'a') return runShortcut(controller, 'conflict-use-archive');
+    if (name === 'l') return runShortcut(controller, 'conflict-keep-local');
+    if (name === 'd') return runShortcut(controller, 'conflict-view-diff');
   }
   return false;
 }
@@ -162,6 +172,7 @@ function llmReviewMenuItems(state) {
     label: state.llmReviewCancelling ? 'Cancelling LLM review…' : 'Cancel LLM review',
     description: state.llmReviewCancelling ? 'Waiting for the active model request to close safely' : 'Stop the model request and keep the deterministic update plan',
     disabled: Boolean(state.llmReviewCancelling),
+    allowDuringOperation: true,
   }];
   if (state.llmReviewInput && (state.run?.llm?.cancelled || state.run?.llm?.error)) return [{
     id: 'restart-llm-review',
@@ -187,7 +198,7 @@ export function showArchiveSafetyReview(controller) {
     ? 'LLM review cancellation is finishing before another operation can start.'
     : 'LLM review is still running. You can inspect the plan or cancel the review.');
   controller.showMenu('archive-safety', [
-    { id: 'safety-review-plan', label: 'Review changed files', description: 'Inspect groups and diffs before deciding whether to apply' },
+    { id: 'safety-review-plan', label: 'Review changed files', description: 'Inspect groups and diffs before deciding whether to apply', allowDuringOperation: active },
     { id: 'safety-continue', label: active ? 'Continue · waiting for LLM review' : 'Continue despite warnings', description: active ? 'Wait for the active review or cancel it first' : dangerous ? 'The archive remains subject to backup, conflict handling, and checks' : 'Acknowledge the advisory warnings and continue normally', disabled: active },
     ...llmReviewMenuItems(state),
     { id: 'safety-retry', label: 'Choose another archive', description: active ? 'Cancel the LLM review before leaving this run' : 'Cancel this run without changing the project', disabled: active },
@@ -200,7 +211,7 @@ export function showPlanReview(controller) {
   const active = llmReviewActive(state);
   const items = [
     { id: 'apply-plan', label: active ? 'Apply update · waiting for LLM review' : 'Apply update', description: active ? 'Wait for the active review or cancel it first' : plan.conflicts.length ? 'Uses the conflict decisions shown above' : 'Backup is created before any local file changes', disabled: active },
-    { id: 'view-plan', label: 'Review changes', description: 'Open file groups and inspect unified or side-by-side diffs' },
+    { id: 'view-plan', label: 'Review changes', description: 'Open file groups and inspect unified or side-by-side diffs', allowDuringOperation: active },
     ...llmReviewMenuItems(state),
   ];
   if (autopilotPaused(state)) items.push({ id: 'resume-autopilot', label: 'Resume autopilot', description: 'Ask the local model to decide this plan checkpoint again.' });
@@ -246,13 +257,13 @@ function showPlanCategories(controller) {
     if (!count) return [];
     const selectable = ['created', 'updated', 'deleted', 'conflicts'].includes(id);
     const selected = selectable ? entries.filter((item) => isPlanItemSelected(controller.state, item)).length : count;
-    return [{ id: `plan-category:${id}`, label: `${label} · ${selectable ? `${selected}/${count}` : count} ›`, description }];
+    return [{ id: `plan-category:${id}`, label: `${label} · ${selectable ? `${selected}/${count}` : count} ›`, description, allowDuringOperation: llmReviewActive(controller.state) }];
   });
   const active = llmReviewActive(controller.state);
   items.push(
     { id: 'apply-plan', label: active ? 'Apply update · waiting for LLM review' : 'Apply update', description: active ? 'Wait for the active review or cancel it first' : '', disabled: active },
     ...llmReviewMenuItems(controller.state),
-    { id: 'back-to-plan', label: 'Back to summary' },
+    { id: 'back-to-plan', label: 'Back to summary', allowDuringOperation: active },
   );
   controller.showMenu('plan-details', items, 'Review changed files', null, [compactPlanLine(plan), 'Choose a group. Enter on a changed file opens its diff.']);
 }
@@ -272,6 +283,7 @@ function showPlanFiles(controller, category, selectedIndex = null) {
     path: item.path,
     context: item.reason ?? (selectable ? `${decisionLabel(item, planItemDecision(controller.state, item))} · Enter choices · Space toggle` : group[2]),
     help: item.reason ?? (selectable ? 'Enter opens Apply/Keep and diff actions. Space toggles this file without opening the action page.' : group[2]),
+    allowDuringOperation: llmReviewActive(controller.state),
   }));
   if (selectable && entries.length) items.push(
     { id: 'plan-group-select-all', label: 'Select all in this group', context: 'Apply every change shown in this group.' },
@@ -280,7 +292,7 @@ function showPlanFiles(controller, category, selectedIndex = null) {
   const active = llmReviewActive(controller.state);
   items.push(
     ...llmReviewMenuItems(controller.state),
-    { id: 'back-plan-categories', label: 'Back to groups' },
+    { id: 'back-plan-categories', label: 'Back to groups', allowDuringOperation: active },
     { id: 'apply-plan', label: active ? 'Apply selected changes · waiting for LLM review' : 'Apply selected changes', description: active ? 'Wait for the active review or cancel it first' : '', disabled: active },
   );
   const selectedCount = selectable ? entries.filter((item) => isPlanItemSelected(controller.state, item)).length : entries.length;
@@ -297,8 +309,8 @@ function showPlanFileChoice(controller, itemId) {
   controller.showMenu('plan-file-choice', [
     { id: 'plan-file-archive', label: `${selected ? '●' : '○'} ${action.archive}`, context: action.archiveContext },
     { id: 'plan-file-keep', label: `${selected ? '○' : '●'} ${action.keep}`, context: action.keepContext },
-    { id: 'plan-file-diff', label: 'View diff', context: 'Open a read-only unified or side-by-side comparison.' },
-    { id: 'plan-file-back', label: 'Back to files' },
+    { id: 'plan-file-diff', label: 'View diff', context: 'Open a read-only unified or side-by-side comparison.', allowDuringOperation: llmReviewActive(controller.state) },
+    { id: 'plan-file-back', label: 'Back to files', allowDuringOperation: llmReviewActive(controller.state) },
   ], item.path, selected ? 0 : 1, [`${item.kind.toUpperCase()} · ${item.path}`, `Current choice: ${decisionLabel(item, selected ? 'archive' : 'keep')}`]);
 }
 
@@ -460,18 +472,23 @@ function closeDiff(controller) {
 
 async function moveDiffFile(controller, delta) {
   const view = controller.state.diffView;
-  if (!view?.files?.length) return;
-  view.fileIndex = (view.fileIndex + delta + view.files.length) % view.files.length;
-  const file = view.files[view.fileIndex];
-  view.diff = view.source === 'stored'
+  if (!view?.files?.length) return false;
+  const token = screenGenerationToken(controller.state);
+  const nextIndex = (view.fileIndex + delta + view.files.length) % view.files.length;
+  const file = view.files[nextIndex];
+  const diff = view.source === 'stored'
     ? await loadStoredFileDiff(view.run, file.path ?? file)
     : await loadPlanItemDiff(file);
+  if (controller.state.diffView !== view || !isScreenGenerationCurrent(controller.state, token)) return false;
+  view.fileIndex = nextIndex;
+  view.diff = diff;
   view.scroll = 0;
   view.hunkIndex = 0;
   view.hunkCount = 1;
   view.hunkOffsets = [0];
   view.pendingHunkJump = true;
   controller.setStatus(`Diff file ${view.fileIndex + 1} of ${view.files.length} · ${view.diff.path}`);
+  return true;
 }
 
 function diffFilesForCurrentScreen(state, item) {
@@ -488,9 +505,9 @@ function jumpToHunk(view, index) {
   view.pendingHunkJump = false;
 }
 
-function runShortcut(controller, itemId) {
-  void activateConflictFile(controller, itemId, controller.state.reviewActions)
-    .catch((error) => controller.handleUnexpected(error));
+async function runShortcut(controller, itemId) {
+  await activateConflictFile(controller, itemId, controller.state.reviewActions);
+  return true;
 }
 
 function planWarnings(plan, safety = null) {

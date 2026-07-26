@@ -63,6 +63,8 @@ export function showAvailableUpdate(controller, result = controller.state.update
     detail: '',
     cancelling: false,
     installCommand: formatInstallCommand(result.latestVersion),
+    installation: result.installation ?? null,
+    verification: null,
   };
   controller.invalidate();
   return true;
@@ -78,7 +80,7 @@ export async function handleUpdateKey(controller, key) {
   }
   if (key.name === 'escape') {
     if (prompt.phase === 'installing') await cancelUpdate(controller);
-    else if (prompt.phase === 'complete') controller.exit(0);
+    else if (prompt.phase === 'complete' || prompt.phase === 'uncertain') controller.exit(0);
     else closeUpdatePrompt(controller);
     return true;
   }
@@ -92,7 +94,7 @@ export async function handleUpdateKey(controller, key) {
 export async function handleUpdateDispatch(controller, action) {
   if (!controller.state.updatePrompt) return false;
   if (action.type === 'update-move') {
-    moveUpdateSelection(controller.state.updatePrompt, Math.sign(Number(action.delta) || 0));
+    moveUpdateSelection(controller.state.updatePrompt, Number(action.delta) || 0);
     controller.invalidate();
     return true;
   }
@@ -125,6 +127,9 @@ export function updateActions(prompt) {
     { id: 'update-retry', label: 'Try again', description: `Run ${prompt.installCommand}` },
     { id: 'update-later', label: 'Later', description: 'Close this message and continue with the current version.' },
   ];
+  if (prompt.phase === 'uncertain') return [
+    { id: 'update-exit', label: 'Exit Zipflow', description: 'Close this process. Verify or reinstall Zipflow before starting it again.' },
+  ];
   if (prompt.phase === 'complete') return [
     { id: 'update-restart', label: 'Restart Zipflow', description: 'Restart Zipflow now using the installed version.' },
     { id: 'update-exit', label: 'Exit', description: 'Close Zipflow and start it yourself later.' },
@@ -151,36 +156,41 @@ export async function installAvailableUpdate(controller) {
   });
   Object.assign(prompt, {
     phase: 'installing', selectedIndex: 0, message: 'Installing the update with npm…', messageVariables: {},
-    detail: prompt.installCommand, cancelling: false,
+    detail: prompt.installCommand, cancelling: false, verification: null,
   });
   controller.invalidate();
+  let installError = null;
+  let verification = null;
+  operation.enterCritical('Replacing the global npm package');
   try {
-    await controller.updateService.install(prompt.latestVersion, {
-      signal: operation.signal,
-      onOutput: ({ text }) => {
-        const line = String(text ?? '').split(/\r?\n/).map((value) => value.trim()).filter(Boolean).at(-1);
-        if (line) prompt.detail = line;
-        controller.invalidate();
-      },
-    });
-    Object.assign(prompt, {
-      phase: 'complete', selectedIndex: 0, message: 'Zipflow {version} was installed.',
-      messageVariables: { version: prompt.latestVersion }, detail: 'Restart Zipflow before continuing so the running process uses the new files.', cancelling: false,
-    });
-  } catch (error) {
-    if (error?.code === 'cancelled' || operation.signal.aborted) {
-      Object.assign(prompt, {
-        phase: 'available', selectedIndex: 0, message: 'Update cancelled.', messageVariables: {},
-        detail: '', cancelling: false,
+    try {
+      await controller.updateService.install(prompt.latestVersion, {
+        signal: operation.signal,
+        onOutput: ({ text }) => {
+          const line = String(text ?? '').split(/\r?\n/).map((value) => value.trim()).filter(Boolean).at(-1);
+          if (line) prompt.detail = line;
+          controller.invalidate();
+        },
       });
-    } else {
-      Object.assign(prompt, {
-        phase: 'failed', selectedIndex: 0, message: 'Automatic update failed.', messageVariables: {},
-        detail: updateFailureMessage(error), cancelling: false,
-      });
+    } catch (error) {
+      installError = error;
     }
+    prompt.message = 'Verifying the installed Zipflow package…';
+    prompt.detail = 'Checking package metadata, executable presence, and zipflow --version.';
+    controller.invalidate();
+    verification = typeof controller.updateService.verify === 'function'
+      ? await controller.updateService.verify({
+        previousVersion: prompt.currentVersion,
+        targetVersion: prompt.latestVersion,
+        installation: prompt.installation,
+      }).catch((error) => ({ status: 'uncertain', detail: error.message }))
+      : { status: installError ? 'unchanged' : 'updated' };
+    prompt.verification = verification;
   } finally {
-    operation.finish();
+    const cancellationRequested = operation.isCancellationRequested();
+    operation.leaveCritical('Update verification complete');
+    applyUpdateVerification(prompt, verification, installError, { cancellationRequested });
+    operation.finish(updateOperationOutcome(prompt));
     controller.invalidate();
   }
 }
@@ -194,7 +204,8 @@ export async function cancelUpdate(controller) {
   await controller.handleInterrupt();
 }
 
-export function closeUpdatePrompt(controller) {
+export function closeUpdatePrompt(controller, { force = false } = {}) {
+  if (controller.state.updatePrompt?.phase === 'uncertain' && !force) return false;
   controller.state.updatePrompt = null;
   controller.invalidate();
 }
@@ -210,6 +221,44 @@ function moveUpdateSelection(prompt, delta) {
       return;
     }
   }
+}
+
+function applyUpdateVerification(prompt, verification, installError, { cancellationRequested = false } = {}) {
+  if (verification?.status === 'updated') {
+    Object.assign(prompt, {
+      phase: 'complete', selectedIndex: 0, message: 'Zipflow {version} was installed.',
+      messageVariables: { version: prompt.latestVersion },
+      detail: 'The installed package and executable both report the requested version. Restart Zipflow before continuing.',
+      cancelling: false,
+    });
+    return;
+  }
+  if (verification?.status === 'unchanged') {
+    if (cancellationRequested || installError?.code === 'cancelled') {
+      Object.assign(prompt, {
+        phase: 'available', selectedIndex: 0, message: 'Update cancelled.', messageVariables: {},
+        detail: 'The installed package and executable still report the previous version.', cancelling: false,
+      });
+      return;
+    }
+    Object.assign(prompt, {
+      phase: 'failed', selectedIndex: 0, message: 'Automatic update failed.', messageVariables: {},
+      detail: updateFailureMessage(installError ?? new Error('npm finished without replacing the installed Zipflow version.')),
+      cancelling: false,
+    });
+    return;
+  }
+  Object.assign(prompt, {
+    phase: 'uncertain', selectedIndex: 0, message: 'Zipflow installation state is uncertain.', messageVariables: {},
+    detail: verification?.detail || updateFailureMessage(installError ?? new Error('The installed package could not be verified.')),
+    cancelling: false,
+  });
+}
+
+function updateOperationOutcome(prompt) {
+  if (prompt.phase === 'complete') return 'completed';
+  if (prompt.phase === 'available' && prompt.message === 'Update cancelled.') return 'cancelled';
+  return 'failed';
 }
 
 function updateFailureMessage(error) {

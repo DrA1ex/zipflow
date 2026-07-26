@@ -2,11 +2,11 @@ import path from 'node:path';
 import { exists } from '../utils/fs.js';
 import { configureWorkspaceProjects, discoverProject } from '../project/detect.js';
 import { addRecommendedGitignore, recommendedGitignoreGroups } from '../git/ignore.js';
-import { createInitialCommit, initializeRepository } from '../git/repository.js';
+import { createInitialCommit, initializeRepository, prepareInitialCommit } from '../git/repository.js';
 import { showChecksStep } from './setup-checks.js';
 
 export function handlesGitBootstrapScreen(screen) {
-  return ['setup-git-init', 'setup-gitignore', 'setup-initial-commit', 'initial-commit-message'].includes(screen);
+  return ['setup-git-init', 'setup-gitignore', 'setup-initial-commit', 'setup-initial-commit-review', 'initial-commit-message'].includes(screen);
 }
 
 export function showGitBootstrap(controller) {
@@ -28,6 +28,7 @@ export async function activateGitBootstrap(controller, itemId) {
   if (controller.state.screen === 'setup-git-init') return activateInit(controller, itemId);
   if (controller.state.screen === 'setup-gitignore') return activateGitignore(controller, itemId);
   if (controller.state.screen === 'setup-initial-commit') return activateInitialCommit(controller, itemId);
+  if (controller.state.screen === 'setup-initial-commit-review') return activateInitialCommitReview(controller, itemId);
 }
 
 export async function submitGitBootstrapEditor(controller) {
@@ -45,6 +46,7 @@ export function backGitBootstrap(controller) {
   const screen = controller.state.screen;
   if (screen === 'setup-git-init') return false;
   if (screen === 'setup-gitignore') return showChecksStep(controller);
+  if (screen === 'setup-initial-commit-review') return showInitialCommitStep(controller);
   if (screen === 'setup-initial-commit' || screen === 'initial-commit-message') return showGitignoreStep(controller);
   return false;
 }
@@ -130,8 +132,8 @@ function showInitialCommitStep(controller) {
   controller.showMenu('setup-initial-commit', [
     {
       id: 'initial-commit-default',
-      label: 'Add current files and create the first commit',
-      description: 'Run git add --all and commit everything not excluded by .gitignore as “Initial commit”.',
+      label: 'Review current files and create the first commit',
+      description: 'Enumerate committable files, exclude protected paths, and require a decision for files that may contain secrets or private data.',
     },
     {
       id: 'initial-commit-edit',
@@ -153,21 +155,81 @@ async function activateInitialCommit(controller, itemId) {
       label: 'First commit message',
       placeholder: 'Initial commit',
       purpose: 'initial-commit-message',
-      instructions: ['Zipflow will add all current files except paths excluded by .gitignore.'],
+      instructions: ['Zipflow will enumerate current files and require explicit review of paths that may contain secrets or private data.'],
     }, 'Initial commit');
   }
   if (itemId === 'initial-commit-default') return createFirstCommit(controller, 'Initial commit');
 }
 
 async function createFirstCommit(controller, message) {
-  const result = await createInitialCommit(controller.state.project.root, message);
-  if (!result.ok) {
-    controller.message('First commit was not created', [result.reason, 'You can retry, change the message, or skip this step.'], 'error');
+  const prepared = await prepareInitialCommit(controller.state.project.root);
+  if (!prepared.ok) {
+    controller.message('First commit was not prepared', [prepared.reason], 'error');
     return showInitialCommitStep(controller);
   }
+  if (!prepared.paths.length) {
+    controller.message('First commit was not created', ['There are no committable project files.'], 'warning');
+    return showInitialCommitStep(controller);
+  }
+  controller.state.initialCommitDraft = { message, ...prepared };
+  if (prepared.sensitive.length) return showInitialCommitReview(controller);
+  return commitPreparedInitialFiles(controller, prepared.approvedPaths);
+}
+
+function showInitialCommitReview(controller) {
+  const draft = controller.state.initialCommitDraft;
+  const credentialFiles = draft.sensitive.filter((item) => item.risk === 'credential');
+  const reviewFiles = draft.sensitive.filter((item) => item.risk !== 'credential');
+  controller.message('First commit exclusions', [
+    `${draft.paths.length} candidate files · ${draft.sensitive.length} excluded by default`,
+    ...(credentialFiles.length ? [`Credentials or private keys (${credentialFiles.length}):`] : []),
+    ...credentialFiles.slice(0, 8).map((item) => `  ${item.path} · ${item.reason}`),
+    ...(reviewFiles.length ? [`Local, generated, database, or large files (${reviewFiles.length}):`] : []),
+    ...reviewFiles.slice(0, 8).map((item) => `  ${item.path} · ${item.reason}`),
+    ...(draft.sensitive.length > 16 ? [`…and ${draft.sensitive.length - 16} more excluded files`] : []),
+    'Nothing is staged until you choose. You can keep these exclusions or explicitly override them and include every listed file.',
+  ], 'warning');
+  controller.showMenu('setup-initial-commit-review', [
+    {
+      id: 'initial-review-exclude',
+      label: 'Keep listed files excluded and create commit',
+      description: draft.approvedPaths.length
+        ? `${draft.approvedPaths.length} unflagged files will be staged explicitly.`
+        : 'No unflagged files are available for this commit.',
+      disabled: draft.approvedPaths.length === 0,
+      disabledReason: 'Review and include at least one flagged file, or skip the first commit.',
+    },
+    {
+      id: 'initial-review-include',
+      label: 'Override exclusions and include all listed files',
+      description: 'Explicitly include every listed credential, private-data, generated, database, and large file in the first commit.',
+    },
+    { id: 'initial-review-back', label: 'Back', description: 'Return without staging files.' },
+  ], 'Review files before the first commit', 0, [
+    'Protected .git and .zipflow paths are never included. Existing .gitignore rules remain authoritative.',
+  ]);
+}
+
+async function activateInitialCommitReview(controller, itemId) {
+  const draft = controller.state.initialCommitDraft;
+  if (!draft || itemId === 'initial-review-back') return showInitialCommitStep(controller);
+  if (itemId === 'initial-review-exclude') return commitPreparedInitialFiles(controller, draft.approvedPaths);
+  if (itemId === 'initial-review-include') return commitPreparedInitialFiles(controller, draft.paths);
+}
+
+async function commitPreparedInitialFiles(controller, paths) {
+  const draft = controller.state.initialCommitDraft;
+  const result = await createInitialCommit(controller.state.project.root, draft.message, { paths, allowHooks: false });
+  if (!result.ok) {
+    controller.message('First commit was not created', [result.reason, 'You can retry, change the message, or skip this step.'], 'error');
+    return draft.sensitive?.length ? showInitialCommitReview(controller) : showInitialCommitStep(controller);
+  }
+  controller.state.initialCommitDraft = null;
   controller.message('First commit created', [
-    `${result.revision} ${message}`,
+    `${result.revision} ${draft.message}`,
     `${result.paths.length} files added to the Git baseline.`,
+    ...(result.omittedPaths?.length ? [`${result.omittedPaths.length} listed files were deliberately excluded from the commit: ${result.omittedPaths.slice(0, 6).join(', ')}${result.omittedPaths.length > 6 ? ', …' : ''}`] : []),
+    'Git hooks were disabled for this Zipflow commit.',
   ], 'success');
   showChecksStep(controller);
 }

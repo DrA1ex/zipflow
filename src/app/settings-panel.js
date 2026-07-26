@@ -10,12 +10,14 @@ import { openHelpOverlay } from '../ui/help-overlay.js';
 import {
   handleModelSettingsKey, openModelConfiguration, selectModelChoice, selectModelParameter, settingsModelView,
 } from './settings-model.js';
-import { ensureDefinitionData, ensureModels, refreshModels, resetModelCache } from './settings-model-list.js';
+import { ensureDefinitionData as ensureModelDefinitionData, ensureModels, refreshModels, resetModelCache } from './settings-model-list.js';
 import {
   clearPathSuggestions, movePathSuggestion, navigatePathSuggestionParent, refreshPathSuggestions, resetPathSuggestionInput, selectPathSuggestion,
 } from './path-suggestions.js';
 import { validateSettingValue } from './settings-validation.js';
 import { pageSelectableIndex } from './list-navigation.js';
+import { OperationBusyError } from '../operations/manager.js';
+import { showOperationBusy } from './operation-feedback.js';
 import { testSelectedModel } from './settings-model-check.js';
 import {
   handleModelReplayWorkspaceKey, loadModelReplayRuns, startHistoricalModelReplay,
@@ -25,6 +27,9 @@ import {
 } from './settings-autopilot-replay.js';
 import { clearArchiveStorage, clearBackups, refreshSettingsStorage } from './settings-storage.js';
 import { checkForUpdatesNow } from './update-flow.js';
+import {
+  refreshSettingsBinaries, resetBinaryToAutomatic, saveBinaryPath, testConfiguredBinary, useDetectedBinary,
+} from './settings-binaries.js';
 import {
   canSearchSettingsChoices, filterSettingsChoices, handleSettingsChoiceSearchKey,
 } from './settings-choice-search.js';
@@ -43,7 +48,7 @@ export function isSettingsScreen(screen) {
 
 export async function openSettings(controller, { categoryId = null } = {}) {
   const { state } = controller;
-  if (state.busy || ['checks-running', 'deploy-running', 'manual-checks-running', 'manual-deploy-running'].includes(state.screen)) {
+  if (!state.operationCapabilities?.canOpenSettings) {
     controller.toast('Settings are available after this operation finishes', 'info');
     return false;
   }
@@ -70,6 +75,10 @@ export async function openSettings(controller, { categoryId = null } = {}) {
     loadingStorage: false,
     storageError: null,
     updateChecking: false,
+    binaries: {},
+    detectedBinaries: {},
+    loadingBinaries: false,
+    binaryError: null,
     modal: null,
     modelConfig: null,
     choiceSearch: null,
@@ -77,7 +86,10 @@ export async function openSettings(controller, { categoryId = null } = {}) {
   };
   setScreen(state, 'settings', { status: 'Global settings' });
   controller.invalidate();
-  await refreshSettingsStorage(controller, { quiet: true });
+  await Promise.all([
+    refreshSettingsStorage(controller, { quiet: true }),
+    refreshSettingsBinaries(controller, { quiet: true }),
+  ]);
   if (state.settings.llmProvider !== 'disabled') await refreshModels(controller, { quiet: true });
   return true;
 }
@@ -112,7 +124,8 @@ export async function submitSettingsEditor(controller) {
   const entered = state.editor.value.trim();
   try {
     const value = await validateSettingValue(modal.field, entered);
-    state.settings = await updateSettings({ [modal.field.id]: value }, { allowClearToken: modal.field.id === 'llmApiToken', baseSettings: state.settings });
+    if (modal.field.binaryId) await saveBinaryPath(controller, modal.field.binaryId, value);
+    else state.settings = await updateSettings({ [modal.field.id]: value }, { allowClearToken: modal.field.id === 'llmApiToken', baseSettings: state.settings });
     if (modal.field.id === 'llmApiToken') resetModelCache(state.settingsPanel);
     state.settingsPanel.modal = null;
     resetPathSuggestionInput(state);
@@ -136,6 +149,10 @@ export async function handleSettingsKey(controller, key) {
   if (panel.modelTest?.running && key.name === 'escape') {
     controller.state.settingsTestAbortController?.abort();
     controller.setStatus('Cancelling model test…');
+    return true;
+  }
+  if (controller.state.activeOperation && settingsKeyCanMutate(key)) {
+    showOperationBusy(controller, new OperationBusyError('settings action', controller.state.activeOperation.kind));
     return true;
   }
   if (panel.modal) return handleModalKey(controller, key);
@@ -167,6 +184,10 @@ export async function handleSettingsKey(controller, key) {
     return activateChoice(controller);
   }
   return true;
+}
+
+function settingsKeyCanMutate(key) {
+  return !(key.printable && key.text === '?');
 }
 
 async function pageSettingsSelection(controller, direction) {
@@ -269,14 +290,20 @@ export async function selectModelSettingChoice(controller, index) {
   return selectModelChoice(controller, index);
 }
 export function settingsViewModel(state) {
-  const definitions = settingsDefinitions(state);
-  const selectedSetting = currentDefinition(state);
-  const parameters = settingsParameters(state, selectedSetting);
+  const locked = Boolean(state.activeOperation);
+  const lockItems = (items) => locked ? items.map((item) => ({
+    ...item,
+    disabled: true,
+    disabledReason: item.disabledReason || `Wait for ${state.activeOperation?.label || 'the active operation'} to finish.`,
+  })) : items;
+  const definitions = lockItems(settingsDefinitions(state));
+  const selectedSetting = definitions[state.settingsPanel?.categoryIndex ?? 0] ?? currentDefinition(state);
+  const parameters = lockItems(settingsParameters(state, selectedSetting));
   const parameterIndex = currentParameterIndex(state, parameters);
   const directParameter = directSettingParameter(selectedSetting, parameters);
   const activeParameter = directParameter ?? panelParameter(state, parameters);
   const showChoices = Boolean(directParameter) || state.settingsPanel?.focus === 'choices';
-  const choices = showChoices && activeParameter ? filterSettingsChoices(state, settingsChoices(state, activeParameter), activeParameter) : [];
+  const choices = showChoices && activeParameter ? lockItems(filterSettingsChoices(state, settingsChoices(state, activeParameter), activeParameter)) : [];
   return {
     focus: state.settingsPanel?.focus ?? 'categories',
     definitions,
@@ -347,6 +374,11 @@ async function handleBack(controller) {
   closeSettings(controller);
   return true;
 }
+async function ensureDefinitionData(controller, definition) {
+  await ensureModelDefinitionData(controller, definition);
+  if (definition?.id === 'binaries') await refreshSettingsBinaries(controller, { quiet: true });
+}
+
 async function moveCategory(controller, delta, { wrap: wrapNavigation = true } = {}) {
   const { state } = controller;
   const definitions = settingsDefinitions(state);
@@ -478,6 +510,29 @@ async function activateChoice(controller) {
     state.settingsPanel.managedHistory = { ...state.settingsPanel.managedHistory, paths: [], updatedAt: new Date().toISOString() };
     state.settingsPanel.managedCount = 0;
     return returnAfterChoice(controller, parameter.id, `${result.removed} managed path${result.removed === 1 ? '' : 's'} cleared`);
+  }
+  if (option.action === 'binary-use-detected') {
+    const result = await useDetectedBinary(controller, option.binaryId);
+    return returnAfterChoice(controller, parameter.id, `${result.label} path saved`);
+  }
+  if (option.action === 'binary-choose-path') {
+    openSettingModal(controller, `binaryPath:${option.binaryId}`, parameter.id);
+    return true;
+  }
+  if (option.action === 'binary-reset-auto') {
+    const result = await resetBinaryToAutomatic(controller, option.binaryId);
+    return returnAfterChoice(controller, parameter.id, result?.valid ? `${result.label} uses automatic detection` : 'Automatic detection reset');
+  }
+  if (option.action === 'binary-test') {
+    try {
+      const result = await testConfiguredBinary(controller, option.binaryId);
+      return returnAfterChoice(controller, parameter.id, `${result.label} validated`);
+    } catch (error) {
+      state.status = error.message;
+      controller.toast(error.message, 'error');
+      controller.invalidate();
+      return true;
+    }
   }
   if (option.settingId) {
     state.settings = await updateSettings({ [option.settingId]: option.value }, { baseSettings: state.settings });

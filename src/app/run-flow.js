@@ -1,5 +1,6 @@
 import path from 'node:path';
-import { extractArchive } from '../archive/extract.js';
+import { extractArchiveFromSource } from '../archive/extract.js';
+import { withArchiveSource } from '../archive/source.js';
 import { readArchiveMetadata } from '../archive/metadata.js';
 import { evaluateArchiveRisks } from '../archive/risk.js';
 import { createPlanPatch } from '../patch/create.js';
@@ -11,9 +12,7 @@ import { applyUpdatePlan } from '../apply/apply.js';
 import { acquireProjectLock } from '../apply/lock.js';
 import { createRunId } from '../utils/id.js';
 import { exists } from '../utils/fs.js';
-import { hashFile } from '../utils/hash.js';
 import { displayPath, parseEnteredPath } from '../utils/paths.js';
-import { inspectArchiveFile } from '../security/archive-input.js';
 import { getZipflowHome } from '../workflow/store.js';
 import { createRunRecord, findAppliedArchiveRun, saveRunRecord } from '../runs/store.js';
 import { compactPlanLine, formatArchiveName, planActivityLines } from '../ui/format.js';
@@ -43,6 +42,7 @@ import {
 } from './run-plan-autonomy.js';
 
 import { completeNoChangeRun } from './run-completion.js';
+import { transitionScreen } from './state.js';
 import { effectiveChangedCount, excludedPlanItems, initializePlanSelections, selectedPlanCounts } from './plan-selection.js';
 import { handleEmptyArchiveEnter as handleArchiveDoubleEnter, selectedDiscoveredArchive } from './run-archive-discovery.js';
 
@@ -103,7 +103,7 @@ export async function activateRun(controller, itemId) {
   }
 }
 
-export function handleRunShortcut(controller, key) {
+export async function handleRunShortcut(controller, key) {
   return handleReviewKey(controller, key);
 }
 
@@ -120,40 +120,39 @@ export function backRun(controller) {
   return false;
 }
 
-export async function inspectArchivePath(controller, enteredPath, { allowDuplicate = false, archiveHash = null } = {}) {
+export async function inspectArchivePath(controller, enteredPath, { allowDuplicate = false } = {}) {
   const { state } = controller;
-  const archivePath = parseEnteredPath(enteredPath, state.project.root);
-  if (!(await exists(archivePath))) return controller.toast('Archive not found', 'error', 3, displayPath(archivePath));
-  if (!archivePath.toLowerCase().endsWith('.zip')) return controller.toast('Unsupported archive', 'error', 3, 'Zipflow currently accepts .zip files only.');
-  let inspectedArchive;
-  try {
-    inspectedArchive = await inspectArchiveFile(archivePath);
-  } catch (error) {
-    return controller.toast('Unsafe archive path', 'error', 4, error.message);
-  }
+  const enteredArchivePath = parseEnteredPath(enteredPath, state.project.root);
+  if (!(await exists(enteredArchivePath))) return controller.toast('Archive not found', 'error', 3, displayPath(enteredArchivePath));
+  if (!enteredArchivePath.toLowerCase().endsWith('.zip')) return controller.toast('Unsupported archive', 'error', 3, 'Zipflow currently accepts .zip files only.');
   const operation = controller.beginOperation({ kind: 'archive-inspection', label: 'Inspecting archive' });
-  setBusy(controller, 'Inspecting archive', 0, 7, 'Hashing archive');
+  setBusy(controller, 'Inspecting archive', 0, 7, 'Opening and hashing archive');
   try {
-    const archiveInfo = { size: inspectedArchive.size, modifiedAt: inspectedArchive.modifiedAt };
-    await rememberArchivePath(state, archivePath);
-    operation.update({ phase: 'Hashing archive' });
-    const digest = archiveHash ?? await hashFile(archivePath, { signal: operation.signal });
-    let previous = null;
-    if (!allowDuplicate) {
-      previous = await findAppliedArchiveRun(state.project.root, digest);
-      if (previous && state.workflow.autonomy?.mode === 'manual') {
-        state.busy = false;
-        return showDuplicateWarning(controller, archivePath, digest, previous);
+    return await withArchiveSource(enteredArchivePath, async (source) => {
+      const archivePath = source.path;
+      const archiveInfo = { size: source.size, modifiedAt: source.modifiedAt };
+      await rememberArchivePath(state, archivePath);
+      operation.update({ phase: 'Hashing archive' });
+      const digest = source.hash;
+      let previous = null;
+      if (!allowDuplicate) {
+        previous = await findAppliedArchiveRun(state.project.root, digest);
+        if (previous && state.workflow.autonomy?.mode === 'manual') {
+          return showDuplicateWarning(controller, archivePath, digest, previous);
+        }
+        if (previous) controller.message('Previously applied archive detected', [
+          `Run ${previous.id} used the same ZIP. Autopilot will rebuild the plan against the current project state.`,
+        ], 'info', { collapsedSummary: `Repeated archive · comparing current project state` });
       }
-      if (previous) controller.message('Previously applied archive detected', [
-        `Run ${previous.id} used the same ZIP. Autopilot will rebuild the plan against the current project state.`,
-      ], 'info', { collapsedSummary: `Repeated archive · comparing current project state` });
-    }
-    return inspectArchive(controller, archivePath, digest, archiveInfo, operation, previous);
+      return await inspectArchive(controller, source, archivePath, digest, archiveInfo, operation, previous);
+    }, { signal: operation.signal });
   } catch (error) {
     if (error.code === 'cancelled') {
       controller.message('Archive inspection cancelled', ['No project files were changed.'], 'warning');
       return beginArchiveInput(controller);
+    }
+    if (error.code === 'unsafe_archive_input' || error.code === 'archive_identity_changed') {
+      return controller.toast('Unsafe archive path', 'error', 5, error.message);
     }
     throw error;
   } finally {
@@ -161,7 +160,7 @@ export async function inspectArchivePath(controller, enteredPath, { allowDuplica
   }
 }
 
-async function inspectArchive(controller, archivePath, archiveHash, archiveInfo, operation, previousRun = null) {
+async function inspectArchive(controller, source, archivePath, archiveHash, archiveInfo, operation, previousRun = null) {
   const { state } = controller;
   const runId = createRunId();
   state.pendingArchive = null;
@@ -175,11 +174,10 @@ async function inspectArchive(controller, archivePath, archiveHash, archiveInfo,
     const temp = path.join(getZipflowHome(), 'tmp', runId);
     setBusy(controller, 'Inspecting archive', 1, 7, 'Reading ZIP entries');
     operation.update({ phase: 'Reading ZIP entries' });
-    const extracted = await extractArchive(archivePath, temp, { signal: operation.signal });
+    const extracted = await extractArchiveFromSource(source, temp, { signal: operation.signal });
     const rootReview = await prepareArchiveRootReview({ project: state.project, workflow: state.workflow, extracted });
     if (rootReview.prompt) {
       state.pendingArchiveInspection = { archivePath, archiveHash, archiveInfo, rootReview };
-      state.busy = false;
       operation.finish();
       return showArchiveRootChoice(controller, rootReview);
     }
@@ -200,7 +198,7 @@ async function inspectArchive(controller, archivePath, archiveHash, archiveInfo,
     }
     await failRun(controller, error, {
       kind: 'archive',
-      retry: () => inspectArchivePath(controller, archivePath, { allowDuplicate: true, archiveHash }),
+      retry: () => inspectArchivePath(controller, archivePath, { allowDuplicate: true }),
     });
   }
 }
@@ -253,7 +251,6 @@ async function continueArchiveInspection(controller, { archivePath, archiveHash,
     state.run = await saveRunRecord(state.run);
     state.pendingArchiveInspection = null;
     setProgress(controller, 7, 7, 'Plan ready');
-    state.busy = false;
 
     controller.message('Archive inspected', [
       `${formatArchiveName(archivePath)} · ${extracted.fileCount} files${extracted.rootPrefix ? ` · root ${extracted.rootPrefix}/` : ''}`,
@@ -267,7 +264,7 @@ async function continueArchiveInspection(controller, { archivePath, archiveHash,
 
     const settings = activeRunSettings(state);
     const shouldRunLlm = isLocalLlmEnabled(settings) && hasLlmChangeTasks(settings) && hasChanges;
-    if (shouldRunLlm) startLlmReview(controller, { plan: resolvedPlan, patch, extracted });
+    if (shouldRunLlm) activeOperation.handoff(() => startLlmReview(controller, { plan: resolvedPlan, patch, extracted }));
 
     if (requiresSafetyReview(state.archiveSafety)) return showArchiveSafetyReview(controller);
     return continueAfterSafety(controller);
@@ -279,7 +276,7 @@ async function continueArchiveInspection(controller, { archivePath, archiveHash,
     }
     await failRun(controller, error, {
       kind: 'archive',
-      retry: () => inspectArchivePath(controller, archivePath, { allowDuplicate: true, archiveHash }),
+      retry: () => inspectArchivePath(controller, archivePath, { allowDuplicate: true }),
     });
   } finally {
     activeOperation.finish();
@@ -354,10 +351,8 @@ export async function startApply(controller, { checkpointCreated = false } = {})
       `${applied.applied.length} paths changed · ${excluded.length} kept local by review · ${applied.skippedConflicts.length} conflicts kept locally`,
       `${state.plan.preserved.length} snapshot paths preserved · Backup: ${displayPath(applied.backup.root)}`,
     ], 'success');
-    state.busy = false;
     return operation.handoff(() => startChecks(controller));
   } catch (error) {
-    state.busy = false;
     if (error.code === 'cancelled') {
       controller.message('Update cancelled', ['The active filesystem transaction was stopped and every touched path was restored from backup.'], 'warning');
       return cancelRun(controller);
@@ -486,8 +481,7 @@ function requiresSafetyReview(safety) {
   return ['suspicious', 'unsuitable'].includes(safety.llm?.assessment);
 }
 function setBusy(controller, label, value, total, detail) {
-  controller.state.busy = true;
-  controller.state.screen = 'applying';
+  transitionScreen(controller.state, 'applying');
   controller.state.busyLabel = label;
   controller.state.progress = { value, total, detail };
   controller.invalidate();

@@ -2,12 +2,14 @@ import { runDeploy } from '../deploy/runner.js';
 import { saveRunRecord } from '../runs/store.js';
 import { confirmRollback, performRollback, showRunDetails } from './run-rollback.js';
 import { failRun, releaseRunResources } from './run-lifecycle.js';
-import { clearRunSettings } from './runtime-settings.js';
+import { activeRunSettings, clearRunSettings } from './runtime-settings.js';
+import { ensureProjectEnvironmentNotice } from './project-environment-notice.js';
 import { decideDeployment, handleDeploymentFailureAutonomy } from './run-autonomy.js';
 import { completeRun, showCompleted } from './run-completion.js';
 import { autopilotPaused } from './autonomy-flow.js';
 import { captureRunExecutionState } from './run-state-integrity.js';
 import { commandLocationLabel } from '../project/command-spec.js';
+import { transitionScreen } from './state.js';
 
 export async function continueToDeploy(controller) {
   const { state } = controller;
@@ -43,10 +45,12 @@ export function showDeployPrompt(controller) {
 
 export async function startDeploy(controller, { fromCompleted = false, expectedState = null } = {}) {
   const { state } = controller;
+  const runSettings = activeRunSettings(state);
+  await ensureProjectEnvironmentNotice(controller, runSettings);
   const operation = controller.beginOperation({ kind: 'deployment', label: 'Running deployment' });
   const deploy = state.workflow.deploy;
   const beforeState = expectedState ?? await captureRunExecutionState(state);
-  state.screen = 'deploy-running';
+  transitionScreen(state, 'deploy-running');
   state.deployRuntime = { commandText: deploy.commandText, cwd: deploy.cwd || '.', lastLine: '', fromCompleted };
   state.status = 'Deploying';
   controller.invalidate();
@@ -56,6 +60,7 @@ export async function startDeploy(controller, { fromCompleted = false, expectedS
     const result = await runDeploy({
       deploy,
       projectPath: state.project.root,
+      settings: runSettings,
       signal: operation.signal,
       onOutput: (event) => {
         state.deployRuntime.lastLine = lastNonEmptyLine(event.text);

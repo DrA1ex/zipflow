@@ -1,9 +1,10 @@
 import { InputEditor, createTextSelectionState } from 'terlio.js';
 import { DEFAULT_SETTINGS } from '../settings/store.js';
 import { normalizeSelectableIndex } from './list-navigation.js';
+import { operationBlocksActions, operationCapabilities, operationState } from '../operations/state.js';
 
 export function createInitialState() {
-  return {
+  const state = {
     screen: 'boot',
     project: null,
     workflow: null,
@@ -31,12 +32,13 @@ export function createInitialState() {
     editorContext: null,
     pathSuggestions: null,
     pathSuggestionActive: false,
-    busy: false,
     busyLabel: 'Starting…',
     activeOperation: null,
     updateCheck: null,
     updatePrompt: null,
     inputGeneration: 0,
+    screenGeneration: 0,
+    pathSuggestionAbortController: null,
     progress: { value: 0, total: 1, detail: '' },
     checkRuntime: null,
     deployRuntime: null,
@@ -78,13 +80,31 @@ export function createInitialState() {
     overlays: null,
     dispatch: null,
   };
+  Object.defineProperties(state, {
+    busy: {
+      enumerable: true,
+      configurable: false,
+      get() { return operationBlocksActions(this.activeOperation); },
+    },
+    operationState: {
+      enumerable: true,
+      configurable: false,
+      get() { return operationState(this.activeOperation); },
+    },
+    operationCapabilities: {
+      enumerable: true,
+      configurable: false,
+      get() { return operationCapabilities(this.activeOperation); },
+    },
+  });
+  return state;
 }
 
 export function setScreen(state, screen, { items = [], selectedIndex = 0, status = null, intro = [] } = {}) {
-  state.screen = screen;
+  transitionScreen(state, screen);
   state.menuSourceItems = Array.isArray(items) ? items : [];
   state.menuSearch = state.menuSearch?.screen === screen ? state.menuSearch : null;
-  state.menuItems = applyMenuSearch(state.menuSourceItems, state.menuSearch?.query);
+  state.menuItems = applyOperationGuard(state, applyMenuSearch(state.menuSourceItems, state.menuSearch?.query));
   state.selectedIndex = normalizeSelectableIndex(state.menuItems, selectedIndex);
   state.panelIntro = Array.isArray(intro) ? intro : [String(intro ?? '')].filter(Boolean);
   if (status) state.status = status;
@@ -94,9 +114,46 @@ export function refreshMenuSearch(state, query) {
   if (!state.menuSearch) return;
   const selectedId = state.menuItems[state.selectedIndex]?.id;
   state.menuSearch.query = String(query ?? '');
-  state.menuItems = applyMenuSearch(state.menuSourceItems, state.menuSearch.query);
+  state.menuItems = applyOperationGuard(state, applyMenuSearch(state.menuSourceItems, state.menuSearch.query));
   const preserved = state.menuItems.findIndex((item) => item.id === selectedId);
   state.selectedIndex = normalizeSelectableIndex(state.menuItems, preserved >= 0 ? preserved : state.selectedIndex);
+}
+
+
+export function transitionScreen(state, screen) {
+  const next = String(screen ?? 'boot');
+  const changed = state.screen !== next;
+  state.pathSuggestionAbortController?.abort?.(changed ? 'screen-changed' : 'screen-refreshed');
+  state.pathSuggestionAbortController = null;
+  state.pathSuggestions = null;
+  state.screen = next;
+  state.screenGeneration = (Number(state.screenGeneration) || 0) + 1;
+  return changed;
+}
+
+export function applyOperationSnapshot(state, operation) {
+  state.activeOperation = operation;
+  if (operation?.label) state.busyLabel = operation.label;
+  state.menuItems = applyOperationGuard(state, applyMenuSearch(state.menuSourceItems, state.menuSearch?.query));
+  state.selectedIndex = normalizeSelectableIndex(state.menuItems, state.selectedIndex);
+}
+
+export function screenGenerationToken(state) {
+  return { screen: state.screen, generation: Number(state.screenGeneration) || 0 };
+}
+
+export function isScreenGenerationCurrent(state, token) {
+  return Boolean(token && state.screen === token.screen
+    && (Number(state.screenGeneration) || 0) === (Number(token.generation) || 0));
+}
+
+function applyOperationGuard(state, items) {
+  if (!operationBlocksActions(state.activeOperation)) return items;
+  return items.map((item) => item.allowDuringOperation ? item : {
+    ...item,
+    disabled: true,
+    disabledReason: item.disabledReason || `Wait for ${state.activeOperation?.label || 'the active operation'} to finish.`,
+  });
 }
 
 export function appendMessage(state, title, lines = [], tone = 'info', options = {}) {

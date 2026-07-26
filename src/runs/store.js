@@ -4,6 +4,8 @@ import { ensureDir, readJson, writeJsonAtomic, writeTextAtomic } from '../utils/
 import { getZipflowHome } from '../workflow/store.js';
 import { canonicalPath } from '../utils/paths.js';
 import { formatRunReport } from './text-report.js';
+import { withStorageLease } from '../storage/lease.js';
+import { ensureActiveRunLease, listActiveRunIds, releaseActiveRunLease } from '../storage/run-leases.js';
 
 export async function createRunRecord({ id, project, workflow, archivePath, archiveHash = null, archiveInfo = null }) {
   const record = {
@@ -38,6 +40,7 @@ export async function createRunRecord({ id, project, workflow, archivePath, arch
     },
     error: null,
   };
+  await ensureActiveRunLease(record.id);
   await saveRunRecord(record);
   return record;
 }
@@ -75,16 +78,22 @@ export async function createActionRunRecord({ id, project, workflow, action }) {
     autonomy: { mode: 'manual', paused: false, decisions: [], fallbackCount: 0, checkRetries: 0, deployRetries: 0 },
     error: null,
   };
+  await ensureActiveRunLease(record.id);
   await saveRunRecord(record);
   return record;
 }
 
 export async function saveRunRecord(record) {
-  const root = runDirectory(record.id);
-  await ensureDir(root);
-  const value = { ...record, updatedAt: new Date().toISOString() };
-  await writeJsonAtomic(path.join(root, 'report.json'), value);
-  await writeTextAtomic(path.join(root, 'report.txt'), formatRunReport(value));
+  if (!TERMINAL_RUN_STATUSES.has(record.status)) await ensureActiveRunLease(record.id);
+  const value = await withStorageLease('run-history', async () => {
+    const root = runDirectory(record.id);
+    await ensureDir(root);
+    const next = { ...record, updatedAt: new Date().toISOString() };
+    await writeJsonAtomic(path.join(root, 'report.json'), next);
+    await writeTextAtomic(path.join(root, 'report.txt'), formatRunReport(next));
+    return next;
+  });
+  if (TERMINAL_RUN_STATUSES.has(value.status)) await releaseActiveRunLease(value.id);
   return value;
 }
 
@@ -137,13 +146,19 @@ const TERMINAL_RUN_STATUSES = new Set([
 ]);
 
 export async function cleanupRunStorage(options = {}) {
-  const temporary = await removeOrphanedTemporaryDirectories(options);
-  const retention = await pruneRunHistory(options);
-  return { temporary, retention };
+  return withStorageLease('run-history', async () => {
+    const temporary = await removeOrphanedTemporaryDirectoriesUnlocked(options);
+    const retention = await pruneRunHistoryUnlocked(options);
+    return { temporary, retention };
+  });
 }
 
-export async function removeOrphanedTemporaryDirectories({ activeRunIds = [] } = {}) {
-  const active = new Set(activeRunIds);
+export async function removeOrphanedTemporaryDirectories(options = {}) {
+  return withStorageLease('run-history', () => removeOrphanedTemporaryDirectoriesUnlocked(options));
+}
+
+async function removeOrphanedTemporaryDirectoriesUnlocked({ activeRunIds = [] } = {}) {
+  const active = await activeRunIdSet(activeRunIds);
   const tempRoot = path.join(getZipflowHome(), 'tmp');
   let entries = [];
   try {
@@ -163,7 +178,11 @@ export async function removeOrphanedTemporaryDirectories({ activeRunIds = [] } =
   return removed;
 }
 
-export async function pruneRunHistory({
+export async function pruneRunHistory(options = {}) {
+  return withStorageLease('run-history', () => pruneRunHistoryUnlocked(options));
+}
+
+async function pruneRunHistoryUnlocked({
   activeRunIds = [],
   retentionDays = DEFAULT_RUN_RETENTION_DAYS,
   maxBytes = DEFAULT_RUN_STORAGE_BYTES,
@@ -177,7 +196,7 @@ export async function pruneRunHistory({
     if (error.code === 'ENOENT') return { removed: [], totalBytes: 0 };
     throw error;
   }
-  const active = new Set(activeRunIds);
+  const active = await activeRunIdSet(activeRunIds);
   const candidates = [];
   let totalBytes = 0;
   for (const entry of entries) {
@@ -242,6 +261,12 @@ async function directorySize(directory) {
 
 async function removeRunPath(target) {
   await rm(target, { recursive: true, force: true });
+}
+
+async function activeRunIdSet(values = []) {
+  const active = await listActiveRunIds();
+  for (const value of values) active.add(value);
+  return active;
 }
 
 function parsedTime(value) {

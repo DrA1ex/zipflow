@@ -59,5 +59,6 @@ function inspectPath(relative, size) {
 }
 
 function record(pathValue, reason, category, size) {
-  return { path: pathValue, reason, category, size };
+  const risk = category === 'sensitive' ? 'credential' : 'review';
+  return { path: pathValue, reason, category, risk, excludedByDefault: true, size };
 }

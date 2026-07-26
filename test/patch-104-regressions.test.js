@@ -30,7 +30,8 @@ test('secure credential storage preserves a token without writing it to Zipflow 
   process.env.ZIPFLOW_HOME = await tempDir('zipflow-settings-104-');
   try {
     await updateSettings({ ...DEFAULT_SETTINGS, llmApiToken: 'persistent-secret', archivePolicy: 'move' }, { allowClearToken: true });
-    await saveSettings({ ...DEFAULT_SETTINGS, theme: 'mono', llmApiToken: '' });
+    const current = await loadSettings();
+    await saveSettings({ ...current, theme: 'mono', llmApiToken: '' });
     const loaded = await loadSettings();
     assert.equal(loaded.llmApiToken, 'persistent-secret');
     assert.equal(await exists(credentialsPath()), false);

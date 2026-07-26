@@ -118,6 +118,12 @@ Each autonomous decision records information needed for later review, including:
 
 These records are stored with the run and appear in reports and history where relevant.
 
+## Full Autopilot acknowledgement
+
+Enabling **Full autopilot · Dangerous** opens one blocking warning before the mode is saved. The warning explains that project and archive content becomes untrusted model decision input, that a model can misunderstand the project or choose an incorrect eligible action, and that Zipflow's deterministic protected paths, safety checks, configured commands, backups, and no-push policy remain authoritative.
+
+The acknowledgement is stored with the workflow and versioned. It is not repeated for every decision, but a later warning revision can require acknowledgement again. Existing workflows that contain Full mode without the current acknowledgement pause before autonomous action instead of silently continuing.
+
 ## Choosing a mode
 
 Use **Manual** when every update needs direct review or no compatible local model is available.

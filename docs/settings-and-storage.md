@@ -9,6 +9,8 @@ Settings include:
 - Terlio semantic theme;
 - background update-check preference and an explicit **Check now** action;
 - compact or live running-check output;
+- validated absolute paths for Git, npm, Node.js, the system opener, Python, and gofmt;
+- sanitized or fully inherited environments for project checks and deployment commands;
 - local LLM provider, authentication, model, load configuration, and languages;
 - independent LLM tasks for archive review, summaries, failed-check explanations, update commit messages, and dirty-tree checkpoint messages;
 - archive-review methods and change-delivery behavior;
@@ -43,6 +45,24 @@ On Linux, install `secret-tool` and run a Secret Service provider such as GNOME 
 If the primary settings file becomes unreadable, the backup is restored automatically. Model and loaded-instance selection, source archive policy, storage directories, and retention limits remain preserved across compatible patch upgrades; the bearer token is read independently from the system credential store.
 
 The default maximum rollback-backup storage remains 2 GB.
+
+## Internal binaries
+
+The **Binaries** settings page shows the automatic or manual source, resolved absolute path, validation state, and version probe for every executable Zipflow invokes internally. Automatic detection excludes candidates inside the active project and project-local `node_modules/.bin` directories.
+
+A manual absolute-path override remains available for tools outside `PATH` and can deliberately select a project-local executable. Zipflow validates that it is an executable file and clearly warns when the override bypasses automatic exclusions. The path editor completes files and directories with `Tab`, moves to the parent directory with `Shift+Tab`, and suppresses global single-key shortcuts while active. Resetting an entry returns it to automatic detection.
+
+## Project command environment
+
+Checks and deployment have separate policies. Checks default to **Sanitized environment**; deployment defaults to **Inherit full environment**.
+
+The sanitized policy preserves normal system paths, project and command-directory `node_modules/.bin`, home, user, locale, terminal, temporary-directory, and required platform variables. It omits common credential variables and SSH or GPG agent sockets. Zipflow explains the policy before its first use. Either command class can be switched independently to full inheritance or sanitization. This reduces accidental environment leakage but is not a sandbox.
+
+## Multi-process storage coordination
+
+Independent Zipflow processes coordinate Settings writes, managed archive-index mutations, backup cleanup, and run-history cleanup with short static owner-token leases under `~/.zipflow/leases/`. Reads are not leased, and leases do not produce periodic heartbeat writes. Active runs keep static ownership markers so another process does not prune their backup, temporary data, or history.
+
+Settings carry a storage revision. A stale patch that changes an unrelated field is merged with the latest settings under the lease. A stale same-field update or full replacement stops with a conflict and must be reloaded, preventing silent lost updates.
 
 ## Source ZIP disposition
 
@@ -149,6 +169,9 @@ By default, Zipflow uses:
     <project-id>/managed-files.json
   tmp/
   locks/
+  leases/
+    storage/
+    runs/
 ```
 
 Zipflow creates its state directories with owner-only permissions (`0700`) and atomically written state files with owner-only permissions (`0600`). Credentials remain outside this tree in the operating-system credential store.

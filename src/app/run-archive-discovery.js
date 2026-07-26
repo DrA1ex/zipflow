@@ -29,7 +29,6 @@ export async function handleEmptyArchiveEnter(controller, { now = Date.now(), re
 export async function scanRecentArchives(controller, directory, { returnToInput = null, now = Date.now() } = {}) {
   const { state } = controller;
   const operation = controller.beginOperation({ kind: 'archive-discovery', label: 'Scanning recent archives' });
-  state.busy = true;
   state.busyLabel = 'Scanning recent archives';
   state.progress = { value: 0, total: 1, detail: displayPath(directory) };
   controller.invalidate();
@@ -37,7 +36,6 @@ export async function scanRecentArchives(controller, directory, { returnToInput 
     const candidates = await discoverRecentArchives({
       directory, project: state.project, now, maxAgeMs: RECENT_ARCHIVE_MAX_AGE_MS, signal: operation.signal,
     });
-    state.busy = false;
     state.archiveDiscoveryCandidates = candidates;
     if (!candidates.length) {
       controller.toast('No matching recent ZIP files found', 'info', 4, `Scanned ${displayPath(directory)} for archives modified in the last 24 hours.`);
@@ -54,7 +52,6 @@ export async function scanRecentArchives(controller, directory, { returnToInput 
       'Selecting an archive starts the normal security inspection; no archive was extracted during this scan.',
     ]);
   } catch (error) {
-    state.busy = false;
     if (error.code === 'cancelled') {
       controller.toast('Archive scan cancelled', 'warning');
       return returnToInput?.();

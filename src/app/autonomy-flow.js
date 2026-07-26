@@ -1,9 +1,10 @@
 import { requestAutonomyDecision } from '../autonomy/decision-engine.js';
-import { canAutonomy, isAutopilotEnabled } from '../autonomy/policies.js';
+import { canAutonomy, fullAutopilotWarningRequired, isAutopilotEnabled } from '../autonomy/policies.js';
 import { saveRunRecord } from '../runs/store.js';
 import { hashText } from '../utils/hash.js';
 import { beginLlmProgress } from './llm-progress.js';
 import { activeRunSettings } from './runtime-settings.js';
+import { transitionScreen } from './state.js';
 
 export function autonomyEnabledFor(state, capability) {
   return isAutopilotEnabled(state.workflow) && canAutonomy(state.workflow, capability);
@@ -21,6 +22,16 @@ export async function decideAtGate(controller, {
 }) {
   const { state } = controller;
   if (!autonomyEnabledFor(state, capability)) return { action: fallback, source: 'manual' };
+  if (fullAutopilotWarningRequired(state.workflow)) {
+    state.run.autonomy ??= { mode: state.workflow.autonomy.mode, paused: true, decisions: [], fallbackCount: 0 };
+    state.run.autonomy.paused = true;
+    state.run = await saveRunRecord(state.run);
+    controller.message('Full autopilot requires renewed confirmation', [
+      'This workflow predates the current safety warning. No autonomous action was executed.',
+      'Edit the configured workflow, open Decision mode, and enable Full autopilot again after reviewing the warning.',
+    ], 'warning');
+    return { action: 'ask-user', source: 'warning-required' };
+  }
   state.run.autonomy ??= { mode: state.workflow.autonomy.mode, paused: false, decisions: [], fallbackCount: 0 };
   if (state.run.autonomy.paused) return { action: 'ask-user', source: 'paused' };
   const operation = controller.beginOperation({
@@ -31,8 +42,7 @@ export async function decideAtGate(controller, {
   const decisionLabel = label || `Autopilot decision · ${gate}`;
   const progress = beginLlmProgress(controller, { presentation: 'decision' });
   const startedAt = Date.now();
-  state.busy = true;
-  state.screen = 'autopilot-decision';
+  transitionScreen(state, 'autopilot-decision');
   state.busyLabel = decisionLabel;
   state.progress = { value: 0, total: 1, detail: 'Waiting for the local model' };
   controller.setStatus(decisionLabel);
@@ -124,7 +134,6 @@ export async function decideAtGate(controller, {
   } finally {
     progress.stop();
     operation.finish();
-    state.busy = false;
     controller.invalidate();
   }
 }

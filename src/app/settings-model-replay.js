@@ -5,11 +5,12 @@ import { generateChangeDescription } from '../llm/generate.js';
 import { listProjectRuns } from '../runs/store.js';
 import { exists } from '../utils/fs.js';
 import { beginHistoricalAutopilotSimulation } from './settings-autopilot-replay.js';
+import { BoundedByteBuffer } from '../utils/byte-buffer.js';
 
 
-export function handleReplayDispatch(controller, action) {
+export async function handleReplayDispatch(controller, action) {
   if (action.type === 'model-replay-preview-select') {
-    selectReplayPreview(controller, action.index);
+    await selectReplayPreview(controller, action.index);
     return true;
   }
   if (action.type === 'model-replay-scroll') {
@@ -174,7 +175,7 @@ async function handlePreviewKey(controller, workspace, key) {
       controller.invalidate();
       return true;
     }
-    void beginWorkspaceReplay(controller, workspace);
+    await beginWorkspaceReplay(controller, workspace);
     return true;
   }
   return true;
@@ -186,11 +187,11 @@ async function beginWorkspaceReplay(controller, workspace) {
     : beginHistoricalModelReplay(controller);
 }
 
-export function selectReplayPreview(controller, index) {
+export async function selectReplayPreview(controller, index) {
   const workspace = controller.state.settingsPanel?.modelTestWorkspace;
   if (!workspace || workspace.mode !== 'preview') return;
   workspace.previewIndex = clamp(Number(index) || 0, 0, 1);
-  if (workspace.previewIndex === 0) void beginWorkspaceReplay(controller, workspace);
+  if (workspace.previewIndex === 0) await beginWorkspaceReplay(controller, workspace);
   else {
     controller.state.settingsPanel.modelTestWorkspace = null;
     controller.invalidate();
@@ -253,8 +254,8 @@ export function updateReplayWorkspace(controller, event) {
   } else if (event.type === 'chunk' && !event.hiddenOutput) {
     const block = ensureStreamBlock(workspace, event);
     changedId = block.id;
-    block.reasoning = event.reasoning ?? block.reasoning ?? '';
-    block.content = event.content ?? block.content ?? '';
+    appendReplayStream(block, 'reasoning', event.reasoningDelta, event.reasoning);
+    appendReplayStream(block, 'content', event.contentDelta, event.content);
     block.streaming = true;
     block.status = 'active';
   } else if (event.type === 'complete') {
@@ -275,6 +276,22 @@ export function updateReplayWorkspace(controller, event) {
   controller.invalidate();
 }
 
+function appendReplayStream(block, key, delta, complete) {
+  const bufferKey = `${key}Buffer`;
+  if (!block[bufferKey]) block[bufferKey] = new BoundedByteBuffer(2 * 1024 * 1024);
+  if (delta) {
+    if (block[bufferKey].byteLength === 0 && complete != null && String(complete) !== String(delta)) block[bufferKey].append(complete);
+    else block[bufferKey].append(delta);
+  } else if (complete != null) {
+    block[bufferKey] = new BoundedByteBuffer(2 * 1024 * 1024);
+    block[bufferKey].append(complete);
+  }
+}
+
+function replayStreamText(block, key) {
+  return String(block?.[key] ?? '');
+}
+
 function coverageLines(coverage) {
   return [
     coverage.reviewedFiles != null ? `Reviewed content: ${coverage.reviewedFiles} of ${coverage.totalFiles ?? coverage.reviewedFiles} files` : null,
@@ -290,7 +307,22 @@ function addBlock(workspace, id, title, lines = [], options = {}) {
     Object.assign(existing, options);
     return existing;
   }
-  const block = { id, title, lines, reasoning: '', content: '', streaming: false, status: 'pending', ...options };
+  const block = { id, title, lines, streaming: false, status: 'pending' };
+  Object.defineProperties(block, {
+    _reasoning: { value: '', writable: true },
+    _content: { value: '', writable: true },
+    reasoning: {
+      enumerable: true,
+      get() { return this.reasoningBuffer?.toString() ?? this._reasoning; },
+      set(value) { this._reasoning = String(value ?? ''); },
+    },
+    content: {
+      enumerable: true,
+      get() { return this.contentBuffer?.toString() ?? this._content; },
+      set(value) { this._content = String(value ?? ''); },
+    },
+  });
+  Object.assign(block, options);
   workspace.blocks.push(block);
   return block;
 }
@@ -381,8 +413,8 @@ function replayDiagnosticsText(workspace) {
     `Elapsed: ${(workspace.elapsedMs / 1000).toFixed(1)}s`,
     ...workspace.blocks.flatMap((block) => [
       '', `[${block.title}]`, ...block.lines,
-      ...(block.reasoning ? ['Reasoning:', block.reasoning] : []),
-      ...(block.content ? ['Response:', block.content] : []),
+      ...(replayStreamText(block, 'reasoning') ? ['Reasoning:', replayStreamText(block, 'reasoning')] : []),
+      ...(replayStreamText(block, 'content') ? ['Response:', replayStreamText(block, 'content')] : []),
     ]),
   ].join('\n');
 }

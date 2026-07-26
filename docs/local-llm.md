@@ -78,6 +78,12 @@ Large changes are shortened structurally rather than cut at an arbitrary byte of
 
 Context-overflow and out-of-memory responses trigger a smaller-patch retry and are reported explicitly.
 
+## Streaming resource limits
+
+Generation has independent deadlines for opening the connection, completing the entire request, and receiving the next stream chunk. A server that opens an SSE response and then stalls is cancelled rather than waiting indefinitely.
+
+Zipflow also enforces byte-based limits for one SSE event, the unparsed line buffer, model reasoning, answer text, and retained raw diagnostics. Exceeding a limit produces a typed, readable Local LLM error. Live Activity and replay workspaces consume response deltas and retain bounded preview windows instead of copying the complete accumulated response for every chunk.
+
 ## LM Studio behavior
 
 LM Studio uses its native model catalog and streaming chat API. Zipflow can read parameter counts, loaded-instance configuration, context size, and load or prompt-processing progress.

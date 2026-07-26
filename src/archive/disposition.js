@@ -4,6 +4,7 @@ import { ensureDir, exists, readJson, writeJsonAtomic } from '../utils/fs.js';
 import { expandHome } from '../utils/paths.js';
 import { getZipflowHome } from '../workflow/store.js';
 import { throwIfCancelled } from '../operations/manager.js';
+import { withStorageLease } from '../storage/lease.js';
 
 export async function applySourceArchivePolicy({ archivePath, runId, settings, now = new Date(), signal = null }) {
   throwIfCancelled(signal);
@@ -16,6 +17,10 @@ export async function applySourceArchivePolicy({ archivePath, runId, settings, n
     return { action: 'deleted', originalPath: archivePath, path: null, pruned: [] };
   }
   if (policy !== 'move') throw new Error(`Unknown source archive policy: ${policy}`);
+  return withStorageLease('archive-index', () => moveManagedArchive({ archivePath, runId, settings, now, signal }));
+}
+
+async function moveManagedArchive({ archivePath, runId, settings, now, signal }) {
   const directory = path.resolve(expandHome(settings.archiveDirectory || '~/zipflow-archive'));
   await ensureDir(directory);
   const destination = await chooseDestination(directory, path.basename(archivePath), runId, archivePath);
@@ -31,7 +36,7 @@ export async function applySourceArchivePolicy({ archivePath, runId, settings, n
     addedAt: now.toISOString(),
     size: fileStat.size,
   });
-  const pruned = await pruneManagedArchives(index, {
+  const pruned = await pruneManagedArchivesUnlocked(index, {
     now,
     retentionDays: settings.archiveRetentionDays,
     maxBytes: settings.archiveMaxBytes,
@@ -41,7 +46,11 @@ export async function applySourceArchivePolicy({ archivePath, runId, settings, n
   return { action: 'moved', originalPath: archivePath, path: destination, pruned };
 }
 
-export async function pruneManagedArchives(index, {
+export async function pruneManagedArchives(index, options = {}) {
+  return withStorageLease('archive-index', () => pruneManagedArchivesUnlocked(index, options));
+}
+
+async function pruneManagedArchivesUnlocked(index, {
   now = new Date(), retentionDays = 30, maxBytes = 1_000_000_000, signal = null,
 } = {}) {
   const active = [];
@@ -72,7 +81,11 @@ export async function pruneManagedArchives(index, {
   return pruned;
 }
 
-export async function inspectManagedArchives({ signal = null } = {}) {
+export async function inspectManagedArchives(options = {}) {
+  return inspectManagedArchivesUnlocked(options);
+}
+
+async function inspectManagedArchivesUnlocked({ signal = null } = {}) {
   const index = await loadArchiveIndex();
   const records = [];
   for (const record of index.records ?? []) {
@@ -82,10 +95,6 @@ export async function inspectManagedArchives({ signal = null } = {}) {
     records.push({ ...record, size: actual.size });
   }
   records.sort((left, right) => new Date(left.addedAt) - new Date(right.addedAt));
-  if (records.length !== (index.records ?? []).length) {
-    index.records = records;
-    await saveArchiveIndex(index);
-  }
   return {
     count: records.length,
     totalBytes: records.reduce((sum, record) => sum + record.size, 0),
@@ -94,7 +103,11 @@ export async function inspectManagedArchives({ signal = null } = {}) {
   };
 }
 
-export async function clearManagedArchives({ signal = null, onProgress = null } = {}) {
+export async function clearManagedArchives(options = {}) {
+  return withStorageLease('archive-index', () => clearManagedArchivesUnlocked(options));
+}
+
+async function clearManagedArchivesUnlocked({ signal = null, onProgress = null } = {}) {
   const index = await loadArchiveIndex();
   const records = index.records ?? [];
   const removed = [];

@@ -2,6 +2,7 @@ import path from 'node:path';
 import { requestAutonomyDecision } from '../autonomy/decision-engine.js';
 import { autonomyForMode } from '../autonomy/policies.js';
 import { listProjectRuns } from '../runs/store.js';
+import { BoundedByteBuffer } from '../utils/byte-buffer.js';
 
 const MODES = ['guarded', 'full'];
 
@@ -366,10 +367,13 @@ function updateSimulationEvent(controller, event) {
   if (!workspace || workspace.kind !== 'autopilot') return;
   if (event.type === 'chunk' && !event.hiddenOutput) {
     const id = `stream:${event.simulationMode}:${event.simulationGate}`;
-    pushBlock(workspace, {
+    const existing = workspace.blocks.find((item) => item.id === id) ?? {
       id, title: `${event.simulationMode} · ${event.simulationGate} · model response`, status: 'active', streaming: true,
-      reasoning: event.reasoning ?? '', content: event.content ?? '', lines: [],
-    });
+      reasoning: '', content: '', lines: [],
+    };
+    appendSimulationStream(existing, 'reasoning', event.reasoningDelta, event.reasoning);
+    appendSimulationStream(existing, 'content', event.contentDelta, event.content);
+    pushBlock(workspace, existing);
   } else if (event.type === 'complete') {
     const id = `stream:${event.simulationMode}:${event.simulationGate}`;
     const block = workspace.blocks.find((item) => item.id === id);
@@ -378,6 +382,17 @@ function updateSimulationEvent(controller, event) {
     workspace.status = `${event.simulationMode} · ${event.simulationGate} · contacting model`;
   }
   controller.invalidate();
+}
+
+function appendSimulationStream(block, key, delta, complete) {
+  const bufferKey = `${key}Buffer`;
+  if (!block[bufferKey]) block[bufferKey] = new BoundedByteBuffer(2 * 1024 * 1024);
+  if (delta) block[bufferKey].append(delta);
+  else if (complete != null) {
+    block[bufferKey] = new BoundedByteBuffer(2 * 1024 * 1024);
+    block[bufferKey].append(complete);
+  }
+  block[key] = block[bufferKey].toString();
 }
 
 function comparisonSummary(result) {

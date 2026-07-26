@@ -58,7 +58,23 @@
     "Español": "Español",
     "Language pack directory": "Directorio de paquetes de idioma",
     "Custom language packs": "Paquetes de idioma personalizados",
-    "Refresh languages": "Actualizar idiomas"
+    "Refresh languages": "Actualizar idiomas",
+    "Zipflow storage": "Almacenamiento de Zipflow",
+    "project filesystem": "sistema de archivos del proyecto",
+    "Choose environment inheritance separately for checks and deployments.": "Choose environment inheritance separately for checks and deployments.",
+    "Select and validate any absolute executable path. Manual overrides may deliberately use paths excluded from automatic detection.": "Select and validate any absolute executable path. Manual overrides may deliberately use paths excluded from automatic detection.",
+    "Keep listed files excluded and create commit": "Keep listed files excluded and create commit",
+    "Override exclusions and include all listed files": "Override exclusions and include all listed files",
+    "Explicitly include every listed credential, private-data, generated, database, and large file in the first commit.": "Explicitly include every listed credential, private-data, generated, database, and large file in the first commit.",
+    "First commit exclusions": "First commit exclusions",
+    "Nothing is staged until you choose. You can keep these exclusions or explicitly override them and include every listed file.": "Nothing is staged until you choose. You can keep these exclusions or explicitly override them and include every listed file.",
+    "Sanitized is the safe default for tests and validation. Full inheritance remains available for projects that require additional variables.": "Sanitized is the safe default for tests and validation. Full inheritance remains available for projects that require additional variables.",
+    "Deployments": "Deployments",
+    "Full inheritance is the practical default for deployment credentials and agent sockets. Sanitized remains available when deployment does not need them.": "Full inheritance is the practical default for deployment credentials and agent sockets. Sanitized remains available when deployment does not need them.",
+    "1 project-local PATH entry was excluded from automatic detection.": "1 project-local PATH entry was excluded from automatic detection.",
+    "{count} project-local PATH entries were excluded from automatic detection.": "{count} project-local PATH entries were excluded from automatic detection.",
+    "Remove the manual override and search PATH while excluding executables inside the current project.": "Remove the manual override and search PATH while excluding executables inside the current project.",
+    "Internal calls use resolved absolute paths. Automatic detection excludes paths inside the current project; a manual override can deliberately select one and is shown with a warning.": "Internal calls use resolved absolute paths. Automatic detection excludes paths inside the current project; a manual override can deliberately select one and is shown with a warning."
   },
   "patterns": [
     {

@@ -1,8 +1,10 @@
 import path from 'node:path';
+import { realpath } from 'node:fs/promises';
 import { suggestPathEntries } from '../utils/paths.js';
 import { outputPathForDirectory } from '../export/output-path.js';
 import { moveSelectableIndex } from './list-navigation.js';
 import { commandPrefix } from '../project/command-spec.js';
+import { isScreenGenerationCurrent, screenGenerationToken } from './state.js';
 
 const PATH_SCREENS = new Set(['project-path-input', 'project-entry-path', 'custom-check-command', 'deploy-command', 'archive-input', 'export-path']);
 
@@ -13,14 +15,18 @@ export function isPathEditorScreen(screen) {
 export async function refreshPathSuggestions(controller, { settingsModal = false } = {}) {
   const { state } = controller;
   if (!state.pathSuggestionActive || !String(state.editor.value ?? '').trim()) {
-    state.pathSuggestions = null;
+    clearPathSuggestions(state);
     return;
   }
   const spec = pathSuggestionSpec(state, settingsModal);
   if (!spec) {
-    state.pathSuggestions = null;
+    clearPathSuggestions(state);
     return;
   }
+  state.pathSuggestionAbortController?.abort('superseded');
+  const abortController = new AbortController();
+  state.pathSuggestionAbortController = abortController;
+  const screenToken = screenGenerationToken(state);
   const requestId = (state.pathSuggestions?.requestId ?? 0) + 1;
   state.pathSuggestions = {
     requestId,
@@ -31,9 +37,9 @@ export async function refreshPathSuggestions(controller, { settingsModal = false
   };
   controller.invalidate();
   try {
-    let items = await suggestPathEntries(spec.value ?? state.editor.value, spec.options);
-    if (spec.kind === 'workspace-relative') items = workspaceRelativeSuggestions(items, state.project.root, { command: false });
-    if (spec.kind === 'command-directory') items = workspaceRelativeSuggestions(items, state.project.root, { command: true });
+    let items = await suggestPathEntries(spec.value ?? state.editor.value, { ...spec.options, signal: abortController.signal });
+    if (spec.kind === 'workspace-relative') items = await workspaceRelativeSuggestions(items, state.project.root, { command: false });
+    if (spec.kind === 'command-directory') items = await workspaceRelativeSuggestions(items, state.project.root, { command: true });
     if (spec.owner === 'export-path') {
       items = items.map((item) => item.id.startsWith('use:')
         ? {
@@ -46,15 +52,19 @@ export async function refreshPathSuggestions(controller, { settingsModal = false
           }
         : item);
     }
-    if (state.pathSuggestions?.requestId !== requestId) return;
+    if (abortController.signal.aborted || !isScreenGenerationCurrent(state, screenToken)
+      || state.pathSuggestions?.requestId !== requestId) return;
     const previousId = state.pathSuggestions.items?.[state.pathSuggestions.selectedIndex]?.id;
     const selectedIndex = Math.max(0, items.findIndex((item) => item.id === previousId));
     state.pathSuggestions = { requestId, loading: false, items, selectedIndex, owner: spec.owner };
   } catch (error) {
-    if (state.pathSuggestions?.requestId !== requestId) return;
+    if (abortController.signal.aborted || error?.code === 'cancelled'
+      || !isScreenGenerationCurrent(state, screenToken) || state.pathSuggestions?.requestId !== requestId) return;
     state.pathSuggestions = { requestId, loading: false, items: [], selectedIndex: 0, owner: spec.owner, error: error.message };
+  } finally {
+    if (state.pathSuggestionAbortController === abortController) state.pathSuggestionAbortController = null;
   }
-  controller.invalidate();
+  if (isScreenGenerationCurrent(state, screenToken)) controller.invalidate();
 }
 
 
@@ -87,6 +97,8 @@ function parentPathInput(value, { relative = false } = {}) {
 }
 
 export function clearPathSuggestions(state) {
+  state.pathSuggestionAbortController?.abort?.('cleared');
+  state.pathSuggestionAbortController = null;
   state.pathSuggestions = null;
 }
 
@@ -133,9 +145,11 @@ export function selectPathSuggestion(state, index) {
 }
 
 
-function workspaceRelativeSuggestions(items, workspaceRoot, { command }) {
-  return items.map((item) => {
-    const relative = path.relative(workspaceRoot, item.path).split(path.sep).join('/');
+async function workspaceRelativeSuggestions(items, workspaceRoot, { command }) {
+  const canonicalRoot = await realpath(workspaceRoot).catch(() => path.resolve(workspaceRoot));
+  const mapped = await Promise.all(items.map(async (item) => {
+    const canonicalItem = await realpath(item.path).catch(() => path.resolve(item.path));
+    const relative = path.relative(canonicalRoot, canonicalItem).split(path.sep).join('/');
     if (!relative || relative === '.' || relative.startsWith('../')) return null;
     const directory = relative.replace(/\/+$/, '');
     return {
@@ -148,7 +162,8 @@ function workspaceRelativeSuggestions(items, workspaceRoot, { command }) {
       submit: false,
       completeCommandPrefix: command,
     };
-  }).filter(Boolean);
+  }));
+  return mapped.filter(Boolean);
 }
 
 function pathSuggestionSpec(state, settingsModal) {
@@ -159,8 +174,8 @@ function pathSuggestionSpec(state, settingsModal) {
       owner: 'settings-modal',
       options: {
         cwd: state.project?.root ?? process.cwd(),
-        directoriesOnly: true,
-        includeCurrentDirectory: true,
+        directoriesOnly: field.directoriesOnly !== false,
+        includeCurrentDirectory: field.directoriesOnly !== false,
       },
     };
   }

@@ -11,6 +11,8 @@ import { displayPath } from '../utils/paths.js';
 import { createActionRunRecord, runReportPath, saveRunRecord } from '../runs/store.js';
 import { beginLlmProgress } from './llm-progress.js';
 import { commandLocationLabel } from '../project/command-spec.js';
+import { ensureProjectEnvironmentNotice } from './project-environment-notice.js';
+import { transitionScreen } from './state.js';
 
 export function handlesManualScreen(screen) {
   return ['manual-checks-running', 'manual-checks-result', 'manual-deploy-running', 'manual-deploy-result'].includes(screen);
@@ -20,10 +22,11 @@ export async function beginManualChecks(controller) {
   const { state } = controller;
   const checks = state.workflow.checks.filter((check) => check.selected);
   if (!checks.length) return controller.message('No checks configured', ['Change the workflow to select at least one check.'], 'warning');
+  await ensureProjectEnvironmentNotice(controller);
   const operation = controller.beginOperation({ kind: 'manual-checks', label: 'Running manual checks' });
   const run = await createActionRunRecord({ id: createRunId(), project: state.project, workflow: state.workflow, action: 'manual-checks' });
   state.run = run;
-  state.screen = 'manual-checks-running';
+  transitionScreen(state, 'manual-checks-running');
   state.status = 'Running tests';
   state.checkRuntime = { checks, activeIndex: 0, results: [], lastLine: '', estimates: {} };
   controller.message('Manual checks starting', [`${checks.length} configured check${checks.length === 1 ? '' : 's'} will run against the current project files.`], 'process');
@@ -34,6 +37,7 @@ export async function beginManualChecks(controller) {
       workflow: state.workflow,
       projectPath: state.project.root,
       changedPaths,
+      settings: state.settings,
       signal: operation.signal,
       onUpdate: (event) => updateCheckRuntime(controller, event),
     });
@@ -64,10 +68,11 @@ export async function beginManualChecks(controller) {
 export async function beginManualDeploy(controller) {
   const { state } = controller;
   if (!state.workflow.deploy?.commandText) return controller.message('Deployment is not configured', ['Change the workflow to choose a deploy command.'], 'warning');
+  await ensureProjectEnvironmentNotice(controller);
   const operation = controller.beginOperation({ kind: 'manual-deploy', label: 'Running manual deployment' });
   const run = await createActionRunRecord({ id: createRunId(), project: state.project, workflow: state.workflow, action: 'manual-deploy' });
   state.run = run;
-  state.screen = 'manual-deploy-running';
+  transitionScreen(state, 'manual-deploy-running');
   state.status = 'Deploying current version';
   state.deployRuntime = { commandText: state.workflow.deploy.commandText, cwd: state.workflow.deploy.cwd || '.', lastLine: '' };
   controller.message('Manual deployment starting', [`${commandLocationLabel(state.workflow.deploy.cwd)} · ${state.workflow.deploy.commandText}`, 'This deploys the current local project without applying a ZIP archive.'], 'process');
@@ -76,6 +81,7 @@ export async function beginManualDeploy(controller) {
     const result = await runDeploy({
       deploy: state.workflow.deploy,
       projectPath: state.project.root,
+      settings: state.settings,
       signal: operation.signal,
       onOutput: (event) => {
         state.deployRuntime.lastLine = lastNonEmptyLine(event.text);

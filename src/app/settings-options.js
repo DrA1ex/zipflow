@@ -7,6 +7,8 @@ import { modelTestDescription, modelTestValue } from './settings-model-check.js'
 import { translateForState as t } from '../i18n/index.js';
 import { hasLlmPatchDeliveryTasks, llmTasks } from '../llm/tasks.js';
 import { ZIPFLOW_VERSION } from '../version.js';
+import { BINARY_TOOL_IDS, binaryDefinition, configuredBinaryPath } from '../security/binaries.js';
+import { environmentPolicyLabel } from '../security/environment.js';
 
 export function settingsDefinitions(state) {
   const definitions = [
@@ -14,6 +16,8 @@ export function settingsDefinitions(state) {
     { id: 'theme', label: 'Theme', description: '', directParameterId: 'theme' },
     { id: 'updates', label: 'Updates', description: 'Control background update checks and query the latest published npm version.' },
     { id: 'checkOutput', label: 'Running checks', description: '', directParameterId: 'checkOutput' },
+    { id: 'binaries', label: 'Binaries', description: 'Validated absolute executables used by trusted Zipflow operations.' },
+    { id: 'commandEnvironment', label: 'Project command environment', description: 'Choose environment inheritance separately for checks and deployments.' },
     { id: 'localLlm', label: 'Local LLM', description: 'Provider, model, languages, review behavior, and authentication.' },
     { id: 'sourceArchive', label: 'Source archives', description: 'Retention and storage for completed source ZIPs.' },
     { id: 'backups', label: 'Backups', description: 'Retention and storage for rollback backups.' },
@@ -34,6 +38,17 @@ export function settingsParameters(state, definition) {
     'checkOutput', 'Output while running', outputLabel(state.settings.checkOutput),
     'Compact shows status only; last-line also shows the latest command output line.',
   )];
+  if (definition.id === 'binaries') return binaryParameters(state);
+  if (definition.id === 'commandEnvironment') return [
+    choiceParameter(
+      'checkCommandEnvironment', 'Checks', environmentPolicyLabel(state.settings.checkCommandEnvironment),
+      'Sanitized is the safe default for tests and validation. Full inheritance remains available for projects that require additional variables.',
+    ),
+    choiceParameter(
+      'deployCommandEnvironment', 'Deployments', environmentPolicyLabel(state.settings.deployCommandEnvironment),
+      'Full inheritance is the practical default for deployment credentials and agent sockets. Sanitized remains available when deployment does not need them.',
+    ),
+  ];
   if (definition.id === 'localLlm') {
     if (state.settingsPanel?.subpage === 'llmTasks') return llmTaskParameters(state);
     if (state.settingsPanel?.subpage === 'llmLanguages') return llmLanguageParameters(state);
@@ -46,6 +61,53 @@ export function settingsParameters(state, definition) {
   if (definition.id === 'backups') return backupParameters(state);
   if (definition.id === 'managedHistory') return managedHistoryParameters(state);
   return [];
+}
+
+
+function binaryParameters(state) {
+  const loading = Boolean(state.settingsPanel?.loadingBinaries);
+  return BINARY_TOOL_IDS.map((binaryId) => {
+    const definition = binaryDefinition(binaryId);
+    const status = state.settingsPanel?.binaries?.[binaryId];
+    const mode = status?.mode === 'manual' ? 'Manual' : 'Automatic';
+    const value = loading && !status ? 'Checking…' : `${mode} · ${status?.valid ? 'Validated' : 'Unavailable'}`;
+    const excludedCount = status?.excludedPaths?.length ?? 0;
+    const exclusions = excludedCount === 1
+      ? '1 project-local PATH entry was excluded from automatic detection.'
+      : excludedCount > 1 ? `${excludedCount} project-local PATH entries were excluded from automatic detection.` : '';
+    const description = status?.valid
+      ? [status.resolvedPath, status.version, status.warning, exclusions].filter(Boolean).join(' · ')
+      : [status?.error || 'Open to detect, choose, reset, or test the executable.', exclusions].filter(Boolean).join(' · ');
+    return { id: `binary:${binaryId}`, type: 'choice', binaryId, label: definition.label, value, description };
+  });
+}
+
+function binaryChoices(state, parameter) {
+  const status = state.settingsPanel?.binaries?.[parameter.binaryId];
+  const detected = state.settingsPanel?.detectedBinaries?.[parameter.binaryId];
+  const manual = Boolean(configuredBinaryPath(state.settings, parameter.binaryId));
+  return [
+    {
+      id: `binary-use-detected:${parameter.binaryId}`, action: 'binary-use-detected', binaryId: parameter.binaryId,
+      label: 'Use detected executable',
+      description: detected?.valid ? detected.resolvedPath : detected?.error || 'No validated system executable was detected.',
+      disabled: !detected?.valid,
+    },
+    {
+      id: `binary-choose:${parameter.binaryId}`, action: 'binary-choose-path', binaryId: parameter.binaryId,
+      label: 'Choose path', description: 'Select and validate any absolute executable path. Manual overrides may deliberately use paths excluded from automatic detection.',
+    },
+    {
+      id: `binary-reset:${parameter.binaryId}`, action: 'binary-reset-auto', binaryId: parameter.binaryId,
+      label: 'Reset to automatic detection', description: detected?.resolvedPath || 'Remove the manual override and search PATH while excluding executables inside the current project.',
+      disabled: !manual,
+    },
+    {
+      id: `binary-test:${parameter.binaryId}`, action: 'binary-test', binaryId: parameter.binaryId,
+      label: 'Test current executable',
+      description: status?.resolvedPath || status?.error || 'Validate the current executable and run its probe when available.',
+    },
+  ];
 }
 
 function updateParameters(state) {
@@ -85,6 +147,11 @@ export function settingsChoices(state, parameter) {
     option(parameter, 'compact', 'Compact', 'Show check state and duration only.'),
     option(parameter, 'last-line', 'Last output line', 'Also show the latest non-empty output line.'),
   ];
+  if (['checkCommandEnvironment', 'deployCommandEnvironment'].includes(parameter.settingId)) return [
+    option(parameter, 'sanitized', 'Sanitized environment', 'Pass normal paths, locale, terminal, home, and platform variables while removing secret-like variables and agent sockets.'),
+    option(parameter, 'inherit', 'Full inherited environment', 'Pass every environment variable inherited by Zipflow. Use only for project commands that explicitly require it.'),
+  ];
+  if (parameter.binaryId) return binaryChoices(state, parameter);
   if (parameter.settingId === 'llmProvider') return [
     option(parameter, 'disabled', 'Disabled', 'Do not contact a local LLM server.'),
     option(parameter, 'ollama', 'Ollama', 'Local server at 127.0.0.1:11434.'),
@@ -155,10 +222,22 @@ export function settingsPageTitle(state, definition) {
 }
 
 export function settingsFieldDefinition(fieldId) {
+  if (fieldId.startsWith('binaryPath:')) {
+    const binaryId = fieldId.slice('binaryPath:'.length);
+    const definition = binaryDefinition(binaryId);
+    return {
+      id: fieldId, binaryId, label: `${definition.label} path`,
+      description: `Absolute executable path used for ${definition.label}.`,
+      placeholder: '/absolute/path/to/executable',
+      instructions: ['Tab completes files and directories. Shift+Tab moves to the parent directory.', 'The selected real path must be a regular executable file and pass its validation probe.'],
+      path: true, directoriesOnly: false,
+    };
+  }
   return FIELD_DEFINITIONS[fieldId] ?? null;
 }
 
 export function settingsEditorValue(state, fieldId) {
+  if (fieldId.startsWith('binaryPath:')) return configuredBinaryPath(state.settings, fieldId.slice('binaryPath:'.length));
   if (fieldId === 'llmApiToken') return '';
   if (['archiveMaxBytes', 'backupMaxBytes'].includes(fieldId)) return formatByteSize(state.settings[fieldId]).replace(/\s+/g, '');
   return String(state.settings[fieldId] ?? '');
@@ -412,6 +491,17 @@ export function settingsPageHelp(state, definition) {
       t(state, 'Latest version: {version}', { version: result?.latestVersion ?? 'Not checked' }),
     ];
   }
+  if (definition.id === 'binaries') {
+    const statuses = Object.values(state.settingsPanel?.binaries ?? {});
+    return [
+      `${statuses.filter((item) => item.valid).length}/${BINARY_TOOL_IDS.length} executables validated`,
+      'Internal calls use resolved absolute paths. Automatic detection excludes paths inside the current project; a manual override can deliberately select one and is shown with a warning.',
+    ];
+  }
+  if (definition.id === 'commandEnvironment') return [
+    `Checks: ${environmentPolicyLabel(state.settings.checkCommandEnvironment)}`,
+    `Deployments: ${environmentPolicyLabel(state.settings.deployCommandEnvironment)}`,
+  ];
   if (definition.id === 'sourceArchive') {
     const archives = state.settingsPanel?.storageStats?.archives ?? {};
     if (loading) return [t(state, 'Storage statistics'), t(state, 'Scanning source archive storage…')];
@@ -447,6 +537,17 @@ export function settingsPageHelp(state, definition) {
 export function settingsPageSummary(state, definition) {
   const loading = Boolean(state.settingsPanel?.loadingStorage);
   if (definition.id === 'updates') return [updateCheckValue(state)];
+  if (definition.id === 'binaries') {
+    const statuses = Object.values(state.settingsPanel?.binaries ?? {});
+    return [
+      `${statuses.filter((item) => item.valid).length}/${BINARY_TOOL_IDS.length} executables validated`,
+      'Internal calls use resolved absolute paths. Automatic detection excludes paths inside the current project; a manual override can deliberately select one and is shown with a warning.',
+    ];
+  }
+  if (definition.id === 'commandEnvironment') return [
+    `Checks: ${environmentPolicyLabel(state.settings.checkCommandEnvironment)}`,
+    `Deployments: ${environmentPolicyLabel(state.settings.deployCommandEnvironment)}`,
+  ];
   if (definition.id === 'sourceArchive') {
     const archives = state.settingsPanel?.storageStats?.archives ?? {};
     if (loading) return [t(state, 'Scanning source archive storage…')];

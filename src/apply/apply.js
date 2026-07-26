@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { chmod, rename, rm, stat } from 'node:fs/promises';
-import { createBackup } from './backup.js';
+import { createBackup, verifyBackupFiles } from './backup.js';
 import { ensureDir, exists } from '../utils/fs.js';
 import { hashFile } from '../utils/hash.js';
 import { assertSafeProjectPath } from '../security/project-path.js';
@@ -8,11 +8,21 @@ import { throwIfCancelled } from '../operations/manager.js';
 import { copyRegularFileNoFollow } from '../security/safe-file.js';
 import { shortToken } from '../utils/hash.js';
 import { selectedPlanItems } from '../app/plan-selection.js';
+import { assertApplySpace } from '../storage/disk-space.js';
+import { getZipflowHome } from '../workflow/store.js';
 
-export async function applyUpdatePlan({ runId, projectPath, plan, decisions = new Map(), onProgress = null, signal = null, shouldCancel = () => false }) {
+export async function applyUpdatePlan({ runId, projectPath, plan, decisions = new Map(), onProgress = null, signal = null, shouldCancel = () => false, diskSpaceProbe = undefined }) {
   const items = selectedPlanItems(plan, decisions);
   throwIfCancelled(signal);
   await verifyPlanStillCurrent(projectPath, items, signal);
+  onProgress?.({ stage: 'preflight', current: 0, total: items.length });
+  await assertApplySpace({
+    projectPath,
+    zipflowPath: getZipflowHome(),
+    items,
+    signal,
+    ...(diskSpaceProbe ? { probe: diskSpaceProbe } : {}),
+  });
   onProgress?.({ stage: 'backup', current: 0, total: items.length });
   const backup = await createBackup({ runId, projectPath, items, signal });
   if (shouldCancel()) throw Object.assign(new Error('Operation cancelled.'), { code: 'cancelled' });
@@ -96,6 +106,7 @@ async function verifyApplied(projectPath, items, signal) {
 }
 
 async function restoreBackup(backup) {
+  await verifyBackupFiles(backup);
   for (const item of [...backup.manifest.items].reverse()) {
     const { target: currentPath } = await assertSafeProjectPath(backup.manifest.projectPath, item.path);
     if (!item.existed) {

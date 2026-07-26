@@ -71,7 +71,7 @@ test('commit prompt exposes each available message source without redundant expl
   backPostCheck(controller);
 
   assert.equal(state.screen, 'commit');
-  assert.deepEqual(state.panelIntro, []);
+  assert.deepEqual(state.panelIntro, ['Git hooks are disabled for this Zipflow commit.']);
   assert.deepEqual(state.menuItems.map((item) => item.label), [
     'Create commit · Local LLM',
     'Create commit · Archive message',

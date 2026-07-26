@@ -3,11 +3,18 @@ import { themes } from 'terlio.js';
 import { readJson, removeIfExists, writeJsonAtomic } from '../utils/fs.js';
 import { ensureZipflowHome, getZipflowHome } from '../workflow/store.js';
 import { canonicalModelId, modelIdentityKey } from '../llm/model-identity.js';
+import { withStorageLease } from '../storage/lease.js';
+import {
+  assertFullSettingsCas, assertPatchSettingsCas, nextStorageRevision, normalizeStorageRevision,
+  SettingsConflictError,
+} from './revision.js';
+
+export { SettingsConflictError };
 import {
   deleteLlmApiToken, readLlmApiToken, SecureCredentialStoreError, writeLlmApiToken,
 } from '../security/credential-store.js';
 
-export const SETTINGS_VERSION = 20;
+export const SETTINGS_VERSION = 23;
 export const THEME_NAMES = Object.keys(themes);
 export const LLM_PROVIDERS = ['disabled', 'ollama', 'lmstudio'];
 export const LLM_LANGUAGES = ['English', 'Russian', 'German', 'French', 'Spanish', 'Chinese', 'Japanese'];
@@ -17,13 +24,20 @@ export const LLM_CHANGE_DELIVERY_MODES = ['adaptive', 'patch', 'representative',
 export const LLM_FAILURE_ANALYSIS_MODES = ['same-context', 'new-context'];
 export const BACKUP_RETENTION_POLICIES = ['all', 'limits'];
 export const MANAGED_HISTORY_POLICIES = ['record', 'disabled'];
+export const PROJECT_COMMAND_ENVIRONMENT_POLICIES = ['sanitized', 'inherit'];
+const INTERNAL_BINARY_IDS = new Set(['git', 'npm', 'node', 'opener', 'python', 'gofmt']);
 
 export const DEFAULT_SETTINGS = Object.freeze({
   version: SETTINGS_VERSION,
+  storageRevision: 0,
   interfaceLanguage: 'en',
   theme: 'ocean',
   checkForUpdatesOnStartup: true,
   checkOutput: 'last-line',
+  binaryPaths: {},
+  checkCommandEnvironment: 'sanitized',
+  deployCommandEnvironment: 'inherit',
+  projectEnvironmentNoticeVersion: 0,
   llmProvider: 'disabled',
   llmModel: '',
   llmLanguage: 'English',
@@ -64,6 +78,10 @@ const LEGACY_CREDENTIAL_KEYS = ['llmApiToken', 'apiToken', 'localLlmApiToken', '
 
 export async function loadSettings() {
   await settingsWriteQueue;
+  return loadSettingsUnlocked();
+}
+
+async function loadSettingsUnlocked() {
   await ensureZipflowHome();
   const [credentials, primary, backup] = await Promise.all([
     readSettingsFile(credentialsPath()),
@@ -87,7 +105,7 @@ export async function loadSettings() {
 }
 
 export function saveSettings(settings, { allowClearToken = false } = {}) {
-  return enqueueSettingsWrite(async () => {
+  return enqueueSettingsWrite(() => withStorageLease('settings', async () => {
     const [stored, backup, credentials] = await Promise.all([
       readSettingsFile(settingsPath()),
       readSettingsFile(settingsBackupPath()),
@@ -96,6 +114,7 @@ export function saveSettings(settings, { allowClearToken = false } = {}) {
     const current = normalizeSettings(stored ?? backup);
     const credential = await resolveCredential(stored ? [stored, credentials] : [backup, credentials]);
     const rawIncoming = settings && typeof settings === 'object' ? settings : {};
+    assertFullSettingsCas(rawIncoming, current, { currentExists: Boolean(stored ?? backup) });
     const tokenWasProvided = Object.prototype.hasOwnProperty.call(rawIncoming, 'llmApiToken');
     const incoming = normalizeSettings({ ...current, ...expandLegacyLanguagePatch(rawIncoming) });
     const requestedToken = tokenWasProvided ? incoming.llmApiToken : credential.token;
@@ -106,15 +125,15 @@ export function saveSettings(settings, { allowClearToken = false } = {}) {
       allowClearToken,
     });
     return writeSettingsValue(normalizeSettings({ ...current, ...incoming, llmApiToken: credentialChange.token }), {
-      currentRaw: stored,
+      currentRaw: stored ?? backup,
       legacyToken: credentialChange.secure ? '' : credential.legacyOnDisk,
       secure: credentialChange.secure,
     });
-  });
+  }));
 }
 
 export function updateSettings(patch, { allowClearToken = false, baseSettings = null } = {}) {
-  return enqueueSettingsWrite(async () => {
+  return enqueueSettingsWrite(() => withStorageLease('settings', async () => {
     const [stored, backup, credentials] = await Promise.all([
       readSettingsFile(settingsPath()),
       readSettingsFile(settingsBackupPath()),
@@ -123,6 +142,7 @@ export function updateSettings(patch, { allowClearToken = false, baseSettings = 
     const current = normalizeSettings({ ...(baseSettings ?? {}), ...(stored ?? backup ?? {}) });
     const credential = await resolveCredential(stored ? [stored, credentials, baseSettings] : [backup, credentials, baseSettings]);
     const nextPatch = expandLegacyLanguagePatch(patch ?? {});
+    assertPatchSettingsCas(current, nextPatch, baseSettings);
     const tokenWasProvided = Object.prototype.hasOwnProperty.call(nextPatch, 'llmApiToken');
     let token = credential.token;
     let secure = credential.secure;
@@ -140,11 +160,11 @@ export function updateSettings(patch, { allowClearToken = false, baseSettings = 
       } else delete nextPatch.llmApiToken;
     }
     return writeSettingsValue(normalizeSettings({ ...current, ...nextPatch, llmApiToken: token }), {
-      currentRaw: stored,
+      currentRaw: stored ?? backup,
       legacyToken: secure ? '' : credential.legacyOnDisk,
       secure,
     });
-  });
+  }));
 }
 
 
@@ -168,10 +188,11 @@ function enqueueSettingsWrite(task) {
 
 async function writeSettingsValue(value, { currentRaw = null, legacyToken = '', secure = false } = {}) {
   await ensureZipflowHome();
+  const next = normalizeSettings({ ...value, storageRevision: nextStorageRevision(currentRaw) });
   if (currentRaw) await writeJsonAtomic(settingsBackupPath(), settingsForDisk(currentRaw, { legacyToken }));
-  await writeJsonAtomic(settingsPath(), settingsForDisk(value, { legacyToken }));
+  await writeJsonAtomic(settingsPath(), settingsForDisk(next, { legacyToken }));
   if (secure) await scrubLegacyCredentials();
-  return { ...value, llmApiToken: value.llmApiToken ?? '' };
+  return { ...next, llmApiToken: next.llmApiToken ?? '' };
 }
 
 async function applyCredentialChange({ requestedToken, currentToken, currentSecure, allowClearToken }) {
@@ -253,11 +274,24 @@ export function normalizeSettings(settings) {
   const raw = settings && typeof settings === 'object' ? settings : {};
   const source = migrateLegacySettingAliases(raw);
   const value = { ...DEFAULT_SETTINGS, ...source, version: SETTINGS_VERSION };
+  value.storageRevision = normalizeStorageRevision(value.storageRevision);
   if (typeof value.interfaceLanguage !== 'string' || !value.interfaceLanguage.trim()) value.interfaceLanguage = DEFAULT_SETTINGS.interfaceLanguage;
   value.interfaceLanguage = value.interfaceLanguage.trim().toLowerCase();
   if (!THEME_NAMES.includes(value.theme)) value.theme = DEFAULT_SETTINGS.theme;
   value.checkForUpdatesOnStartup = value.checkForUpdatesOnStartup !== false;
   if (!['compact', 'last-line'].includes(value.checkOutput)) value.checkOutput = DEFAULT_SETTINGS.checkOutput;
+  value.binaryPaths = normalizeBinaryPaths(value.binaryPaths);
+  const legacyEnvironment = PROJECT_COMMAND_ENVIRONMENT_POLICIES.includes(source.projectCommandEnvironment)
+    ? source.projectCommandEnvironment
+    : null;
+  if (!PROJECT_COMMAND_ENVIRONMENT_POLICIES.includes(source.checkCommandEnvironment)) {
+    value.checkCommandEnvironment = legacyEnvironment ?? DEFAULT_SETTINGS.checkCommandEnvironment;
+  }
+  if (!PROJECT_COMMAND_ENVIRONMENT_POLICIES.includes(source.deployCommandEnvironment)) {
+    value.deployCommandEnvironment = legacyEnvironment ?? DEFAULT_SETTINGS.deployCommandEnvironment;
+  }
+  delete value.projectCommandEnvironment;
+  value.projectEnvironmentNoticeVersion = normalizeInteger(value.projectEnvironmentNoticeVersion, 0, 0, Number.MAX_SAFE_INTEGER);
   if (!LLM_PROVIDERS.includes(value.llmProvider)) value.llmProvider = DEFAULT_SETTINGS.llmProvider;
   if (typeof value.llmModel !== 'string') value.llmModel = '';
   value.llmModel = canonicalModelId(value.llmProvider, value.llmModel);
@@ -350,6 +384,17 @@ function migrateLegacySettingAliases(source) {
     if (found) value[target] = value[found];
   }
   return value;
+}
+
+
+function normalizeBinaryPaths(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const result = {};
+  for (const [key, binaryPath] of Object.entries(value)) {
+    if (!INTERNAL_BINARY_IDS.has(key) || typeof binaryPath !== 'string' || !binaryPath.trim()) continue;
+    result[key] = binaryPath.trim();
+  }
+  return result;
 }
 
 function normalizeCompatibilityMap(value) {

@@ -12,8 +12,10 @@ import { isLocalLlmEnabled } from '../llm/generate.js';
 import { beginLlmProgress } from './llm-progress.js';
 import { saveLlmDiagnostics } from '../llm/diagnostics.js';
 import { activeRunSettings } from './runtime-settings.js';
+import { ensureProjectEnvironmentNotice } from './project-environment-notice.js';
 import { handleFailedChecksAutonomy } from './run-autonomy.js';
 import { commandLocationLabel } from '../project/command-spec.js';
+import { transitionScreen } from './state.js';
 import { autopilotPaused, resumeAutopilot } from './autonomy-flow.js';
 import {
   activateCommitChoice, continueAfterChecks, offerCommitAfterFailedChecks,
@@ -74,6 +76,8 @@ export async function submitPostCheckEditor(controller) {
 
 export async function startChecks(controller) {
   const { state } = controller;
+  const runSettings = activeRunSettings(state);
+  await ensureProjectEnvironmentNotice(controller, runSettings);
   const operation = controller.beginOperation({ kind: 'checks', label: 'Running checks' });
   const checks = state.workflow.checks.filter((check) => check.selected);
   const estimate = await previousCheckEstimate(state);
@@ -81,7 +85,7 @@ export async function startChecks(controller) {
     `${checks.length} selected check${checks.length === 1 ? '' : 's'} will run in workflow order${estimate?.totalLabel ? ` · historical median ${estimate.totalLabel}` : ''}.`,
     'Successful output stays compact; a failed command opens its useful output and copyable report.',
   ], 'process');
-  state.screen = 'checks-running';
+  transitionScreen(state, 'checks-running');
   state.checkRuntime = { checks, activeIndex: 0, results: [], lastLine: '', estimates: estimate?.byName ?? {} };
   state.status = 'Running checks';
   controller.invalidate();
@@ -90,6 +94,7 @@ export async function startChecks(controller) {
       workflow: state.workflow,
       projectPath: state.project.root,
       changedPaths: state.run.applied.changedPaths,
+      settings: runSettings,
       signal: operation.signal,
       onUpdate: (event) => {
         if (event.type === 'started') state.checkRuntime.activeIndex = event.index;

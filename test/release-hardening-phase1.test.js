@@ -174,48 +174,38 @@ test('durable JSON replacement never exposes partially valid JSON', async () => 
   await rm(directory, { recursive: true, force: true });
 });
 
-test('project locks use owner heartbeats and reclaim stale PID reuse safely', async () => {
+test('project locks use one static owner record and reclaim dead or expired owners', async () => {
   await withZipflowHome(async () => {
     const projectPath = await mkdtemp(path.join(os.tmpdir(), 'zipflow-lock-project-'));
-    const first = await acquireProjectLock(projectPath, 'run-one', { heartbeatIntervalMs: 0 });
-    await assert.rejects(
-      acquireProjectLock(projectPath, 'run-two', { heartbeatIntervalMs: 0 }),
-      /Another Zipflow run is active/,
-    );
+    const first = await acquireProjectLock(projectPath, 'run-one');
+    const before = await readFile(first.path, 'utf8');
+    await first.heartbeat();
+    assert.equal(await readFile(first.path, 'utf8'), before);
+    await assert.rejects(acquireProjectLock(projectPath, 'run-two'), /Another Zipflow run is active/);
     await first.release();
 
     const stale = {
-      version: 2, pid: process.pid, projectPath, runId: 'stale-run', ownerToken: 'stale-owner',
-      createdAt: '2020-01-01T00:00:00.000Z', heartbeatAt: '2020-01-01T00:00:00.000Z',
+      version: 3, pid: process.pid, projectPath, runId: 'stale-run', ownerToken: 'stale-owner',
+      createdAt: '2020-01-01T00:00:00.000Z',
     };
     await writeJsonAtomic(first.path, stale);
     const replacement = await acquireProjectLock(projectPath, 'replacement', {
-      heartbeatIntervalMs: 0,
-      now: () => Date.parse('2026-07-25T12:00:00.000Z'),
-      staleAfterMs: 1_000,
-      isProcessAlive: () => true,
+      now: () => Date.parse('2026-07-25T12:00:00.000Z'), staleAfterMs: 1_000, isProcessAlive: () => true,
     });
     const stored = await readJson(replacement.path);
     assert.equal(stored.runId, 'replacement');
     assert.notEqual(stored.ownerToken, stale.ownerToken);
 
-    await writeJsonAtomic(replacement.path, { ...stored, heartbeatAt: 'invalid' });
-    const malformedReplacement = await acquireProjectLock(projectPath, 'malformed-replacement', {
-      heartbeatIntervalMs: 0,
-      now: () => Date.parse('2026-07-25T12:00:00.000Z'),
-      staleAfterMs: 1_000,
-      isProcessAlive: () => true,
-    });
-    const malformedStored = await readJson(malformedReplacement.path);
-    assert.equal(malformedStored.runId, 'malformed-replacement');
-    await malformedReplacement.release();
+    await writeJsonAtomic(replacement.path, { ...stored, ownerToken: 'successor-owner', runId: 'successor' });
     await replacement.release();
+    assert.equal((await readJson(replacement.path)).runId, 'successor');
+    await rm(replacement.path, { force: true });
 
-    const successorLock = await acquireProjectLock(projectPath, 'replacement-successor', { heartbeatIntervalMs: 0 });
-    const successorStored = await readJson(successorLock.path);
-    await writeJsonAtomic(successorLock.path, { ...successorStored, ownerToken: 'successor-owner', runId: 'successor' });
-    await successorLock.release();
-    assert.equal((await readJson(successorLock.path)).runId, 'successor');
+    const dead = { ...stale, createdAt: new Date().toISOString(), runId: 'dead-owner' };
+    await writeJsonAtomic(first.path, dead);
+    const afterDead = await acquireProjectLock(projectPath, 'after-dead', { isProcessAlive: () => false });
+    assert.equal((await readJson(afterDead.path)).runId, 'after-dead');
+    await afterDead.release();
     await rm(projectPath, { recursive: true, force: true });
   });
 });

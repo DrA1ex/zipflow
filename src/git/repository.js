@@ -2,6 +2,9 @@ import path from 'node:path';
 import { runProcess } from '../utils/process.js';
 import { isProtectedProjectPath } from '../archive/protected.js';
 import { findGitRoot } from './root.js';
+import { resolveInternalBinary } from '../security/binaries.js';
+import { gitArgumentsWithHookPolicy } from './hooks.js';
+import { inspectPotentiallySensitivePaths } from '../export/sensitive.js';
 export { findGitRoot } from './root.js';
 
 
@@ -44,24 +47,73 @@ export async function listIgnoredPaths(projectPath, paths, { includeTracked = fa
   return new Set(splitNullPaths(result.stdout));
 }
 
-export async function createInitialCommit(projectPath, message = 'Initial commit') {
-  const status = await getGitStatus(projectPath);
-  if (status.staged.length) return { ok: false, reason: 'The Git index already contains staged changes.' };
-  const add = await runGit(projectPath, ['add', '--all'], { allowFailure: true });
-  if (!add.ok) return { ok: false, reason: add.stderr.trim() || add.stdout.trim() || 'git add failed' };
-  const staged = await runGit(projectPath, ['diff', '--cached', '--name-only', '-z'], { allowFailure: true });
-  const paths = splitNullPaths(staged.stdout);
-  if (!paths.length) return { ok: false, reason: 'There are no files available for the first commit.' };
-  const commit = await runGit(projectPath, ['commit', '-m', message], { allowFailure: true });
-  if (!commit.ok) {
-    await runGit(projectPath, ['reset', '-q'], { allowFailure: true });
-    return { ok: false, reason: commit.stderr.trim() || commit.stdout.trim() || 'git commit failed' };
-  }
-  const revision = await runGit(projectPath, ['rev-parse', '--short', 'HEAD']);
-  return { ok: true, revision: revision.stdout.trim(), paths, output: commit.stdout.trim() };
+export async function prepareInitialCommit(projectPath, { signal = null } = {}) {
+  const status = await getGitStatus(projectPath, { signal });
+  if (status.staged.length) return { ok: false, reason: 'The Git index already contains staged changes.', paths: [], approvedPaths: [], sensitive: [] };
+  const paths = [...new Set(status.entries.map((entry) => entry.path))]
+    .filter(Boolean)
+    .filter((item) => !isProtectedProjectPath(item));
+  const sensitive = inspectPotentiallySensitivePaths(paths);
+  const sensitivePaths = new Set(sensitive.map((item) => item.path));
+  return {
+    ok: true,
+    paths,
+    approvedPaths: paths.filter((item) => !sensitivePaths.has(item)),
+    sensitive,
+    protectedPaths: status.entries.map((entry) => entry.path).filter(isProtectedProjectPath),
+  };
 }
 
-export async function createCommit(projectPath, paths, message, { signal = null } = {}) {
+export async function createInitialCommit(projectPath, message = 'Initial commit', { paths = null, allowHooks = false, signal = null } = {}) {
+  const prepared = await prepareInitialCommit(projectPath, { signal });
+  if (!prepared.ok) return prepared;
+  const requestedPaths = paths === null ? prepared.approvedPaths : paths;
+  const candidatePaths = new Set(prepared.paths);
+  const approvedPaths = [...new Set(requestedPaths)]
+    .filter(Boolean)
+    .filter((item) => candidatePaths.has(normalizeGitPath(item)))
+    .filter((item) => !isProtectedProjectPath(item));
+  if (!approvedPaths.length) {
+    return {
+      ok: false,
+      reason: prepared.sensitive.length
+        ? 'Every available file requires explicit sensitive-file review before the first commit.'
+        : 'There are no approved files available for the first commit.',
+      sensitive: prepared.sensitive,
+    };
+  }
+  let add = { ok: true };
+  for (const chunk of chunks(approvedPaths, 100)) {
+    add = await runGit(projectPath, ['add', '--all', '--', ...chunk], { allowFailure: true, signal });
+    if (!add.ok) break;
+  }
+  if (!add.ok) {
+    await unstagePaths(projectPath, approvedPaths, { signal });
+    return { ok: false, reason: add.stderr.trim() || add.stdout.trim() || 'git add failed' };
+  }
+  const staged = await runGit(projectPath, ['diff', '--cached', '--name-only', '-z'], { allowFailure: true, signal });
+  const stagedPaths = splitNullPaths(staged.stdout);
+  if (!staged.ok || !stagedPaths.length) {
+    await unstagePaths(projectPath, approvedPaths, { signal });
+    return { ok: false, reason: staged.stderr.trim() || 'There are no files available for the first commit.' };
+  }
+  const commit = await runGit(projectPath, ['commit', '-m', message], { allowFailure: true, allowHooks, signal });
+  if (!commit.ok) {
+    await unstagePaths(projectPath, approvedPaths, { signal });
+    return { ok: false, reason: commit.stderr.trim() || commit.stdout.trim() || 'git commit failed' };
+  }
+  const revision = await runGit(projectPath, ['rev-parse', '--short', 'HEAD'], { signal });
+  return {
+    ok: true,
+    revision: revision.stdout.trim(),
+    paths: stagedPaths,
+    omittedPaths: prepared.paths.filter((item) => !stagedPaths.includes(item)),
+    sensitive: prepared.sensitive,
+    output: commit.stdout.trim(),
+  };
+}
+
+export async function createCommit(projectPath, paths, message, { signal = null, allowHooks = false } = {}) {
   const status = await getGitStatus(projectPath);
   if (status.staged.length) {
     return { ok: false, reason: 'The Git index already contains staged changes.' };
@@ -80,7 +132,7 @@ export async function createCommit(projectPath, paths, message, { signal = null 
       return { ok: false, reason: add.stderr || add.stdout || 'git add failed' };
     }
   }
-  const commit = await runGit(projectPath, ['commit', '-m', message], { allowFailure: true, signal });
+  const commit = await runGit(projectPath, ['commit', '-m', message], { allowFailure: true, signal, allowHooks });
   if (!commit.ok) {
     await unstagePaths(projectPath, uniquePaths, { signal });
     return { ok: false, reason: commit.stderr || commit.stdout || 'git commit failed' };
@@ -125,8 +177,10 @@ export async function currentRevision(projectPath) {
   return result.ok ? result.stdout.trim() : null;
 }
 
-export async function runGit(cwd, args, { allowFailure = false, input = null, signal = null } = {}) {
-  const result = await runProcess('git', args, { cwd, input, timeoutMs: 120_000, signal });
+export async function runGit(cwd, args, { allowFailure = false, input = null, signal = null, settings = null, allowHooks = true } = {}) {
+  const git = await resolveInternalBinary('git', { settings });
+  const effectiveArgs = await gitArgumentsWithHookPolicy(args, { allowHooks });
+  const result = await runProcess(git, effectiveArgs, { cwd, input, timeoutMs: 120_000, signal });
   if (!result.ok && !allowFailure) {
     const detail = result.stderr.trim() || result.stdout.trim() || `git ${args.join(' ')} failed`;
     throw new Error(detail);
@@ -246,14 +300,14 @@ function rewriteContext(item) {
   };
 }
 
-export async function amendZipflowCommit(projectPath, { runId, paths, message, candidate, signal = null }) {
+export async function amendZipflowCommit(projectPath, { runId, paths, message, candidate, signal = null, allowHooks = false }) {
   const eligibility = await validateRewriteState(projectPath, candidate, { signal });
   if (!eligibility.ok) return eligibility;
   const backupRef = await createRewriteBackupRef(projectPath, runId, { signal });
   try {
     const staged = await stageCommitPaths(projectPath, paths, { signal });
     if (!staged.ok) return { ...staged, backupRef };
-    const commit = await runGit(projectPath, ['commit', '--amend', '-m', message], { allowFailure: true, signal });
+    const commit = await runGit(projectPath, ['commit', '--amend', '-m', message], { allowFailure: true, signal, allowHooks });
     if (!commit.ok) {
       await restoreRewriteRef(projectPath, backupRef);
       return { ok: false, reason: commit.stderr.trim() || commit.stdout.trim() || 'git commit --amend failed', backupRef };
@@ -266,7 +320,7 @@ export async function amendZipflowCommit(projectPath, { runId, paths, message, c
   }
 }
 
-export async function squashZipflowCommits(projectPath, { runId, paths, message, candidate, signal = null }) {
+export async function squashZipflowCommits(projectPath, { runId, paths, message, candidate, signal = null, allowHooks = false }) {
   if (!Number.isInteger(candidate?.count) || candidate.count < 2 || candidate.count > 3) {
     return { ok: false, reason: 'The requested squash is outside the supported 2–3 commit range.' };
   }
@@ -281,7 +335,7 @@ export async function squashZipflowCommits(projectPath, { runId, paths, message,
       await restoreRewriteRef(projectPath, backupRef);
       return { ...staged, backupRef };
     }
-    const commit = await runGit(projectPath, ['commit', '-m', message], { allowFailure: true, signal });
+    const commit = await runGit(projectPath, ['commit', '-m', message], { allowFailure: true, signal, allowHooks });
     if (!commit.ok) {
       await restoreRewriteRef(projectPath, backupRef);
       return { ok: false, reason: commit.stderr.trim() || commit.stdout.trim() || 'git squash commit failed', backupRef };

@@ -36,7 +36,8 @@ export function displayPath(target) {
   return target;
 }
 
-export async function completePath(value, { cwd = process.cwd(), directoriesOnly = false, extension = null } = {}) {
+export async function completePath(value, { cwd = process.cwd(), directoriesOnly = false, extension = null, signal = null } = {}) {
+  throwIfPathSuggestionCancelled(signal);
   const raw = String(value ?? '');
   const empty = raw.trim() === '';
   const parsed = parseEnteredPath(empty ? cwd : raw, cwd);
@@ -45,6 +46,7 @@ export async function completePath(value, { cwd = process.cwd(), directoriesOnly
   const prefix = endsWithSeparator ? '' : path.basename(parsed);
   if (!(await exists(directory))) return { value: raw, matches: [] };
   const entries = await readdir(directory, { withFileTypes: true });
+  throwIfPathSuggestionCancelled(signal);
   const matches = entries.filter((entry) => {
     if (!entry.name.startsWith(prefix)) return false;
     if (directoriesOnly && !entry.isDirectory()) return false;
@@ -64,10 +66,12 @@ export async function suggestPathEntries(value, {
   directoriesOnly = false,
   extension = null,
   includeCurrentDirectory = false,
+  signal = null,
 } = {}) {
   const raw = String(value ?? '');
   const parsed = parseEnteredPath(raw.trim() ? raw : cwd, cwd);
   const current = await existingDirectory(parsed).catch(() => null);
+  throwIfPathSuggestionCancelled(signal);
   const endsWithSeparator = !raw.trim() || raw.endsWith('/') || raw.endsWith(path.sep);
   const browseDirectory = Boolean(current) || endsWithSeparator;
   const directory = browseDirectory ? parsed : path.dirname(parsed);
@@ -86,7 +90,9 @@ export async function suggestPathEntries(value, {
     });
   }
   if (!(await exists(directory))) return suggestions;
+  throwIfPathSuggestionCancelled(signal);
   const entries = await readdir(directory, { withFileTypes: true });
+  throwIfPathSuggestionCancelled(signal);
   const matches = entries.filter((entry) => {
     if (!entry.name.toLowerCase().startsWith(prefix.toLowerCase())) return false;
     if (directoriesOnly && !entry.isDirectory()) return false;
@@ -131,4 +137,11 @@ function commonPrefix(values) {
 function collapseHome(target) {
   const home = os.homedir();
   return target.startsWith(home) ? `~${target.slice(home.length)}` : target;
+}
+
+function throwIfPathSuggestionCancelled(signal) {
+  if (!signal?.aborted) return;
+  const error = new Error('Path suggestion request cancelled.');
+  error.code = 'cancelled';
+  throw error;
 }

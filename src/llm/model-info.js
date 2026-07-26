@@ -1,20 +1,25 @@
 import { providerDefinition } from './client.js';
+import { requestLlmJson } from './json-request.js';
 
 const FALLBACK_CONTEXT = 16_384;
 
 export async function getLocalModelProfile(provider, model, {
   fetchImpl = fetch,
   timeoutMs = 10_000,
+  connectionTimeoutMs = null,
+  totalDeadlineMs = null,
+  idleTimeoutMs = null,
+  streamLimits = null,
   apiToken = '',
   signal = null,
 } = {}) {
   if (!model) return fallbackProfile(provider, model);
   try {
     if (provider === 'lmstudio') return await lmStudioProfile(model, {
-      fetchImpl, timeoutMs, apiToken, signal,
+      fetchImpl, timeoutMs, connectionTimeoutMs, totalDeadlineMs, idleTimeoutMs, streamLimits, apiToken, signal,
     });
     if (provider === 'ollama') return await ollamaProfile(model, {
-      fetchImpl, timeoutMs, apiToken, signal,
+      fetchImpl, timeoutMs, connectionTimeoutMs, totalDeadlineMs, idleTimeoutMs, streamLimits, apiToken, signal,
     });
   } catch (error) {
     if (error?.code === 'cancelled' || error?.code === 'invalid_api_key' || [401, 403].includes(error?.status) || signal?.aborted) throw error;
@@ -26,13 +31,17 @@ export async function getLocalModelProfile(provider, model, {
 export async function listLmStudioModelRecords({
   fetchImpl = fetch,
   timeoutMs = 10_000,
+  connectionTimeoutMs = null,
+  totalDeadlineMs = null,
+  idleTimeoutMs = null,
+  streamLimits = null,
   apiToken = '',
   signal = null,
 } = {}) {
   const definition = providerDefinition('lmstudio');
   const payload = await requestJson(fetchImpl, `${definition.nativeBaseUrl}/models`, {
     method: 'GET', headers: authHeaders(apiToken),
-  }, timeoutMs, signal);
+  }, { provider: 'lmstudio', timeoutMs, connectionTimeoutMs, totalDeadlineMs, idleTimeoutMs, streamLimits, signal });
   return (payload.models ?? []).filter((item) => item.type === 'llm').map((item) => {
     const loadedInstances = (item.loaded_instances ?? []).map((entry) => ({
       id: entry.id,
@@ -73,15 +82,18 @@ async function lmStudioProfile(model, options) {
   };
 }
 
-async function ollamaProfile(model, { fetchImpl, timeoutMs, apiToken, signal }) {
+async function ollamaProfile(model, {
+  fetchImpl, timeoutMs, connectionTimeoutMs, totalDeadlineMs, idleTimeoutMs, streamLimits, apiToken, signal,
+}) {
   const definition = providerDefinition('ollama');
   const [running, details] = await Promise.all([
     requestJson(fetchImpl, `${definition.nativeBaseUrl}/ps`, {
       method: 'GET', headers: authHeaders(apiToken),
-    }, timeoutMs, signal).catch(() => ({ models: [] })),
+    }, { provider: 'ollama', timeoutMs, connectionTimeoutMs, totalDeadlineMs, idleTimeoutMs, streamLimits, signal })
+      .catch(() => ({ models: [] })),
     requestJson(fetchImpl, `${definition.nativeBaseUrl}/show`, {
       method: 'POST', headers: jsonHeaders(apiToken), body: JSON.stringify({ model, verbose: false }),
-    }, timeoutMs, signal),
+    }, { provider: 'ollama', timeoutMs, connectionTimeoutMs, totalDeadlineMs, idleTimeoutMs, streamLimits, signal }),
   ]);
   const active = (running.models ?? []).find((item) => item.model === model || item.name === model);
   const configured = parseNumCtx(details.parameters);
@@ -136,32 +148,20 @@ function fallbackProfile(provider, model = '') {
   };
 }
 
-async function requestJson(fetchImpl, url, options, timeoutMs, signal) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  const abort = () => controller.abort();
-  signal?.addEventListener('abort', abort, { once: true });
-  try {
-    if (signal?.aborted) throw Object.assign(new Error('Local LLM generation was cancelled.'), { code: 'cancelled' });
-    const response = await fetchImpl(url, { ...options, signal: controller.signal });
-    if (!response.ok) throw await metadataResponseError(response);
-    return response.json();
-  } finally {
-    clearTimeout(timer);
-    signal?.removeEventListener('abort', abort);
-  }
+async function requestJson(fetchImpl, url, options, requestOptions) {
+  const response = await requestLlmJson(fetchImpl, url, options, requestOptions);
+  if (!response.ok) throw metadataResponseError(response);
+  return response.payload;
 }
 
-
-async function metadataResponseError(response) {
-  let payload = null;
-  try { payload = await response.json(); } catch { /* response is not JSON */ }
-  const details = payload?.error ?? payload ?? {};
+function metadataResponseError(response) {
+  const details = response.payload?.error ?? response.payload ?? {};
   const error = new Error(details.message || `Local LLM metadata request failed with HTTP ${response.status}.`);
   error.status = response.status;
   error.code = details.code || (response.status === 401 || response.status === 403 ? 'invalid_api_key' : 'metadata_request_failed');
   return error;
 }
+
 
 function authHeaders(apiToken) {
   const headers = {};

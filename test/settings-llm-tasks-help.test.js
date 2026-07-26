@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createOverlayManager, renderToString } from 'terlio.js';
 import { tempDir } from '../test-support/helpers.js';
-import { DEFAULT_SETTINGS, loadSettings, normalizeSettings, saveSettings } from '../src/settings/store.js';
+import { DEFAULT_SETTINGS, loadSettings, normalizeSettings, saveSettings, updateSettings } from '../src/settings/store.js';
 import { createInitialState } from '../src/app/state.js';
 import { ZipflowController } from '../src/app/controller.js';
 import {
@@ -54,7 +54,8 @@ test('saveSettings preserves existing LLM task selection when only an unrelated 
     llmUseArchiveReview: true, llmUseSummary: false,
     llmUseFailedChecks: true, llmUseCommitMessage: false, llmUseDirtyTreeCommitMessage: true,
   });
-  await saveSettings({ theme: 'matrix' });
+  const baseSettings = await loadSettings();
+  await updateSettings({ theme: 'matrix' }, { baseSettings });
 
   const settings = await loadSettings();
   assert.equal(settings.theme, 'matrix');

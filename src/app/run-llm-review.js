@@ -12,11 +12,13 @@ import { showArchiveSafetyReview, showPlanReview } from './run-review.js';
 
 export function startLlmReview(controller, input) {
   const { state } = controller;
+  const operation = controller.beginOperation({ kind: 'llm-review', label: 'Generating local LLM review' });
   state.llmReviewInput = input;
   state.llmReviewPending = true;
   state.llmReviewCancelling = false;
+  state.llmAbortController = { abort: () => operation.abort() };
   const generation = ++state.llmReviewGeneration;
-  state.llmReviewPromise = generateLlmSummary(controller, input)
+  state.llmReviewPromise = generateLlmSummary(controller, input, operation)
     .then((llm) => finishLlmReview(controller, llm, generation))
     .catch((error) => finishLlmReview(controller, {
       error: error.message,
@@ -91,7 +93,7 @@ function refreshReviewAfterLlm(controller) {
   if (state.screen === 'archive-safety') return showArchiveSafetyReview(controller);
 }
 
-async function generateLlmSummary(controller, { plan, patch, extracted }) {
+async function generateLlmSummary(controller, { plan, patch, extracted }, operation) {
   const { state } = controller;
   const settings = activeRunSettings(state);
   const tasks = llmTasks(settings);
@@ -107,10 +109,9 @@ async function generateLlmSummary(controller, { plan, patch, extracted }) {
     'Adaptive delivery uses a full patch, representative sample, or capped batches according to the model context. Ctrl+C cancels this LLM operation.',
   ], 'process');
   const progress = beginLlmProgress(controller, { expectedMs: llmEstimate });
-  const operation = controller.beginOperation({ kind: 'llm-review', label: 'Generating local LLM review' });
-  state.llmAbortController = { abort: () => operation.abort() };
   controller.invalidate();
   const startedAt = Date.now();
+  let operationOutcome = 'completed';
   try {
     progress.onEvent({ type: 'phase', phase: 'model-info', label: 'Reading the selected model context limit' });
     const session = await resolveLocalLlmSession(settings, { signal: operation.signal });
@@ -183,6 +184,7 @@ async function generateLlmSummary(controller, { plan, patch, extracted }) {
     };
   } catch (error) {
     const cancelled = error.code === 'cancelled';
+    operationOutcome = cancelled ? 'cancelled' : 'failed';
     const diagnosticsPath = await saveLlmDiagnostics(state.run.id, {
       status: cancelled ? 'cancelled' : 'failed',
       provider: settings.llmProvider,
@@ -217,7 +219,7 @@ async function generateLlmSummary(controller, { plan, patch, extracted }) {
   } finally {
     state.llmAbortController = null;
     progress.stop();
-    operation.finish();
+    operation.finish(operationOutcome);
   }
 }
 

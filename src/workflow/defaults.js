@@ -1,6 +1,6 @@
 import { defaultAutonomy, normalizeAutonomy } from '../autonomy/policies.js';
 
-export const WORKFLOW_VERSION = 8;
+export const WORKFLOW_VERSION = 9;
 
 export const DEFAULT_EXCLUDES = [
   '.git/**',
@@ -71,6 +71,7 @@ export function createRecommendedWorkflow(project) {
       resultCommit: 'ask',
       messageStrategy: 'metadata',
       fixedMessage: 'zipflow: apply {runId}',
+      hooks: 'disabled',
     },
     deploy: {
       policy: 'disabled',
@@ -109,8 +110,10 @@ export function normalizeWorkflow(workflow) {
     resultCommit: 'ask',
     messageStrategy: 'metadata',
     fixedMessage: 'zipflow: apply {runId}',
+    hooks: 'disabled',
     ...(normalized.git ?? {}),
   };
+  normalized.git.hooks = normalized.git.hooks === 'allow' ? 'allow' : 'disabled';
   normalized.deploy = {
     policy: 'disabled',
     commandText: '',

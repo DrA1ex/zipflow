@@ -3,6 +3,8 @@ import { readdir, rm, stat } from 'node:fs/promises';
 import { exists, readJson } from '../utils/fs.js';
 import { getZipflowHome } from '../workflow/store.js';
 import { throwIfCancelled } from '../operations/manager.js';
+import { withStorageLease } from '../storage/lease.js';
+import { listActiveRunIds } from '../storage/run-leases.js';
 
 export function backupDirectory() {
   return path.join(getZipflowHome(), 'backups');
@@ -37,8 +39,13 @@ export async function inspectBackupStorage({ signal = null } = {}) {
   };
 }
 
-export async function clearBackupStorage({ excludeRunId = null, signal = null, onProgress = null } = {}) {
+export async function clearBackupStorage(options = {}) {
+  return withStorageLease('backup-storage', () => clearBackupStorageUnlocked(options));
+}
+
+async function clearBackupStorageUnlocked({ excludeRunId = null, signal = null, onProgress = null } = {}) {
   const storage = await inspectBackupStorage({ signal });
+  const activeRunIds = await listActiveRunIds();
   const removed = [];
   const failed = [];
   let cancelled = false;
@@ -47,7 +54,7 @@ export async function clearBackupStorage({ excludeRunId = null, signal = null, o
       cancelled = true;
       break;
     }
-    if (excludeRunId && record.runId === excludeRunId) continue;
+    if ((excludeRunId && record.runId === excludeRunId) || activeRunIds.has(record.runId)) continue;
     try {
       await rm(record.path, { recursive: true, force: true });
       removed.push(record);
@@ -62,10 +69,16 @@ export async function clearBackupStorage({ excludeRunId = null, signal = null, o
   };
 }
 
-export async function pruneBackupStorage(settings, { activeRunId = null, now = new Date() } = {}) {
+export async function pruneBackupStorage(settings, options = {}) {
+  return withStorageLease('backup-storage', () => pruneBackupStorageUnlocked(settings, options));
+}
+
+async function pruneBackupStorageUnlocked(settings, { activeRunId = null, now = new Date() } = {}) {
   if ((settings.backupRetentionPolicy ?? 'limits') === 'all') return { removed: [], failed: [], totalBytes: 0 };
   const storage = await inspectBackupStorage();
-  const removable = storage.records.filter((record) => record.runId !== activeRunId);
+  const activeRunIds = await listActiveRunIds();
+  if (activeRunId) activeRunIds.add(activeRunId);
+  const removable = storage.records.filter((record) => !activeRunIds.has(record.runId));
   const remove = new Map();
   const retentionDays = Number(settings.backupRetentionDays ?? 30);
   const deadline = retentionDays > 0 ? now.getTime() - retentionDays * 86_400_000 : null;

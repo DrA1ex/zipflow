@@ -118,7 +118,7 @@ test('settings keep categories on the left and the selected category page on the
   const output = renderToString(renderZipflow({ state, width: 110, height: 30 }), { width: 110, height: 30 });
 
   assert.equal(view.focus, 'categories');
-  assert.deepEqual(view.definitions.map((item) => item.id), ['language', 'theme', 'updates', 'checkOutput', 'localLlm', 'sourceArchive', 'backups', 'managedHistory']);
+  assert.deepEqual(view.definitions.map((item) => item.id), ['language', 'theme', 'updates', 'checkOutput', 'binaries', 'commandEnvironment', 'localLlm', 'sourceArchive', 'backups', 'managedHistory']);
   assert.equal(view.direct, true);
   assert.equal(view.activeParameter.id, 'interfaceLanguage');
   assert.match(output, /CATEGORIES/);

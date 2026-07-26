@@ -15,6 +15,7 @@ import { DEFAULT_SETTINGS, normalizeSettings } from '../src/settings/store.js';
 import { beginHistoricalModelReplay, startHistoricalModelReplay, updateReplayWorkspace } from '../src/app/settings-model-replay.js';
 import { showRunDetails } from '../src/app/run-rollback.js';
 import { exists, readJson, writeJsonAtomic } from '../src/utils/fs.js';
+import { hashFile } from '../src/utils/hash.js';
 import { tempDir, writeFiles } from '../test-support/helpers.js';
 
 function jsonResponse(value, status = 200) {
@@ -190,7 +191,7 @@ test('backup retention removes old backups, protects the active run, and support
   const projectRoot = await tempDir('zipflow-backup-project-');
   const currentPath = path.join(projectRoot, 'file.txt');
   await writeFile(currentPath, 'current');
-  const item = { path: 'file.txt', currentPath, kind: 'updated', beforeHash: 'before', afterHash: 'after' };
+  const item = { path: 'file.txt', currentPath, kind: 'updated', beforeHash: await hashFile(currentPath), afterHash: 'after' };
   await createBackup({ runId: 'old-run', projectPath: projectRoot, items: [item] });
   await createBackup({ runId: 'recent-run', projectPath: projectRoot, items: [item] });
   await createBackup({ runId: 'active-run', projectPath: projectRoot, items: [item] });

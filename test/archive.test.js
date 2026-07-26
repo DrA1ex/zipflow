@@ -50,15 +50,21 @@ function createZip(target, files) {
   });
 }
 
-test('rejects case-colliding entries before they can overwrite each other', async () => {
+test('case-collision handling follows the destination platform', async () => {
   const root = await tempDir();
   const archive = path.join(root, 'collision.zip');
   await createZip(archive, { 'src/File.js': 'one', 'src/file.js': 'two' });
 
-  await assert.rejects(
-    extractArchive(archive, path.join(root, 'out-collision')),
-    /duplicate or case-colliding paths/,
-  );
+  if (process.platform === 'darwin' || process.platform === 'win32') {
+    await assert.rejects(
+      extractArchive(archive, path.join(root, 'out-collision')),
+      /duplicate or case-colliding paths/,
+    );
+    return;
+  }
+
+  const extracted = await extractArchive(archive, path.join(root, 'out-collision'));
+  assert.deepEqual(extracted.entries.map((item) => item.relativePath), ['src/File.js', 'src/file.js']);
 });
 
 test('extracts ordinary dotfiles instead of treating them as hidden metadata', async () => {

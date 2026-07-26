@@ -8,6 +8,9 @@ export class LocalLlmError extends Error {
     this.retryableWithSmallerPrompt = Boolean(details.retryableWithSmallerPrompt);
     this.responseBody = details.responseBody ?? null;
     this.diagnostics = details.diagnostics ?? null;
+    this.limitBytes = details.limitBytes ?? null;
+    this.actualBytes = details.actualBytes ?? null;
+    this.outputKind = details.outputKind ?? null;
   }
 }
 

@@ -1,9 +1,13 @@
+import { operationCapabilities, operationState } from './state.js';
+
 export class OperationManager {
   constructor({ onChange = () => {}, forceStop = async () => {} } = {}) {
     this.onChange = onChange;
     this.forceStop = forceStop;
     this.current = null;
     this.nextId = 1;
+    this.idleWaiters = new Set();
+    this.safeWaiters = new Set();
   }
 
   begin({ kind, label, cancellable = true, critical = false, onCancel = null, onForceCancel = null } = {}) {
@@ -11,6 +15,8 @@ export class OperationManager {
       throw new OperationBusyError(kind || 'operation', this.current.kind);
     }
     const abortController = new AbortController();
+    let resolveCompletion;
+    const completion = new Promise((resolve) => { resolveCompletion = resolve; });
     const operation = {
       id: this.nextId++,
       kind: kind || 'operation',
@@ -25,16 +31,31 @@ export class OperationManager {
       abortController,
       onCancel,
       onForceCancel,
+      completion,
+      resolveCompletion,
     };
     this.current = operation;
     this.emit();
     let finished = false;
+    const finish = (outcome = null) => {
+      if (finished) return;
+      finished = true;
+      operation.outcome = normalizeOutcome(outcome, operation);
+      operation.critical = false;
+      if (this.current?.id === operation.id) {
+        this.current = null;
+        operation.resolveCompletion(this.publicSnapshot(operation));
+        this.emit();
+      } else operation.resolveCompletion(this.publicSnapshot(operation));
+    };
     return {
       id: operation.id,
       signal: abortController.signal,
+      completion,
       update: (changes = {}) => {
         if (this.current?.id !== operation.id) return;
-        Object.assign(operation, changes);
+        const { state: _ignoredState, outcome: _ignoredOutcome, ...safeChanges } = changes;
+        Object.assign(operation, safeChanges);
         if (!operation.critical && operation.cancelRequested && !operation.abortController.signal.aborted) {
           operation.abortController.abort('cancelled');
         }
@@ -61,23 +82,10 @@ export class OperationManager {
         operation.abortController.abort('cancelled');
         this.emit();
       },
-      finish: () => {
-        if (finished) return;
-        finished = true;
-        if (this.current?.id === operation.id) {
-          this.current = null;
-          this.emit();
-        }
-      },
+      finish,
       handoff: (callback) => {
         if (typeof callback !== 'function') throw new TypeError('Operation handoff requires a callback.');
-        if (!finished) {
-          finished = true;
-          if (this.current?.id === operation.id) {
-            this.current = null;
-            this.emit();
-          }
-        }
+        finish('completed');
         return callback();
       },
     };
@@ -87,10 +95,38 @@ export class OperationManager {
     if (typeof callback !== 'function') throw new TypeError('Operation run requires a callback.');
     const operation = this.begin(options);
     try {
-      return await callback(operation);
-    } finally {
-      operation.finish();
+      const result = await callback(operation);
+      operation.finish('completed');
+      return result;
+    } catch (error) {
+      operation.finish(error?.code === 'cancelled' ? 'cancelled' : 'failed');
+      throw error;
     }
+  }
+
+  async requestCancellation() {
+    const operation = this.current;
+    if (!operation) return { handled: false, idle: true };
+    if (!operation.cancellable) {
+      operation.cancelRequested = true;
+      operation.cancelling = true;
+      this.emit();
+      await operation.onCancel?.().catch(() => {});
+      return { handled: true, waitingForCritical: true, operation: this.snapshot() };
+    }
+    if (!operation.cancelRequested) {
+      operation.cancelRequested = true;
+      operation.cancelling = true;
+      if (!operation.critical && !operation.abortController.signal.aborted) operation.abortController.abort('cancelled');
+      this.emit();
+      await operation.onCancel?.().catch(() => {});
+    }
+    return {
+      handled: true,
+      waitingForCritical: Boolean(operation.critical),
+      cancelling: !operation.critical,
+      operation: this.snapshot(),
+    };
   }
 
   async interrupt() {
@@ -119,14 +155,58 @@ export class OperationManager {
     return { handled: true, cancelling: true, operation: this.snapshot() };
   }
 
+  waitForSafeBoundary({ timeoutMs = 0 } = {}) {
+    if (!this.current || !this.current.critical) return Promise.resolve(true);
+    return this.waitFor(this.safeWaiters, () => !this.current || !this.current.critical, timeoutMs);
+  }
+
+  waitForIdle({ timeoutMs = 0 } = {}) {
+    if (!this.current) return Promise.resolve(true);
+    return this.waitFor(this.idleWaiters, () => !this.current, timeoutMs);
+  }
+
+  waitFor(waiters, predicate, timeoutMs) {
+    return new Promise((resolve) => {
+      let timer = null;
+      const waiter = () => {
+        if (!predicate()) return false;
+        if (timer) clearTimeout(timer);
+        waiters.delete(waiter);
+        resolve(true);
+        return true;
+      };
+      waiters.add(waiter);
+      if (timeoutMs > 0) {
+        timer = setTimeout(() => {
+          waiters.delete(waiter);
+          resolve(false);
+        }, timeoutMs);
+      }
+      waiter();
+    });
+  }
+
   snapshot() {
-    if (!this.current) return null;
-    const { abortController, onCancel, onForceCancel, ...publicState } = this.current;
-    return { ...publicState, elapsedMs: Date.now() - publicState.startedAt };
+    return this.current ? this.publicSnapshot(this.current) : null;
+  }
+
+  publicSnapshot(operation) {
+    const {
+      abortController, onCancel, onForceCancel, completion, resolveCompletion, ...publicState
+    } = operation;
+    const state = operationState(publicState);
+    return {
+      ...publicState,
+      state,
+      capabilities: operationCapabilities({ ...publicState, state }),
+      elapsedMs: Date.now() - publicState.startedAt,
+    };
   }
 
   emit() {
     this.onChange(this.snapshot());
+    for (const waiter of [...this.safeWaiters]) waiter();
+    for (const waiter of [...this.idleWaiters]) waiter();
   }
 }
 
@@ -152,4 +232,9 @@ export class OperationBusyError extends Error {
 
 export function isOperationBusyError(error) {
   return error?.code === 'operation-busy' || error instanceof OperationBusyError;
+}
+
+function normalizeOutcome(value, operation) {
+  if (['completed', 'failed', 'cancelled'].includes(value)) return value;
+  return operation.cancelRequested || operation.abortController.signal.aborted ? 'cancelled' : 'completed';
 }
