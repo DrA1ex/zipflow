@@ -472,7 +472,7 @@ test('raw response radio choices preserve boolean values and can be selected bot
 
 test('OpenAI-compatible settings preserve base URL, API mode, and reasoning effort', () => {
   const settings = normalizeSettings({
-    version: 25,
+    version: 26,
     llmProvider: 'openai',
     llmModel: 'gpt-5-codex',
     llmBaseUrl: 'http://127.0.0.1:7777/v1/',
@@ -485,7 +485,7 @@ test('OpenAI-compatible settings preserve base URL, API mode, and reasoning effo
   assert.equal(settings.llmReasoningEffort, 'high');
 
   const repaired = normalizeSettings({
-    version: 25,
+    version: 26,
     llmProvider: 'openai',
     llmOpenAiApiMode: 'unsupported',
     llmReasoningEffort: 'extreme',
@@ -526,3 +526,26 @@ test('OpenAI-compatible base URL validation rejects embedded credentials', async
   await assert.rejects(validateSettingValue(field, 'http://user:secret@localhost:8080/v1'), /API token field/);
   await assert.rejects(validateSettingValue(field, 'file:///tmp/api'), /HTTP or HTTPS/);
 });
+
+
+test('Codex app-server settings expose model and effort controls while using CLI authentication', async () => withSettingsHome(async () => {
+  const { state, controller } = await settingsController({
+    llmProvider: 'codex',
+    llmModel: 'gpt-test',
+    llmReasoningEffort: 'high',
+    binaryPaths: { codex: '/usr/local/bin/codex' },
+  });
+  let view = await selectCategory(controller, 'localLlm');
+  const byId = Object.fromEntries(view.parameters.map((item) => [item.id, item]));
+  assert.equal(byId.llmBaseUrl.disabled, true);
+  assert.equal(byId.llmOpenAiApiMode.disabled, true);
+  assert.equal(byId.llmReasoningEffort.disabled, false);
+  assert.equal(byId.llmReasoningEffort.value, 'High');
+  assert.equal(byId.llmModel.value, 'gpt-test');
+  assert.equal(byId.llmApiToken.disabled, true);
+  assert.match(byId.llmApiToken.description, /Codex CLI login/);
+
+  view = await openParameter(controller, 'llmProvider');
+  assert.ok(view.choices.some((item) => item.id === 'llmProvider:codex'));
+  assert.equal(state.settings.binaryPaths.codex, '/usr/local/bin/codex');
+}));

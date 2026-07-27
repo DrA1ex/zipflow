@@ -14,9 +14,9 @@ import {
   deleteLlmApiToken, readLlmApiToken, SecureCredentialStoreError, writeLlmApiToken,
 } from '../security/credential-store.js';
 
-export const SETTINGS_VERSION = 25;
+export const SETTINGS_VERSION = 26;
 export const THEME_NAMES = Object.keys(themes);
-export const LLM_PROVIDERS = ['disabled', 'ollama', 'lmstudio', 'openai'];
+export const LLM_PROVIDERS = ['disabled', 'ollama', 'lmstudio', 'openai', 'codex'];
 export const OPENAI_API_MODES = ['auto', 'responses', 'chat-completions'];
 export const LLM_REASONING_EFFORTS = ['auto', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh'];
 export const LLM_LANGUAGES = ['English', 'Russian', 'German', 'French', 'Spanish', 'Chinese', 'Japanese'];
@@ -27,7 +27,7 @@ export const LLM_FAILURE_ANALYSIS_MODES = ['same-context', 'new-context'];
 export const BACKUP_RETENTION_POLICIES = ['all', 'limits'];
 export const MANAGED_HISTORY_POLICIES = ['record', 'disabled'];
 export const PROJECT_COMMAND_ENVIRONMENT_POLICIES = ['sanitized', 'inherit'];
-const INTERNAL_BINARY_IDS = new Set(['git', 'npm', 'node', 'opener', 'python', 'gofmt']);
+const INTERNAL_BINARY_IDS = new Set(['git', 'npm', 'node', 'opener', 'python', 'gofmt', 'codex']);
 
 export const DEFAULT_SETTINGS = Object.freeze({
   version: SETTINGS_VERSION,

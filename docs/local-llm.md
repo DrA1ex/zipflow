@@ -1,14 +1,15 @@
 # Local LLM integration
 
-Zipflow supports three provider modes:
+Zipflow supports four provider modes:
 
 ```text
 Ollama:            http://127.0.0.1:11434
 LM Studio:         http://127.0.0.1:1234
 OpenAI-compatible: configurable base URL, normally ending in /v1
+Codex app-server:  local Codex CLI over stdio RPC
 ```
 
-The provider, optional bearer token, selected model, and output languages are configured in global settings. The OpenAI-compatible provider also exposes an API mode and reasoning-effort setting. Bearer tokens are stored in macOS Keychain or the Linux system keyring rather than `~/.zipflow` JSON files. On Linux, persistence requires `secret-tool` and an active Secret Service provider; when secure storage is unavailable, Zipflow refuses to save a new token instead of falling back to plaintext.
+The provider, optional bearer token, selected model, and output languages are configured in global settings. OpenAI-compatible and Codex app-server providers expose a reasoning-effort setting; only OpenAI-compatible uses the configurable HTTP API mode and bearer token. Bearer tokens are stored in macOS Keychain or the Linux system keyring rather than `~/.zipflow` JSON files. On Linux, persistence requires `secret-tool` and an active Secret Service provider; when secure storage is unavailable, Zipflow refuses to save a new token instead of falling back to plaintext.
 
 ## Choose the LLM tasks
 
@@ -86,13 +87,13 @@ Before generation, Zipflow discovers model context information where possible an
 
 Large changes are shortened structurally rather than cut at an arbitrary byte offset. The changed-file manifest is retained and diff hunks are distributed across files.
 
-Context-overflow and out-of-memory responses trigger a smaller-patch retry and are reported explicitly.
+Context-overflow and out-of-memory responses trigger a smaller-patch retry and are reported explicitly. Stream EOF is not treated as success: a provider must report its terminal completion state, otherwise Zipflow preserves the partial output and returns an `incomplete_generation` or `context_exceeded` error.
 
 ## Streaming resource limits
 
 Generation has independent deadlines for opening the connection, completing the entire request, and receiving the next stream chunk. A server that opens an SSE or NDJSON response and then stalls is cancelled rather than waiting indefinitely.
 
-Zipflow also enforces byte-based limits for one SSE event or NDJSON record, the unparsed line buffer, model reasoning, answer text, and retained raw diagnostics. Exceeding a limit produces a typed, readable Local LLM error. Live Activity and replay workspaces consume response deltas and retain bounded preview windows instead of copying the complete accumulated response for every chunk.
+Zipflow also enforces byte-based limits for one SSE event or NDJSON record, the unparsed line buffer, model reasoning, answer text, and retained raw diagnostics. Exceeding a limit produces a typed, readable Local LLM error. Live Activity and replay workspaces consume response deltas and retain bounded preview windows instead of copying the complete accumulated response for every chunk. Historical replay uses a cached Terlio virtualized line source, so elapsed-time updates and scrolling do not repeatedly wrap the complete model transcript.
 
 ## LM Studio behavior
 
@@ -117,9 +118,17 @@ Set **Base URL** to the API root, including the version prefix expected by the s
 
 Model discovery uses `GET /models`. The selected model ID is sent unchanged, so aliases and server-specific model names remain usable.
 
+## Codex app-server behavior
+
+Choose **Codex app-server** to use the locally installed and already authenticated Codex CLI without exposing an HTTP API token. Zipflow resolves the configured `codex` binary, starts `codex app-server --listen stdio://` without a shell, performs the initialize handshake, and discovers selectable models through `model/list`.
+
+Each generation uses an ephemeral thread rooted in a private temporary directory, `approvalPolicy: never`, and a read-only sandbox. Zipflow submits text through `turn/start`, forwards the selected model and reasoning effort, and passes a JSON Schema when structured output is required. It does not grant Codex access to the active project or ask it to run tools.
+
+A request succeeds only after a matching `turn/completed` notification reports `completed`. Interrupted or failed turns, context-window errors, stream disconnects, idle timeouts, and the total deadline remain failures with partial output retained for replay diagnostics. `Esc` sends `turn/interrupt` with the active thread and turn identifiers.
+
 ## Output parsing and diagnostics
 
-Primary generation uses a readable section protocol containing only the outputs selected in **LLM tasks**. A commit-only request, for example, asks for and validates only `COMMIT MESSAGE`.
+**Test selected model** is deliberately independent from the enabled workflow tasks. Its first request checks a fixed transport marker; its second request validates the autonomous-decision schema. Primary workflow generation still uses a readable section protocol containing only the outputs selected in **LLM tasks**. A commit-only request, for example, asks for and validates only `COMMIT MESSAGE`.
 
 When a model ignores the requested format or spends its output budget on reasoning, Zipflow can perform a hidden compact repair request. If only a useful summary can be recovered, the summary is kept and another commit-message source is used.
 

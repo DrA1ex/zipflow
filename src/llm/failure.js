@@ -37,6 +37,7 @@ export async function explainCheckFailure({ settings, project, run, failedCheck 
     reasoningOffSupported: profile.reasoningOffSupported,
   }, {
     ...options,
+    settings,
     onEvent: (event) => notify({ ...event, stage: 'failure-analysis' }),
   });
   const text = String(completion.content || completion.reasoning || '').trim();

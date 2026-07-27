@@ -8,6 +8,7 @@ import {
   Spinner,
   Text,
   color,
+  createTextLineSource,
   renderNode,
   truncateVisible,
   visibleLength,
@@ -96,7 +97,7 @@ function renderReplayPreview(state, workspace, width, height, theme) {
 function renderReplayProgress(state, workspace, width, height, theme, animationFrame) {
   const innerWidth = Math.max(20, width - 4);
   const bodyHeight = Math.max(4, height - 7);
-  const lines = replayLines(workspace, theme, innerWidth);
+  const lines = replayLineSource(workspace, theme, innerWidth);
   workspace.maxScroll = Math.max(0, lines.length - bodyHeight);
   workspace.scroll = clamp(workspace.scroll ?? 0, 0, workspace.maxScroll);
   if (workspace.follow !== false) {
@@ -184,8 +185,13 @@ function footerWithPosition(hints, workspace, width, theme) {
   return `${color(theme, 'textMuted', left)}${spacing}${color(theme, 'textMuted', position)}`;
 }
 
-function replayLines(workspace, theme, width) {
-  return workspace.blocks.flatMap((block) => blockLines(block, workspace, theme, width));
+function replayLineSource(workspace, theme, width) {
+  const revision = workspace.renderRevision ?? 0;
+  const cached = workspace.replayLineCache;
+  if (cached && cached.revision === revision && cached.width === width && cached.theme === theme) return cached.source;
+  const source = createTextLineSource(workspace.blocks.flatMap((block) => blockLines(block, workspace, theme, width)));
+  workspace.replayLineCache = { revision, width, theme, source };
+  return source;
 }
 
 function blockLines(block, workspace, theme, width) {
@@ -207,14 +213,23 @@ function blockLines(block, workspace, theme, width) {
 }
 
 function blockOutputLines(block, theme, width) {
+  const reasoning = replayOutputPreview(block.reasoning);
+  const content = replayOutputPreview(block.content);
   return [
-    ...(block.reasoning
-      ? [color(theme, 'textMuted', '  Analysis'), ...String(block.reasoning).split('\n').flatMap((line) => wrapColoredLine(line, width, 4, theme, 'textMuted'))]
+    ...(reasoning.text
+      ? [color(theme, 'textMuted', '  Analysis'), ...(reasoning.truncated ? [color(theme, 'warning', '    … earlier analysis hidden from the live viewport; press D for full diagnostics')] : []), ...reasoning.text.split('\n').flatMap((line) => wrapColoredLine(line, width, 4, theme, 'textMuted'))]
       : []),
-    ...(block.content
-      ? [color(theme, 'accent', '  Model response'), ...richReplayLines(block.content, theme, width)]
+    ...(content.text
+      ? [color(theme, 'accent', '  Model response'), ...(content.truncated ? [color(theme, 'warning', '    … earlier response hidden from the live viewport; press D for full diagnostics')] : []), ...richReplayLines(content.text, theme, width)]
       : []),
   ];
+}
+
+function replayOutputPreview(value, maxCharacters = 262_144) {
+  const text = String(value ?? '');
+  if (text.length <= maxCharacters) return { text, truncated: false };
+  const start = text.indexOf('\n', text.length - maxCharacters);
+  return { text: text.slice(start >= 0 ? start + 1 : -maxCharacters), truncated: true };
 }
 
 function richReplayLines(value, theme, width) {

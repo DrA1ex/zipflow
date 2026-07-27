@@ -52,8 +52,8 @@ export function startHistoricalModelReplay(controller, runId) {
     archiveName: path.basename(String(run.archivePath || 'archive update')),
     previewIndex: 0, running: false, status: 'Ready to replay',
     startedAt: null, elapsedMs: 0, blocks: [], scroll: 0, maxScroll: 0,
-    follow: true, unread: 0, unreadBlockIds: new Set(),
-    result: null, error: null, abortController: null,
+    follow: true, unread: 0, unreadBlockIds: new Set(), renderRevision: 0,
+    result: null, error: null, errorCode: null, abortController: null,
   };
   controller.invalidate();
   return true;
@@ -73,7 +73,8 @@ export async function beginHistoricalModelReplay(controller) {
   Object.assign(workspace, {
     mode: 'progress', running: true, status: 'Preparing historical replay',
     startedAt: Date.now(), elapsedMs: 0, blocks: [], scroll: 0, maxScroll: 0,
-    follow: true, unread: 0, unreadBlockIds: new Set(), result: null, error: null, abortController: { abort: () => operation.abort() },
+    follow: true, unread: 0, unreadBlockIds: new Set(), renderRevision: 0,
+    result: null, error: null, errorCode: null, abortController: { abort: () => operation.abort() },
   });
   state.settingsTestAbortController = { abort: () => operation.abort() };
   addBlock(workspace, 'session', 'Session', [
@@ -100,7 +101,7 @@ export async function beginHistoricalModelReplay(controller) {
     });
     workspace.result = result;
     workspace.status = 'Replay completed';
-    markActiveBlocksDone(workspace);
+    markActiveBlocks(workspace, 'done');
     addBlock(workspace, 'parsed-result', 'Parsed result', [], { status: 'done', result });
     noteReplayChange(workspace, 'parsed-result');
     return true;
@@ -108,14 +109,17 @@ export async function beginHistoricalModelReplay(controller) {
     const cancelled = operation.signal.aborted || error.code === 'cancelled' || error.name === 'AbortError';
     workspace.status = cancelled ? 'Replay cancelled' : 'Replay failed';
     workspace.error = cancelled ? null : error.message;
-    markActiveBlocksDone(workspace);
-    addBlock(workspace, cancelled ? 'cancelled' : 'error', cancelled ? 'Cancelled' : 'Error', [
-      cancelled ? 'The historical replay was cancelled. No project files were changed.' : error.message,
-    ], { status: cancelled ? 'pending' : 'error' });
+    workspace.errorCode = cancelled ? null : error.code ?? 'replay_failed';
+    markActiveBlocks(workspace, cancelled ? 'pending' : 'error');
+    addBlock(workspace, cancelled ? 'cancelled' : 'error', cancelled ? 'Cancelled' : 'Error', cancelled
+      ? ['The historical replay was cancelled. No project files were changed.']
+      : replayFailureLines(error), { status: cancelled ? 'pending' : 'error' });
     noteReplayChange(workspace, cancelled ? 'cancelled' : 'error');
     return false;
   } finally {
     clearInterval(timer);
+    if (workspace.invalidateTimer) clearTimeout(workspace.invalidateTimer);
+    workspace.invalidateTimer = null;
     workspace.running = false;
     workspace.elapsedMs = Date.now() - workspace.startedAt;
     state.settingsTestAbortController = null;
@@ -219,7 +223,7 @@ export function updateReplayWorkspace(controller, event) {
   workspace.status = eventLabel(event, workspace.status);
   let changedId = null;
   if (event.type === 'model-profile') {
-    markActiveBlocksDone(workspace);
+    markActiveBlocks(workspace, 'done');
     changedId = 'model-profile';
     addBlock(workspace, changedId, 'Model profile', [
       `Model: ${event.profile?.requestModel || '(unknown)'}`,
@@ -235,7 +239,7 @@ export function updateReplayWorkspace(controller, event) {
       ...(event.coverage ? coverageLines(event.coverage) : []),
     ], { status: 'done' });
   } else if (event.type === 'batch-start') {
-    markActiveBlocksDone(workspace);
+    markActiveBlocks(workspace, 'done');
     changedId = `batch-${event.index}`;
     addBlock(workspace, changedId, `Batch ${event.index} of ${event.total}`, [
       `Files: ${(event.files ?? []).join(', ') || '(not reported)'}`,
@@ -246,7 +250,7 @@ export function updateReplayWorkspace(controller, event) {
     const block = findBlock(workspace, changedId);
     if (block) Object.assign(block, { streaming: false, status: 'done' });
   } else if (event.type === 'phase') {
-    markActiveBlocksDone(workspace);
+    markActiveBlocks(workspace, 'done');
     changedId = `phase-${event.phase}`;
     addBlock(workspace, changedId, event.label || event.phase, [], { ephemeral: true, status: 'active' });
   } else if (event.type === 'request') {
@@ -255,8 +259,8 @@ export function updateReplayWorkspace(controller, event) {
   } else if (event.type === 'chunk' && !event.hiddenOutput) {
     const block = ensureStreamBlock(workspace, event);
     changedId = block.id;
-    appendReplayStream(block, 'reasoning', event.reasoningDelta, event.reasoning);
-    appendReplayStream(block, 'content', event.contentDelta, event.content);
+    appendReplayStream(workspace, block, 'reasoning', event.reasoningDelta, event.reasoning);
+    appendReplayStream(workspace, block, 'content', event.contentDelta, event.content);
     block.streaming = true;
     block.status = 'active';
   } else if (event.type === 'complete') {
@@ -273,11 +277,15 @@ export function updateReplayWorkspace(controller, event) {
     changedId = 'delivery';
     for (const line of coverageLines(event)) addLine(workspace, 'delivery', line);
   }
-  if (changedId) noteReplayChange(workspace, changedId);
-  controller.invalidate();
+  if (changedId) {
+    touchReplay(workspace);
+    noteReplayChange(workspace, changedId);
+  }
+  if (event.type === 'chunk') scheduleReplayInvalidate(controller, workspace);
+  else controller.invalidate();
 }
 
-function appendReplayStream(block, key, delta, complete) {
+function appendReplayStream(workspace, block, key, delta, complete) {
   const bufferKey = `${key}Buffer`;
   if (!block[bufferKey]) block[bufferKey] = new BoundedByteBuffer(2 * 1024 * 1024);
   if (delta) {
@@ -287,6 +295,7 @@ function appendReplayStream(block, key, delta, complete) {
     block[bufferKey] = new BoundedByteBuffer(2 * 1024 * 1024);
     block[bufferKey].append(complete);
   }
+  touchReplay(workspace);
 }
 
 function replayStreamText(block, key) {
@@ -306,6 +315,7 @@ function addBlock(workspace, id, title, lines = [], options = {}) {
   if (existing) {
     if (lines.length) existing.lines = [...new Set([...existing.lines, ...lines])];
     Object.assign(existing, options);
+    touchReplay(workspace);
     return existing;
   }
   const block = { id, title, lines, streaming: false, status: 'pending' };
@@ -325,13 +335,17 @@ function addBlock(workspace, id, title, lines = [], options = {}) {
   });
   Object.assign(block, options);
   workspace.blocks.push(block);
+  touchReplay(workspace);
   return block;
 }
 
 function addLine(workspace, id, line) {
   if (!line) return;
   const block = findBlock(workspace, id) ?? addBlock(workspace, id, id === 'delivery' ? 'Delivery' : 'Request', [], { status: 'active' });
-  if (!block.lines.includes(line)) block.lines.push(line);
+  if (!block.lines.includes(line)) {
+    block.lines.push(line);
+    touchReplay(workspace);
+  }
 }
 
 function findBlock(workspace, id) {
@@ -355,10 +369,39 @@ function currentRequestBlockId(workspace, event) {
   return event.stage === 'repair' ? 'repair' : event.stage === 'synthesis' ? 'synthesis' : 'request';
 }
 
-function markActiveBlocksDone(workspace) {
+function markActiveBlocks(workspace, status = 'done') {
+  let changed = false;
   for (const block of workspace.blocks) {
-    if (block.status === 'active' || block.streaming) Object.assign(block, { status: 'done', streaming: false });
+    if (block.status === 'active' || block.streaming) {
+      Object.assign(block, { status, streaming: false });
+      changed = true;
+    }
   }
+  if (changed) touchReplay(workspace);
+}
+
+function replayFailureLines(error) {
+  const lines = [String(error?.message || 'The model replay failed.')];
+  if (error?.code === 'context_exceeded') {
+    lines.push('The model likely reached its context or output-token limit. Reduce the delivered patch, choose chunked delivery, or use a model with a larger context window.');
+  } else if (error?.code === 'incomplete_generation') {
+    lines.push('The provider closed the response before sending a successful completion event. Check the model server logs and retry.');
+  }
+  lines.push('Partial model output was preserved. Press D to copy replay diagnostics.');
+  return lines;
+}
+
+function scheduleReplayInvalidate(controller, workspace) {
+  if (workspace.invalidateTimer) return;
+  workspace.invalidateTimer = setTimeout(() => {
+    workspace.invalidateTimer = null;
+    controller.invalidate();
+  }, 50);
+  workspace.invalidateTimer.unref?.();
+}
+
+function touchReplay(workspace) {
+  workspace.renderRevision = (workspace.renderRevision ?? 0) + 1;
 }
 
 function noteReplayChange(workspace, blockId) {

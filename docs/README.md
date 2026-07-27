@@ -16,7 +16,7 @@ This directory contains the detailed documentation kept out of the package READM
 
 ## Local models and automation
 
-- [Local LLM integration](local-llm.md) — native Ollama, native LM Studio, OpenAI-compatible servers, reasoning effort, model output, failed-check analysis, replay, and diagnostics.
+- [Local LLM integration](local-llm.md) — native Ollama, native LM Studio, OpenAI-compatible servers, Codex app-server RPC, reasoning effort, completion guards, replay, and diagnostics.
 - [Decision modes and autopilot](autopilot.md) — Manual, Guarded, and Full modes, bounded actions, confidence, fallback, and simulation.
 
 ## Settings and maintenance

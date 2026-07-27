@@ -232,7 +232,7 @@ test('selected model compatibility test validates metadata and the Zipflow text 
       if (url.endsWith('/api/v1/chat')) {
         chatCalls += 1;
         if (chatCalls === 1) return jsonResponse({
-          output: [{ type: 'message', content: 'SUMMARY:\n- Model connection works.\nCOMMIT MESSAGE:\nTest local model compatibility' }],
+          output: [{ type: 'message', content: 'ZIPFLOW_COMPATIBILITY_OK' }],
         });
         return jsonResponse({
           output: [{ type: 'message', content: JSON.stringify({
@@ -331,7 +331,7 @@ test('Ollama model compatibility test uses native metadata and chat endpoints', 
         chatCalls += 1;
         chatBodies.push(JSON.parse(options.body));
         if (chatCalls === 1) return jsonResponse({
-          message: { content: 'SUMMARY:\n- Model connection works.\nCOMMIT MESSAGE:\nTest local model compatibility' },
+          message: { content: 'ZIPFLOW_COMPATIBILITY_OK' },
           done: true,
         });
         return jsonResponse({
@@ -360,7 +360,7 @@ test('Ollama model compatibility test uses native metadata and chat endpoints', 
     assert.equal(state.settingsPanel.modelTest.contextLength, 8_192);
     assert.equal(chatBodies.length, 2);
     assert.equal(chatBodies[0].stream, true);
-    assert.equal(chatBodies[0].options.num_predict, 96);
+    assert.equal(chatBodies[0].options.num_predict, 32);
     assert.equal(typeof chatBodies[1].format, 'object');
     assert.ok(urls.every((url) => url.startsWith('http://127.0.0.1:11434/api/')));
     assert.equal(urls.some((url) => url.includes('/v1/')), false);
@@ -383,7 +383,7 @@ test('OpenAI-compatible model test uses configured Responses endpoint and reason
       const body = JSON.parse(options.body);
       requests.push({ url, body, authorization: new Headers(options.headers).get('authorization') });
       const content = calls === 1
-        ? 'SUMMARY:\n- Model connection works.\nCOMMIT MESSAGE:\nTest local model compatibility'
+        ? 'ZIPFLOW_COMPATIBILITY_OK'
         : JSON.stringify({
           schemaVersion: 1, gate: 'compatibility-decision', action: 'continue', targetId: null,
           confidence: 1, summary: 'Autonomous decision protocol works.', evidence: [], risks: [], conditions: [],

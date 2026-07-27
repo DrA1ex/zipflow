@@ -159,6 +159,7 @@ export function settingsChoices(state, parameter) {
     option(parameter, 'ollama', 'Ollama', 'Local server at 127.0.0.1:11434.'),
     option(parameter, 'lmstudio', 'LM Studio', 'Native API at 127.0.0.1:1234/api/v1.'),
     option(parameter, 'openai', 'OpenAI-compatible', 'Configurable /v1 server using the Responses API or Chat Completions.'),
+    option(parameter, 'codex', 'Codex app-server', 'Use the locally authenticated Codex CLI through its stdio RPC app-server.'),
   ];
   if (parameter.settingId === 'llmModel') return modelChoices(state, parameter);
   if (parameter.settingId === 'llmOpenAiApiMode') return [
@@ -282,9 +283,9 @@ function localLlmParameters(state) {
       disabledReason: 'This setting is used only by the OpenAI-compatible provider.',
     },
     {
-      ...choiceParameter('llmReasoningEffort', 'Reasoning effort', reasoningEffortLabel(state.settings.llmReasoningEffort), 'Send an explicit reasoning effort to the OpenAI-compatible provider.'),
-      disabled: state.settings.llmProvider !== 'openai',
-      disabledReason: 'Reasoning effort is currently sent only through the OpenAI-compatible protocol.',
+      ...choiceParameter('llmReasoningEffort', 'Reasoning effort', reasoningEffortLabel(state.settings.llmReasoningEffort), 'Send an explicit reasoning effort to OpenAI-compatible or Codex app-server models.'),
+      disabled: !['openai', 'codex'].includes(state.settings.llmProvider),
+      disabledReason: 'Reasoning effort is supported by OpenAI-compatible and Codex app-server providers.',
     },
     {
       ...choiceParameter('llmModel', 'Model', selected ? modelDisplayLabel(selected) : (state.settings.llmModel || 'Not selected'), ''),
@@ -326,7 +327,9 @@ function localLlmParameters(state) {
     {
       id: 'llmApiToken', type: 'input', fieldId: 'llmApiToken', label: 'Authentication',
       value: state.settings.llmApiToken ? 'Bearer token configured' : 'Not configured',
-      description: 'Optional API token for model discovery and generation.',
+      description: state.settings.llmProvider === 'codex' ? 'Codex app-server uses the existing Codex CLI login; no API token is required here.' : 'Optional API token for model discovery and generation.',
+      disabled: state.settings.llmProvider === 'codex',
+      disabledReason: 'Codex app-server uses the existing Codex CLI login.',
     },
     {
       id: 'llmModelTests', type: 'subpage', label: 'Test selected model',
@@ -720,6 +723,7 @@ function providerLabel(value) {
   if (value === 'ollama') return 'Ollama';
   if (value === 'lmstudio') return 'LM Studio';
   if (value === 'openai') return 'OpenAI-compatible';
+  if (value === 'codex') return 'Codex app-server';
   return 'Disabled';
 }
 

@@ -137,6 +137,51 @@ test('historical model replay uses the stored patch and never changes project fi
   }
 }));
 
+
+
+test('historical replay reports an interrupted provider stream instead of Replay completed', async () => withZipflowHome(async () => {
+  const projectRoot = await tempDir('zipflow-replay-interrupted-project-');
+  const patchPath = path.join(await tempDir('zipflow-replay-interrupted-patch-'), 'changes.patch');
+  await writeFiles(projectRoot, { 'src/value.js': 'export const value = 2;\n' });
+  await writeFile(patchPath, 'diff --git a/src/value.js b/src/value.js\n@@ -1 +1 @@\n-old\n+new\n');
+  const originalFetch = globalThis.fetch;
+  try {
+    const encoder = new TextEncoder();
+    globalThis.fetch = async (url) => {
+      if (url.endsWith('/api/ps')) return jsonResponse({ models: [] });
+      if (url.endsWith('/api/show')) return jsonResponse({ parameters: 'num_ctx 8192', model_info: { 'fixture.context_length': 8192 } });
+      if (url.endsWith('/api/chat')) return new Response(new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode(`${JSON.stringify({ message: { content: 'SUMMARY:\n- Partial result' }, done: false })}\n`));
+          controller.close();
+        },
+      }), { headers: { 'Content-Type': 'application/x-ndjson' } });
+      throw new Error(`Unexpected URL: ${url}`);
+    };
+    const state = createInitialState();
+    state.project = { name: 'fixture', root: projectRoot };
+    state.settings = { ...DEFAULT_SETTINGS, llmProvider: 'ollama', llmModel: 'qwen', llmChangeDelivery: 'patch' };
+    state.settingsPanel = { replayRuns: [{
+      id: 'interrupted-run', archivePath: '/tmp/update.zip', replayAvailable: true, patch: { path: patchPath },
+      plan: { counts: { created: 0, updated: 1, deleted: 0 }, created: [], updated: ['src/value.js'], deleted: [] },
+    }] };
+    const controller = new ZipflowController(state);
+    controller.invalidate = () => {};
+
+    startHistoricalModelReplay(controller, 'interrupted-run');
+    const completed = await beginHistoricalModelReplay(controller);
+    const workspace = state.settingsPanel.modelTestWorkspace;
+
+    assert.equal(completed, false);
+    assert.equal(workspace.status, 'Replay failed');
+    assert.equal(workspace.errorCode, 'incomplete_generation');
+    assert.equal(workspace.result, null);
+    assert.ok(workspace.blocks.some((block) => block.status === 'error'));
+    assert.ok(workspace.blocks.some((block) => block.id === 'error' && block.lines.some((line) => /Partial model output was preserved/.test(line))));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}));
 test('historical replay keeps completed batch output when the next batch starts', () => {
   const state = createInitialState();
   state.settingsPanel = { modelTestWorkspace: { mode: 'progress', blocks: [], status: '', scroll: 0, follow: true, unreadBlockIds: new Set() } };

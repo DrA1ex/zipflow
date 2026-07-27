@@ -949,3 +949,27 @@ Zipflow is ready for a broader public npm release when:
 - the packed global package passes a clean-install smoke test on Linux and macOS.
 
 Phases 7 and 8 improve maintainability and release discipline and should follow before declaring the project fully mature, but the core safety boundary is established by Phases 0–6.
+
+
+---
+
+# Phase 6 — LLM completion integrity and Codex RPC
+
+## Goal
+
+Make model testing and historical replay report only verified provider completion, keep large partial output responsive, and support the locally authenticated Codex CLI without requiring an HTTP compatibility server.
+
+## Delivered work
+
+- separate the transport compatibility marker from workflow summary and commit-message tasks;
+- require terminal completion events from streamed providers and preserve typed partial-output failures;
+- render historical replay through a cached Terlio virtualized line source with bounded live previews;
+- add Codex app-server stdio RPC model discovery, reasoning effort, ephemeral read-only turns, deadlines, and cancellation;
+- cover the complete Settings test action, interrupted replay, context exhaustion, long output, and RPC lifecycle with regression tests.
+
+## Exit criteria
+
+- a truncated or disconnected model response never produces `Replay completed`;
+- the model compatibility button cannot fail merely because a workflow output task such as commit-message generation is enabled;
+- large replay output remains scrollable and cancellable without rebuilding the complete rendered transcript on every chunk;
+- Codex model selection and generation work through the configured local CLI and require a successful `turn/completed` state.

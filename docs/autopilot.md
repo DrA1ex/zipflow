@@ -47,7 +47,7 @@ It remains constrained. Full autopilot cannot invent commands, modify the workfl
 
 ## Compatibility requirement
 
-Autopilot is available only after the selected Ollama, LM Studio, or OpenAI-compatible model passes the autonomous-decision compatibility test.
+Autopilot is available only after the selected Ollama, LM Studio, OpenAI-compatible, or Codex app-server model passes the autonomous-decision compatibility test.
 
 The test is separate from ordinary summarization compatibility because autonomous decisions require a strict structured response, valid action selection, and reliable confidence reporting.
 

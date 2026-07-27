@@ -132,6 +132,31 @@ test('expanded 10k-line Activity blocks reuse their prepared transcript between 
   assert.ok(first.lines.length >= 10_001);
 });
 
+
+
+test('historical replay reuses a virtualized line source for large unchanged model output', () => {
+  const state = createInitialState();
+  const workspace = {
+    mode: 'progress', runId: 'large-run', archiveName: 'large.zip', running: true,
+    status: 'Receiving model response', elapsedMs: 1_000, renderRevision: 1,
+    blocks: [{
+      id: 'response', title: 'Response', lines: [], reasoning: '',
+      content: Array.from({ length: 20_000 }, (_, index) => `line ${index}`).join('\n'),
+      status: 'active', streaming: true,
+    }],
+    scroll: 0, maxScroll: 0, follow: true, unread: 0, unreadBlockIds: new Set(),
+  };
+  state.settingsPanel = { modelTestWorkspace: workspace };
+
+  renderModelReplayWorkspace({ content: Text('BACKGROUND'), state, width: 100, height: 28, theme: themes.ocean });
+  const first = workspace.replayLineCache.source;
+  workspace.elapsedMs = 2_000;
+  renderModelReplayWorkspace({ content: Text('BACKGROUND'), state, width: 100, height: 28, theme: themes.ocean });
+
+  assert.equal(workspace.replayLineCache.source, first);
+  assert.equal(typeof first.getLine, 'function');
+  assert.ok(first.length > 1_000);
+});
 test('Terlio 1.1.2 ScrollPane reads only the visible window from a 10k-line source', {
   skip: hasVirtualScrollSource ? false : `installed Terlio ${installedTerlioVersion}; run npm install to enable 1.1.2 virtualization`,
 }, () => {

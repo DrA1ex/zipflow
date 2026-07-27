@@ -20,7 +20,7 @@ export async function refreshModels(controller, { quiet = false } = {}) {
   spinnerTimer.unref?.();
   try {
     panel.models = await listLocalModelChoices(provider, {
-      apiToken: state.settings.llmApiToken, baseUrl: state.settings.llmBaseUrl,
+      apiToken: state.settings.llmApiToken, baseUrl: state.settings.llmBaseUrl, settings: state.settings,
     });
     panel.modelsProvider = provider;
     const current = findConfiguredModel(panel.models, state.settings.llmModel);

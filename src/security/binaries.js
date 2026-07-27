@@ -5,7 +5,7 @@ import { access, lstat, realpath } from 'node:fs/promises';
 import { runProcess } from '../utils/process.js';
 import { loadSettings } from '../settings/store.js';
 
-export const BINARY_TOOL_IDS = Object.freeze(['git', 'npm', 'node', 'opener', 'python', 'gofmt']);
+export const BINARY_TOOL_IDS = Object.freeze(['git', 'npm', 'node', 'opener', 'python', 'gofmt', 'codex']);
 
 const DEFINITIONS = Object.freeze({
   git: {
@@ -29,6 +29,10 @@ const DEFINITIONS = Object.freeze({
   },
   gofmt: {
     label: 'Go formatter', candidates: ['gofmt'],
+  },
+  codex: {
+    label: 'Codex CLI', candidates: ['codex'], probeArgs: ['--version'],
+    probePattern: /codex/i,
   },
 });
 

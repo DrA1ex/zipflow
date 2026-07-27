@@ -35,7 +35,7 @@ const MAX_REPAIR_DRAFT_CHARS = 40_000;
 const GENERATION_ATTEMPTS = 3;
 
 export function isLocalLlmEnabled(settings) {
-  return ['ollama', 'lmstudio', 'openai'].includes(settings?.llmProvider) && Boolean(settings?.llmModel);
+  return ['ollama', 'lmstudio', 'openai', 'codex'].includes(settings?.llmProvider) && Boolean(settings?.llmModel);
 }
 
 export async function generateChangeDescription({ settings, project, plan, patchContent }, options = {}) {
@@ -380,7 +380,7 @@ function requestCompletion({ settings, profile, messages, maxTokens, contextLeng
     reasoningEffort: settings.llmReasoningEffort,
     contextLength,
     reasoningOffSupported: profile.reasoningOffSupported,
-  }, { ...options, onEvent });
+  }, { ...options, onEvent, settings });
 }
 
 export function parseResponse(content, options = {}) {

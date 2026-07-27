@@ -200,7 +200,10 @@ test('normal long responses stream as deltas and retain only bounded raw SSE dat
   const pieces = Array.from({ length: 200 }, (_, index) => `${index}:😀;`);
   const events = [];
   const completion = await createLocalCompletion(completionRequest(), {
-    fetchImpl: async () => streamResponse(pieces.map((piece) => openAiEvent(piece))),
+    fetchImpl: async () => streamResponse([
+      ...pieces.map((piece) => openAiEvent(piece)),
+      `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] })}\n\n`,
+    ]),
     streamLimits: {
       maxAnswerBytes: 64 * 1024,
       maxRawResponseBytes: 256,

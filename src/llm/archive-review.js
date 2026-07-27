@@ -61,6 +61,7 @@ export async function reviewArchiveStructure({ settings, project, workflow, extr
     reasoningOffSupported: profile.reasoningOffSupported,
   }, {
     ...options,
+    settings,
     onEvent: (event) => notify({ ...event, stage: 'structure-review' }),
   });
   const parsed = parseArchiveAssessment(completion.content) ?? parseArchiveAssessment(completion.reasoning);
@@ -134,6 +135,7 @@ export async function reviewArchiveSample({ settings, project, workflow, extract
     reasoningOffSupported: profile.reasoningOffSupported,
   }, {
     ...options,
+    settings,
     onEvent: (event) => notify({ ...event, stage: 'sample-guard' }),
   });
   const parsed = parseArchiveAssessment(completion.content) ?? parseArchiveAssessment(completion.reasoning);
@@ -206,6 +208,7 @@ export async function reviewSnapshotDeletionIntent({ settings, project, workflow
     reasoningOffSupported: profile.reasoningOffSupported,
   }, {
     ...options,
+    settings,
     onEvent: (event) => notify({ ...event, stage: 'deletion-intent' }),
   });
   const parsed = parseSnapshotDeletionAssessment(completion.content)

@@ -1,7 +1,9 @@
 import { classifyServerError, LocalLlmError, normalizeServerError } from './errors.js';
+import { appendChunk, completeResult, emptyCompletion } from './completion-state.js';
 import { ByteChunkCollector } from '../utils/byte-buffer.js';
+import { createCodexAppServerCompletion, listCodexAppServerModels } from './codex-app-server.js';
 import {
-  deadlineError, normalizeLlmStreamLimits, outputLimitError, responseLimitError, SseEventParser,
+  deadlineError, normalizeLlmStreamLimits, responseLimitError, SseEventParser,
 } from './stream-limits.js';
 
 const PROVIDERS = {
@@ -17,6 +19,10 @@ const PROVIDERS = {
     label: 'OpenAI-compatible',
     openAiBaseUrl: 'http://127.0.0.1:8080/v1',
   },
+  codex: {
+    label: 'Codex app-server',
+    rpcTransport: 'stdio JSONL',
+  },
 };
 
 const responseContexts = new WeakMap();
@@ -31,8 +37,12 @@ export async function listLocalModelChoices(provider, {
   apiToken = '',
   baseUrl = '',
   signal = null,
+  settings = null,
+  spawnImpl = undefined,
+  executable = '',
 } = {}) {
   const definition = requireProvider(provider);
+  if (provider === 'codex') return listCodexAppServerModels({ settings, signal, timeoutMs, spawnImpl, executable });
   const url = provider === 'lmstudio'
     ? `${definition.nativeBaseUrl}/models`
     : provider === 'ollama'
@@ -124,6 +134,9 @@ export async function createLocalCompletion({
   streamLimits = null,
   onEvent = () => {},
   signal = null,
+  settings = null,
+  spawnImpl = undefined,
+  executable = '',
 } = {}) {
   const limits = normalizeLlmStreamLimits({
     ...(streamLimits ?? {}),
@@ -132,6 +145,13 @@ export async function createLocalCompletion({
     idleTimeoutMs: idleTimeoutMs ?? streamLimits?.idleTimeoutMs,
   }, { timeoutMs });
   const requestOptions = { fetchImpl, limits, onEvent, signal };
+  if (provider === 'codex') {
+    return createCodexAppServerCompletion({ model, messages, responseSchema, reasoningEffort, maxTokens }, {
+      settings, signal, timeoutMs: limits.totalDeadlineMs, idleTimeoutMs: limits.idleTimeoutMs,
+      maxAnswerBytes: limits.maxAnswerBytes, maxReasoningBytes: limits.maxReasoningBytes,
+      onEvent, spawnImpl, executable,
+    });
+  }
   if (provider === 'lmstudio') {
     return createLmStudioCompletion({
       model, messages, maxTokens, apiToken, contextLength, reasoningOffSupported, loadedModel,
@@ -391,7 +411,11 @@ async function readOpenAiResponse(response, { onEvent, provider, signal, limits 
     const result = emptyCompletion(limits, provider);
     onEvent({ type: 'stream-open' });
     const raw = await consumeSse(response, ({ data }) => {
-      if (!data || data === '[DONE]') return;
+      if (data === '[DONE]') {
+        result.terminalObserved = true;
+        return;
+      }
+      if (!data) return;
       const payload = parseJsonChunk(data, onEvent);
       if (!payload) return;
       if (payload.error) throw classifyPayloadError(payload, provider);
@@ -444,7 +468,8 @@ async function readOpenAiResponsesResponse(response, { onEvent, provider, signal
     const result = emptyCompletion(limits, provider);
     onEvent({ type: 'stream-open' });
     const raw = await consumeSse(response, ({ event, data }) => {
-      if (!data || data === '[DONE]') return;
+      if (data === '[DONE]') return;
+      if (!data) return;
       const payload = parseJsonChunk(data, onEvent);
       if (!payload) return;
       applyResponsesPayload(event || payload.type, payload, result, onEvent, provider);
@@ -473,7 +498,8 @@ async function readLmStudioResponse(response, { onEvent, signal, limits }) {
     const result = emptyCompletion(limits, provider);
     onEvent({ type: 'stream-open' });
     const raw = await consumeSse(response, ({ event, data }) => {
-      if (!data || data === '[DONE]') return;
+      if (data === '[DONE]') return;
+      if (!data) return;
       const payload = parseJsonChunk(data, onEvent);
       if (!payload) return;
       applyLmStudioEvent(event || payload.type, payload, result, onEvent);
@@ -597,7 +623,11 @@ function applyLmStudioEvent(event, payload, result, onEvent) {
   else if (event === 'prompt_processing.end') onEvent({ type: 'prompt-progress', progress: 1 });
   else if (event === 'reasoning.delta') appendChunk(result, '', textValue(payload.content), onEvent);
   else if (event === 'message.delta') appendChunk(result, textValue(payload.content), '', onEvent);
-  else if (event === 'chat.end') applyLmResult(payload.result, result, onEvent);
+  else if (event === 'chat.end') {
+    result.terminalObserved = true;
+    result.terminalStatus = 'completed';
+    applyLmResult(payload.result, result, onEvent);
+  }
 }
 
 function completionFromOllamaPayload(payload, onEvent, limits) {
@@ -615,6 +645,8 @@ function applyOllamaPayload(payload, result, onEvent) {
     onEvent,
   );
   if (payload?.done) {
+    result.terminalObserved = true;
+    result.terminalStatus = 'completed';
     result.finishReason = payload.done_reason ?? 'stop';
     result.usage = {
       prompt_tokens: payload.prompt_eval_count ?? null,
@@ -630,6 +662,10 @@ function applyOllamaPayload(payload, result, onEvent) {
 function completionFromResponsesPayload(payload, onEvent, limits, provider) {
   const result = emptyCompletion(limits, provider);
   applyResponsesPayload(payload.type, payload, result, onEvent, provider);
+  if (!result.terminalObserved && Array.isArray(payload?.output)) {
+    result.terminalObserved = true;
+    result.terminalStatus = payload?.status ?? 'completed';
+  }
   return completeResult(result, onEvent);
 }
 
@@ -641,7 +677,16 @@ function applyResponsesPayload(event, payload, result, onEvent, provider) {
   else if (event === 'response.reasoning_summary_text.delta' || event === 'response.reasoning_text.delta') {
     appendChunk(result, '', textValue(payload.delta), onEvent);
   } else if (event === 'response.completed' || event === 'response.incomplete' || payload?.output) {
-    applyResponsesResult(payload.response ?? payload, result, onEvent);
+    const response = payload.response ?? payload;
+    applyResponsesResult(response, result, onEvent);
+    if (event === 'response.completed' || response?.status === 'completed') {
+      result.terminalObserved = true;
+      result.terminalStatus = 'completed';
+    } else if (event === 'response.incomplete' || response?.status === 'incomplete') {
+      result.terminalObserved = true;
+      result.terminalStatus = 'incomplete';
+      result.incompleteReason = response?.incomplete_details?.reason ?? response?.incompleteDetails?.reason ?? 'response incomplete';
+    }
   }
 }
 
@@ -661,6 +706,10 @@ function applyResponsesResult(payload, result, onEvent) {
 function completionFromOpenAiPayload(payload, onEvent, limits, provider) {
   const result = emptyCompletion(limits, provider);
   applyOpenAiPayload(payload, result, onEvent);
+  if (!result.terminalObserved && Array.isArray(payload?.choices)) {
+    result.terminalObserved = true;
+    result.terminalStatus = 'completed';
+  }
   return completeResult(result, onEvent);
 }
 
@@ -669,11 +718,17 @@ function applyOpenAiPayload(payload, result, onEvent) {
   const source = choice.delta ?? choice.message ?? {};
   appendChunk(result, textValue(source.content), textValue(source.reasoning_content ?? source.reasoning), onEvent);
   result.finishReason = choice.finish_reason ?? result.finishReason;
+  if (choice.finish_reason) {
+    result.terminalObserved = true;
+    result.terminalStatus = choice.finish_reason;
+  }
   result.usage = payload.usage ?? result.usage;
 }
 
 function completionFromLmResult(payload, onEvent, limits, provider) {
   const result = emptyCompletion(limits, provider);
+  result.terminalObserved = true;
+  result.terminalStatus = 'completed';
   applyLmResult(payload, result, onEvent);
   return completeResult(result, onEvent);
 }
@@ -685,58 +740,6 @@ function applyLmResult(payload, result, onEvent) {
   }
   result.usage = payload?.stats ?? result.usage;
   result.finishReason ??= 'stop';
-}
-
-function appendChunk(result, contentDelta, reasoningDelta, onEvent) {
-  if (!contentDelta && !reasoningDelta) return;
-  const contentBytes = Buffer.byteLength(contentDelta);
-  const reasoningBytes = Buffer.byteLength(reasoningDelta);
-  if (result.contentBytes + contentBytes > result.limits.maxAnswerBytes) {
-    throw outputLimitError('answer', result.limits.maxAnswerBytes, result.contentBytes + contentBytes, result.provider);
-  }
-  if (result.reasoningBytes + reasoningBytes > result.limits.maxReasoningBytes) {
-    throw outputLimitError('reasoning', result.limits.maxReasoningBytes, result.reasoningBytes + reasoningBytes, result.provider);
-  }
-  if (contentDelta) {
-    result.contentCollector.append(contentDelta);
-    result.contentBytes += contentBytes;
-  }
-  if (reasoningDelta) {
-    result.reasoningCollector.append(reasoningDelta);
-    result.reasoningBytes += reasoningBytes;
-  }
-  result.chunks += 1;
-  onEvent({
-    type: 'chunk', contentDelta, reasoningDelta,
-    contentBytes: result.contentBytes, reasoningBytes: result.reasoningBytes,
-    finishReason: result.finishReason, chunks: result.chunks,
-  });
-}
-
-function emptyCompletion(limits, provider) {
-  return {
-    contentCollector: new ByteChunkCollector(limits.maxAnswerBytes),
-    reasoningCollector: new ByteChunkCollector(limits.maxReasoningBytes),
-    contentBytes: 0, reasoningBytes: 0,
-    finishReason: null, usage: null, chunks: 0, rawResponse: '', rawResponseTruncated: false,
-    limits, provider,
-  };
-}
-
-function completeResult(result, onEvent) {
-  const value = {
-    content: result.contentCollector.toString(),
-    reasoning: result.reasoningCollector.toString(),
-    finishReason: result.finishReason,
-    usage: result.usage,
-    chunks: result.chunks,
-    contentBytes: result.contentBytes,
-    reasoningBytes: result.reasoningBytes,
-    rawResponse: result.rawResponse,
-    rawResponseTruncated: result.rawResponseTruncated,
-  };
-  onEvent({ type: 'complete', ...value });
-  return value;
 }
 
 function textValue(value) {

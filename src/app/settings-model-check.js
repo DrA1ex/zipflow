@@ -1,10 +1,9 @@
 import { createLocalCompletion } from '../llm/client.js';
-import { isLocalLlmEnabled, parseResponse } from '../llm/generate.js';
+import { isLocalLlmEnabled } from '../llm/generate.js';
 import { resolveLocalLlmSession } from '../llm/session.js';
 import { requestAutonomyDecision } from '../autonomy/decision-engine.js';
 import { updateSettings } from '../settings/store.js';
 import { canonicalModelId, modelIdentityKey } from '../llm/model-identity.js';
-import { llmTasks } from '../llm/tasks.js';
 
 export async function testSelectedModel(controller) {
   const { state } = controller;
@@ -25,12 +24,7 @@ export async function testSelectedModel(controller) {
   try {
     const session = await resolveLocalLlmSession(settings, { signal: operation.signal });
     let streamSupported = false;
-    const selectedTasks = llmTasks(settings);
-    const protocolTasks = {
-      archiveReview: selectedTasks.archiveReview,
-      summary: selectedTasks.summary || (!selectedTasks.archiveReview && !selectedTasks.commitMessage),
-      commitMessage: selectedTasks.commitMessage,
-    };
+    const compatibilityMarker = 'ZIPFLOW_COMPATIBILITY_OK';
     const completion = await createLocalCompletion({
       provider: settings.llmProvider,
       model: session.profile.requestModel || settings.llmModel,
@@ -39,15 +33,13 @@ export async function testSelectedModel(controller) {
         {
           role: 'system',
           content: [
-            'This is a compatibility test for Zipflow. Return only the requested plain-text fields.',
-            ...(protocolTasks.summary ? ['SUMMARY:', '- Model connection works.'] : []),
-            ...(protocolTasks.commitMessage ? ['COMMIT MESSAGE:', 'Test local model compatibility'] : []),
-            ...(protocolTasks.archiveReview ? ['ASSESSMENT:', 'suitable', 'CONFIDENCE:', 'high', 'REASONS:', '- Test response follows the Zipflow protocol.'] : []),
+            'This is a small transport compatibility test for Zipflow.',
+            `Reply with exactly this text and nothing else: ${compatibilityMarker}`,
           ].join('\n'),
         },
-        { role: 'user', content: 'Return the exact field structure now. Do not add Markdown fences.' },
+        { role: 'user', content: compatibilityMarker },
       ],
-      maxTokens: protocolTasks.archiveReview ? 160 : 96,
+      maxTokens: 32,
       apiToken: session.apiToken,
       baseUrl: settings.llmBaseUrl,
       apiMode: settings.llmOpenAiApiMode,
@@ -56,13 +48,15 @@ export async function testSelectedModel(controller) {
       reasoningOffSupported: session.profile.reasoningOffSupported,
     }, {
       signal: operation.signal,
+      settings,
       onEvent: (event) => { if (event.type === 'stream-open' || event.type === 'chunk') streamSupported = true; },
     });
-    parseResponse(completion.content || completion.reasoning, {
-      requireAssessment: protocolTasks.archiveReview,
-      requireSummary: protocolTasks.summary,
-      requireCommitMessage: protocolTasks.commitMessage,
-    });
+    const compatibilityText = String(completion.content || completion.reasoning || '').trim();
+    if (!compatibilityText.includes(compatibilityMarker)) {
+      const error = new Error('The model connection worked, but the compatibility marker was missing from its response.');
+      error.code = 'compatibility_marker_missing';
+      throw error;
+    }
     const autonomousDecision = await requestAutonomyDecision({
       settings,
       mode: 'guarded',
@@ -74,6 +68,7 @@ export async function testSelectedModel(controller) {
       },
       allowedActions: ['continue'],
       signal: operation.signal,
+      settings,
       onEvent: (event) => { if (event.type === 'stream-open' || event.type === 'chunk') streamSupported = true; },
     });
     if (autonomousDecision.action !== 'continue') throw new Error('Autonomous decision protocol returned an unexpected action.');
@@ -101,7 +96,7 @@ export async function testSelectedModel(controller) {
       contextLength: session.profile.contextLength,
       maxContextLength: session.profile.maxContextLength,
       contextSource: session.profile.source,
-      reviewProtocol: protocolTasks.archiveReview, autonomousDecisionProtocol: true,
+      transportProtocol: true, autonomousDecisionProtocol: true,
     };
     state.status = `Model test passed · ${formatDuration(durationMs)}`;
     controller.toast('Model test passed', 'success', 3, `${streamSupported ? 'Streaming supported' : 'Response received'} · ${formatContext(session.profile.contextLength)}`);

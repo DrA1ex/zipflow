@@ -162,7 +162,16 @@
     "Reinterpreted plan ready": "El plan reinterpretado está listo",
     "Archive reinterpretation cancelled": "Se canceló la reinterpretación del archivo",
     "The previous update plan remains selected.": "El plan de actualización anterior permanece seleccionado.",
-    "Local LLM snapshot deletion intent": "LLM local: intención de eliminación de instantánea"
+    "Local LLM snapshot deletion intent": "LLM local: intención de eliminación de instantánea",
+    "Reasoning effort is supported by OpenAI-compatible and Codex app-server providers.": "El esfuerzo de razonamiento es compatible con proveedores OpenAI-compatible y Codex app-server.",
+    "Codex app-server uses the existing Codex CLI login.": "Codex app-server usa el inicio de sesión existente de Codex CLI.",
+    "Codex app-server": "Codex app-server",
+    "Codex answer": "Respuesta de Codex",
+    "Codex reasoning": "Razonamiento de Codex",
+    "Codex CLI": "Codex CLI",
+    "Use the locally authenticated Codex CLI through its stdio RPC app-server.": "Usar Codex CLI autenticado localmente mediante su app-server RPC por stdio.",
+    "Send an explicit reasoning effort to OpenAI-compatible or Codex app-server models.": "Enviar un esfuerzo de razonamiento explícito a modelos OpenAI-compatible o Codex app-server.",
+    "Codex app-server uses the existing Codex CLI login; no API token is required here.": "Codex app-server usa el inicio de sesión existente de Codex CLI; aquí no se requiere token de API."
   },
   "patterns": [
     {

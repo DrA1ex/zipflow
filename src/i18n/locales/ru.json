@@ -1440,7 +1440,16 @@
     "Send an explicit reasoning effort to the OpenAI-compatible provider.": "Передавать OpenAI-совместимому провайдеру явный уровень рассуждений.",
     "Select this model for generation.": "Выбрать эту модель для генерации.",
     "Include the API version prefix, usually /v1.": "Укажите префикс версии API, обычно /v1.",
-    "Zipflow appends /models, /responses, or /chat/completions.": "Zipflow добавляет /models, /responses или /chat/completions."
+    "Zipflow appends /models, /responses, or /chat/completions.": "Zipflow добавляет /models, /responses или /chat/completions.",
+    "Reasoning effort is supported by OpenAI-compatible and Codex app-server providers.": "Уровень усилий рассуждения поддерживается провайдерами OpenAI-compatible и Codex app-server.",
+    "Codex app-server uses the existing Codex CLI login.": "Codex app-server использует текущую авторизацию Codex CLI.",
+    "Codex app-server": "Codex app-server",
+    "Codex answer": "Ответ Codex",
+    "Codex reasoning": "Рассуждение Codex",
+    "Codex CLI": "Codex CLI",
+    "Use the locally authenticated Codex CLI through its stdio RPC app-server.": "Использовать локально авторизованный Codex CLI через его RPC app-server по stdio.",
+    "Send an explicit reasoning effort to OpenAI-compatible or Codex app-server models.": "Передавать явно выбранный уровень усилий рассуждения моделям OpenAI-compatible или Codex app-server.",
+    "Codex app-server uses the existing Codex CLI login; no API token is required here.": "Codex app-server использует текущую авторизацию Codex CLI; API-токен здесь не требуется."
   },
   "patterns": [
     {

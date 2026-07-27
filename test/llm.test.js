@@ -494,3 +494,51 @@ test('dirty-tree commit generation reuses the configured change-delivery policy 
   assert.match(chatBody.system_prompt, /COMMIT MESSAGE:/);
   assert.doesNotMatch(chatBody.system_prompt, /SUMMARY:|ASSESSMENT:/);
 });
+
+test('Ollama rejects a partial NDJSON stream that closes without done', async () => {
+  const fetchImpl = async () => ndjsonResponse([
+    { message: { content: 'partial answer' }, done: false },
+  ]);
+
+  await assert.rejects(() => createLocalCompletion({
+    provider: 'ollama', model: 'qwen', messages: [{ role: 'user', content: 'test' }],
+  }, { fetchImpl }), (error) => {
+    assert.equal(error.code, 'incomplete_generation');
+    assert.match(error.message, /without a completion event|before the provider reported/i);
+    return true;
+  });
+});
+
+test('OpenAI-compatible chat rejects output-limit completion instead of returning partial text', async () => {
+  const fetchImpl = async () => jsonResponse({
+    choices: [{ message: { content: 'partial answer' }, finish_reason: 'length' }],
+  });
+
+  await assert.rejects(() => createLocalCompletion({
+    provider: 'openai', model: 'local', messages: [{ role: 'user', content: 'test' }],
+    baseUrl: 'http://127.0.0.1:7777/v1', apiMode: 'chat-completions',
+  }, { fetchImpl }), (error) => {
+    assert.equal(error.code, 'context_exceeded');
+    assert.match(error.message, /context or output-token limit/i);
+    return true;
+  });
+});
+
+test('Responses API incomplete event is surfaced as an interrupted generation', async () => {
+  const fetchImpl = async () => sseResponse([
+    { event: 'response.output_text.delta', data: { type: 'response.output_text.delta', delta: 'partial' } },
+    { event: 'response.incomplete', data: {
+      type: 'response.incomplete',
+      response: { status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' }, output: [] },
+    } },
+  ]);
+
+  await assert.rejects(() => createLocalCompletion({
+    provider: 'openai', model: 'local', messages: [{ role: 'user', content: 'test' }],
+    baseUrl: 'http://127.0.0.1:7777/v1', apiMode: 'responses',
+  }, { fetchImpl }), (error) => {
+    assert.equal(error.code, 'context_exceeded');
+    assert.match(error.message, /max_output_tokens/i);
+    return true;
+  });
+});

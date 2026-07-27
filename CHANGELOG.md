@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.6.0 — LLM completion integrity and Codex app-server
+
+- Decouple **Test selected model** from enabled workflow output tasks: its first request now validates a fixed transport marker, while the second request validates only the autonomous-decision schema, so enabling commit-message generation cannot produce a misleading `missing commit message` failure.
+- Require explicit provider completion signals for streamed Ollama, OpenAI-compatible, Responses API, and LM Studio generations. EOF, `length`, incomplete Responses, context exhaustion, and disconnected streams now produce typed errors while preserving partial output for diagnostics.
+- Mark interrupted historical replays as failed instead of completed, retain partial reasoning and response text, show actionable context/output-limit guidance, and keep `Esc` cancellation bounded by provider cancellation and total/idle deadlines.
+- Move replay output to a cached Terlio virtualized line source, throttle chunk invalidation, and bound only the live viewport preview while retaining larger diagnostic buffers, preventing long model responses from repeatedly rewrapping the complete transcript.
+- Add a **Codex app-server** provider that launches the configured Codex CLI over stdio JSONL RPC, initializes the session, discovers models and supported reasoning efforts, starts ephemeral read-only threads and turns, validates `turn/completed`, handles context and stream failures, and interrupts turns with both thread and turn identifiers.
+- Add end-to-end coverage for the settings compatibility button with commit-message tasks enabled, Codex model discovery and schema output, RPC deadlines and cancellation, provider completion guards, failed replay state, and large virtualized replay output.
+
 ## 1.5.0 — Native Ollama and OpenAI-compatible providers
 
 - Replace Ollama's partially compatible `/v1` usage with the native `/api/tags`, `/api/ps`, `/api/show`, and `/api/chat` contracts for model discovery, context inspection, generation, structured output, streaming, and compatibility tests.
