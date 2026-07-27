@@ -13,7 +13,13 @@ import { ZipflowController } from '../src/app/controller.js';
 import { testSelectedModel } from '../src/app/settings-model-check.js';
 import { DEFAULT_SETTINGS } from '../src/settings/store.js';
 
-function fakeCodexRuntime({ initializeDelayMs = 0, onSpawn = null } = {}) {
+function fakeCodexRuntime({
+  initializeDelayMs = 0,
+  onSpawn = null,
+  permissionProfiles = [{ id: ':read-only', allowed: true }],
+  permissionProfileApi = true,
+  permissionProfilePages = null,
+} = {}) {
   const requests = [];
   const children = [];
   const spawnImpl = () => {
@@ -55,6 +61,16 @@ function fakeCodexRuntime({ initializeDelayMs = 0, onSpawn = null } = {}) {
         return undefined;
       }
       if (message.method === 'initialized') return undefined;
+      if (message.method === 'permissionProfile/list') {
+        if (!permissionProfileApi) return send({ id: message.id, error: { code: -32601, message: 'Method not found' } });
+        if (permissionProfilePages) {
+          const pageIndex = message.params.cursor ? Number(message.params.cursor) : 0;
+          const page = permissionProfilePages[pageIndex] ?? [];
+          const nextCursor = pageIndex + 1 < permissionProfilePages.length ? String(pageIndex + 1) : null;
+          return send({ id: message.id, result: { data: page, nextCursor } });
+        }
+        return send({ id: message.id, result: { data: permissionProfiles, nextCursor: null } });
+      }
       if (message.method === 'model/list') return send({ id: message.id, result: { data: [{
         id: 'gpt-test', model: 'gpt-test', displayName: 'GPT Test', isDefault: true,
         defaultReasoningEffort: 'medium', supportedReasoningEfforts: [
@@ -133,13 +149,18 @@ test('Codex app-server lists models with effort capabilities and completes a tex
   assert.ok(events.some((event) => event.type === 'stream-open'));
   assert.ok(events.some((event) => event.type === 'complete'));
 
+  const initialize = runtime.requests.find((item) => item.method === 'initialize');
+  assert.equal(initialize.params.capabilities.experimentalApi, true);
+  const profileList = runtime.requests.find((item) => item.method === 'permissionProfile/list');
+  assert.equal(typeof profileList.params.cwd, 'string');
   const thread = runtime.requests.find((item) => item.method === 'thread/start');
+  assert.equal(thread.params.permissions, ':read-only');
   assert.equal(Object.hasOwn(thread.params, 'sandbox'), false);
   const turn = runtime.requests.find((item) => item.method === 'turn/start');
   assert.equal(turn.params.model, 'gpt-test');
   assert.equal(turn.params.effort, 'high');
   assert.equal(turn.params.approvalPolicy, 'never');
-  assert.equal(turn.params.sandboxPolicy.type, 'readOnly');
+  assert.equal(Object.hasOwn(turn.params, 'sandboxPolicy'), false);
   assert.equal(turn.params.outputSchema, undefined);
 });
 
@@ -241,3 +262,60 @@ test('Codex app-server cancellation sends threadId and turnId to turn/interrupt'
   const interrupt = runtime.requests.find((item) => item.method === 'turn/interrupt');
   assert.deepEqual(interrupt.params, { threadId: 'thr-test', turnId: 'turn-test' });
 });
+
+test('Codex app-server refuses a managed configuration that blocks :read-only', async () => {
+  const runtime = fakeCodexRuntime({ permissionProfiles: [{ id: ':read-only', allowed: false }] });
+  await assert.rejects(() => createLocalCompletion({
+    provider: 'codex', model: 'gpt-test', messages: [{ role: 'user', content: 'test' }],
+  }, runtimeOptions(runtime)), (error) => {
+    assert.equal(error.code, 'permission_profile_denied');
+    assert.match(error.message, /not allowed/i);
+    return true;
+  });
+  assert.equal(runtime.requests.some((item) => item.method === 'thread/start'), false);
+});
+
+
+test('Codex app-server follows permission profile pagination before selecting :read-only', async () => {
+  const runtime = fakeCodexRuntime({
+    permissionProfilePages: [
+      [{ id: ':workspace', allowed: true }],
+      [{ id: ':read-only', allowed: true }],
+    ],
+  });
+  const result = await createLocalCompletion({
+    provider: 'codex', model: 'gpt-test', messages: [{ role: 'user', content: 'test' }],
+  }, runtimeOptions(runtime));
+  assert.equal(result.content, 'ZIPFLOW_COMPATIBILITY_OK');
+  const lists = runtime.requests.filter((item) => item.method === 'permissionProfile/list');
+  assert.equal(lists.length, 2);
+  assert.equal(Object.hasOwn(lists[0].params, 'cursor'), false);
+  assert.equal(lists[1].params.cursor, '1');
+  const thread = runtime.requests.find((item) => item.method === 'thread/start');
+  assert.equal(thread.params.permissions, ':read-only');
+});
+
+test('Codex app-server fails closed when :read-only does not report allowed true', async () => {
+  const runtime = fakeCodexRuntime({ permissionProfiles: [{ id: ':read-only' }] });
+  await assert.rejects(() => createLocalCompletion({
+    provider: 'codex', model: 'gpt-test', messages: [{ role: 'user', content: 'test' }],
+  }, runtimeOptions(runtime)), (error) => {
+    assert.equal(error.code, 'permission_profile_denied');
+    return true;
+  });
+  assert.equal(runtime.requests.some((item) => item.method === 'thread/start'), false);
+});
+
+test('Codex app-server falls back to the documented legacy read-only shape only when permission profiles are unavailable', async () => {
+  const runtime = fakeCodexRuntime({ permissionProfileApi: false });
+  const result = await createLocalCompletion({
+    provider: 'codex', model: 'gpt-test', messages: [{ role: 'user', content: 'test' }],
+  }, runtimeOptions(runtime));
+  assert.equal(result.content, 'ZIPFLOW_COMPATIBILITY_OK');
+  const thread = runtime.requests.find((item) => item.method === 'thread/start');
+  assert.equal(Object.hasOwn(thread.params, 'permissions'), false);
+  const turn = runtime.requests.find((item) => item.method === 'turn/start');
+  assert.deepEqual(turn.params.sandboxPolicy, { type: 'readOnly', networkAccess: false });
+  assert.equal(Object.hasOwn(turn.params.sandboxPolicy, 'access'), false);
+});
+

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.3 — Codex permission-profile protocol
+
+- Initialize Codex app-server with `capabilities.experimentalApi: true`, enumerate `permissionProfile/list` with the replay working directory, and select the built-in `:read-only` profile only when the server reports it as allowed.
+- Pass the selected profile through `thread/start.permissions`, as required by the current app-server protocol, without also sending legacy `thread/start.sandbox` or `turn/start.sandboxPolicy`.
+- Follow permission-profile pagination, fail closed when `:read-only` is absent or denied by effective requirements, and keep a narrowly scoped compatibility fallback only for app-server versions that do not implement `permissionProfile/list`.
+- Add RPC payload, pagination, managed-denial, fail-closed, and legacy-method regression coverage.
+
 ## 1.6.2 — Codex sandbox compatibility
 
 - Stop sending the legacy `thread/start.sandbox` enum, whose spelling differs between Codex app-server protocol generations (`readOnly` versus `read-only`).

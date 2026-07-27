@@ -166,16 +166,15 @@ export async function createCodexAppServerCompletion({
           transport: 'Codex app-server RPC', endpoint: 'turn/start', model,
           reasoningEffort: normalizedEffort(reasoningEffort) ?? null,
         });
-        const threadResult = await client.request('thread/start', {
+        const permissionMode = await resolveCodexPermissionMode(client, scratch);
+        const threadResult = await client.request('thread/start', compactObject({
           model,
           cwd: scratch,
           approvalPolicy: 'never',
-          // Keep the thread request compatible with Codex app-server versions
-          // that use different enum spellings for the legacy `sandbox` field.
-          // The actual execution policy is applied explicitly on turn/start.
+          permissions: permissionMode.permissions,
           ephemeral: true,
           serviceName: 'zipflow',
-        });
+        }));
         threadId = threadResult?.thread?.id;
         if (!threadId) throw new LocalLlmError('Codex app-server did not return a thread ID.', { code: 'protocol_error', provider: 'codex' });
         const turnResult = await client.request('turn/start', compactObject({
@@ -183,7 +182,7 @@ export async function createCodexAppServerCompletion({
           input: [{ type: 'text', text: codexPrompt(messages, maxTokens) }],
           cwd: scratch,
           approvalPolicy: 'never',
-          sandboxPolicy: { type: 'readOnly', access: { type: 'restricted', includePlatformDefaults: true, readableRoots: [scratch] } },
+          sandboxPolicy: permissionMode.sandboxPolicy,
           model,
           effort: normalizedEffort(reasoningEffort),
           outputSchema: responseSchema || undefined,
@@ -221,6 +220,50 @@ export async function createCodexAppServerCompletion({
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }
+}
+
+
+async function resolveCodexPermissionMode(client, cwd) {
+  try {
+    const profiles = [];
+    let cursor = null;
+    do {
+      const result = await client.request('permissionProfile/list', compactObject({
+        cwd,
+        limit: 100,
+        cursor: cursor || undefined,
+      }));
+      profiles.push(...(Array.isArray(result?.data) ? result.data : []));
+      cursor = result?.nextCursor ?? null;
+    } while (cursor && profiles.length < 1_000);
+
+    const readOnly = profiles.find((profile) => profile?.id === ':read-only');
+    if (!readOnly) {
+      throw new LocalLlmError(
+        'Codex app-server did not advertise the built-in :read-only permission profile.',
+        { code: 'permission_profile_unavailable', provider: 'codex', diagnostics: { profiles } },
+      );
+    }
+    if (readOnly.allowed !== true) {
+      throw new LocalLlmError(
+        'The Codex :read-only permission profile is not allowed by the current effective requirements.',
+        { code: 'permission_profile_denied', provider: 'codex', diagnostics: { profile: readOnly } },
+      );
+    }
+    return { permissions: readOnly.id, sandboxPolicy: undefined };
+  } catch (error) {
+    if (!isPermissionProfileApiUnavailable(error)) throw error;
+    // Compatibility only for app-server versions that do not expose permission
+    // profiles at all. Current versions use thread/start.permissions.
+    return { permissions: undefined, sandboxPolicy: { type: 'readOnly', networkAccess: false } };
+  }
+}
+
+function isPermissionProfileApiUnavailable(error) {
+  const code = String(error?.code ?? '');
+  const message = String(error?.message ?? '');
+  return code === 'rpc_-32601'
+    || /method not found|unknown method|permissionProfile\/list.*(?:unsupported|not found)/i.test(message);
 }
 
 async function withCodexClient(options, task) {
@@ -273,7 +316,7 @@ class CodexRpcClient {
     this.lines.on('line', (line) => this.handleLine(line));
     await this.request('initialize', {
       clientInfo: { name: 'zipflow', title: 'Zipflow', version: ZIPFLOW_VERSION },
-      capabilities: { experimentalApi: false },
+      capabilities: { experimentalApi: true },
     });
     this.notify('initialized', {});
   }

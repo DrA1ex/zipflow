@@ -122,7 +122,9 @@ Model discovery uses `GET /models`. The selected model ID is sent unchanged, so 
 
 Choose **Codex app-server** to use the locally installed and already authenticated Codex CLI without exposing an HTTP API token. Zipflow resolves the configured `codex` binary, starts `codex app-server --listen stdio://` without a shell, performs the initialize handshake, and discovers selectable models through `model/list`.
 
-Each generation uses an ephemeral thread rooted in a private temporary directory, `approvalPolicy: never`, and a read-only sandbox. Zipflow submits text through `turn/start`, forwards the selected model and reasoning effort, and passes a JSON Schema when structured output is required. It does not grant Codex access to the active project or ask it to run tools.
+Each generation uses an ephemeral thread rooted in a private temporary directory and `approvalPolicy: never`. Zipflow opts into the experimental app-server surface, reads the paginated `permissionProfile/list` catalog for that directory, requires the built-in `:read-only` profile to be explicitly allowed, and passes its id through `thread/start.permissions`. It does not combine the profile with the legacy thread `sandbox` field or a turn-level `sandboxPolicy`.
+
+If an older app-server does not implement `permissionProfile/list` at all, Zipflow uses only the stable legacy read-only sandbox shape without the removed `access` field. A server that advertises permission profiles but omits or denies `:read-only` fails closed instead of silently broadening access. Zipflow submits text through `turn/start`, forwards the selected model and reasoning effort, and passes a JSON Schema when structured output is required. It does not grant Codex access to the active project or ask it to run tools.
 
 A request succeeds only after a matching `turn/completed` notification reports `completed`. Interrupted or failed turns, context-window errors, stream disconnects, idle timeouts, and the total deadline remain failures with partial output retained for replay diagnostics. `Esc` sends `turn/interrupt` with the active thread and turn identifiers.
 
