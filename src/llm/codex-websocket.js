@@ -81,6 +81,13 @@ export function parseCodexEndpoint(value) {
   };
 }
 
+export function codexEndpointDisplayValue(value = DEFAULT_CODEX_ENDPOINT) {
+  const target = parseCodexEndpoint(value);
+  if (target.transport === 'stdio') return 'stdio://';
+  if (target.transport === 'unix') return `unix://${target.socketPath}`;
+  return target.endpoint;
+}
+
 export function normalizeCodexEndpoint(value) {
   const target = parseCodexEndpoint(value);
   if (target.transport === 'stdio') return 'stdio://';

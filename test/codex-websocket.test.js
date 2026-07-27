@@ -7,13 +7,14 @@ import path from 'node:path';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { once } from 'node:events';
 import {
-  connectCodexWebSocket, normalizeCodexEndpoint, parseCodexEndpoint,
+  codexEndpointDisplayValue, connectCodexWebSocket, normalizeCodexEndpoint, parseCodexEndpoint,
 } from '../src/llm/codex-websocket.js';
 
 const GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 
 test('Codex endpoint validation supports stdio, local WebSocket, and Unix sockets', () => {
   assert.equal(normalizeCodexEndpoint(''), 'unix://');
+  assert.match(codexEndpointDisplayValue('unix://'), /^unix:\/\/\/.+app-server-control\.sock$/);
   assert.equal(normalizeCodexEndpoint('stdio://'), 'stdio://');
   assert.equal(normalizeCodexEndpoint('ws://127.0.0.1:4500'), 'ws://127.0.0.1:4500/');
   assert.equal(parseCodexEndpoint('unix:///tmp/codex.sock').socketPath, '/tmp/codex.sock');

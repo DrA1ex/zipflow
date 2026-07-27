@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.6 — Concrete Codex endpoints and stable model selection
+
+- Display the fully resolved managed Codex Unix-socket address instead of the `unix://` shorthand, so the settings screen shows the real endpoint used on the current machine.
+- Show concrete external-server examples (`unix:///absolute/path` and `ws://127.0.0.1:4500`) while keeping the endpoint field editable only when the external-server checkbox is enabled.
+- Preserve the explicitly selected model when the model catalogue is refreshed or the Codex ownership checkbox is toggled; clear the selection only when the provider itself changes.
+- Add regression coverage for the resolved endpoint value and model preservation.
+
 ## 1.6.5 — Simplified Codex connection settings
 
 - Show OpenAI-compatible Base URL and API-mode controls only when the OpenAI-compatible provider is selected.

@@ -27,8 +27,6 @@ export async function refreshModels(controller, { quiet = false } = {}) {
     if (current) {
       const canonical = canonicalModelId(provider, current.key || current.id, { records: panel.models });
       if (canonical !== state.settings.llmModel) state.settings = await updateSettings({ llmModel: canonical }, { baseSettings: state.settings });
-    } else if (state.settings.llmModel) {
-      state.settings = await updateSettings({ llmModel: '' }, { baseSettings: state.settings });
     }
     if (!quiet) {
       state.status = 'Local LLM';

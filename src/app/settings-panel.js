@@ -531,7 +531,10 @@ async function activateChoice(controller) {
     return returnAfterChoice(controller, parameter.id, result?.valid ? `${result.label} uses automatic detection` : 'Automatic detection reset');
   }
   if (option.settingId) {
-    state.settings = await updateSettings({ [option.settingId]: option.value }, { baseSettings: state.settings });
+    const settingPatch = option.settingId === 'llmProvider' && option.value !== state.settings.llmProvider
+      ? { llmProvider: option.value, llmModel: '' }
+      : { [option.settingId]: option.value };
+    state.settings = await updateSettings(settingPatch, { baseSettings: state.settings });
     if (option.settingId === 'archivePolicy' && option.value === 'move') {
       await ensureDir(path.resolve(expandHome(state.settings.archiveDirectory)));
     }

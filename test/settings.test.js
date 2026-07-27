@@ -14,6 +14,7 @@ import {
 import { exists } from '../src/utils/fs.js';
 import { localizeUiItem } from '../src/i18n/index.js';
 import { validateSettingValue } from '../src/app/settings-validation.js';
+import { codexEndpointDisplayValue } from '../src/llm/codex-websocket.js';
 
 async function withSettingsHome(run) {
   const previous = process.env.ZIPFLOW_HOME;
@@ -582,7 +583,9 @@ test('Codex app-server settings use a checkbox to enable a custom endpoint', asy
   assert.equal(byId.llmOpenAiApiMode, undefined);
   assert.equal(byId.llmUseExternalCodexServer.selected, false);
   assert.equal(byId.llmCodexEndpoint.disabled, true);
-  assert.equal(byId.llmCodexEndpoint.value, 'unix://');
+  assert.equal(byId.llmCodexEndpoint.value, codexEndpointDisplayValue('unix://'));
+  assert.match(byId.llmCodexEndpoint.value, /^unix:\/\/\//);
+  assert.match(byId.llmCodexEndpoint.value, /app-server-control\.sock$/);
   assert.match(byId.llmCodexEndpoint.description, /supported endpoints/i);
   assert.equal(byId.llmReasoningEffort.disabled, false);
   assert.equal(byId.llmReasoningEffort.value, 'High');
@@ -596,6 +599,8 @@ test('Codex app-server settings use a checkbox to enable a custom endpoint', asy
   assert.equal(state.settings.llmUseExternalCodexServer, true);
   assert.equal(byId.llmCodexEndpoint.disabled, false);
   assert.equal(byId.llmCodexEndpoint.value, 'ws://127.0.0.1:4600/');
+  assert.equal(byId.llmModel.value, 'gpt-test');
+  assert.equal(state.settings.llmModel, 'gpt-test');
 
   view = await openParameter(controller, 'llmProvider');
   assert.ok(view.choices.some((item) => item.id === 'llmProvider:codex'));

@@ -1463,9 +1463,9 @@
     "Any changed ws://, wss://, or unix:///absolute/path endpoint is connect-only; start that server yourself.": "Любой изменённый адрес ws://, wss:// или unix:///абсолютный/путь работает только на подключение; такой сервер нужно запустить самостоятельно.",
     "Use an external Codex server": "Использовать внешний сервер Codex",
     "Connect to an app-server that you start and manage yourself. Otherwise Zipflow uses its managed default endpoint.": "Подключаться к app-server, который вы запускаете и обслуживаете самостоятельно. Иначе Zipflow использует управляемый адрес по умолчанию.",
-    "Supported endpoints: unix://, unix:///absolute/path, ws://localhost:port, wss://host/path, and stdio://.": "Поддерживаются адреса: unix://, unix:///absolute/path, ws://localhost:port, wss://host/path и stdio://.",
+    "Supported endpoints: unix:///absolute/path, ws://127.0.0.1:4500, wss://host/path, and stdio://.": "Поддерживаются адреса: unix://, unix:///absolute/path, ws://localhost:port, wss://host/path и stdio://.",
     "Enable Use an external Codex server to edit this endpoint.": "Включите «Использовать внешний сервер Codex», чтобы изменить этот адрес.",
-    "Supported: unix://, unix:///absolute/path, ws://localhost:port, wss://host/path, and stdio://.": "Поддерживаются: unix://, unix:///absolute/path, ws://localhost:port, wss://host/path и stdio://.",
+    "Supported: unix:///absolute/path, ws://127.0.0.1:4500, wss://host/path, and stdio://.": "Поддерживаются: unix://, unix:///absolute/path, ws://localhost:port, wss://host/path и stdio://.",
     "When Use an external Codex server is enabled, Zipflow uses this value instead of the managed default endpoint.": "Когда включено «Использовать внешний сервер Codex», Zipflow использует это значение вместо управляемого адреса по умолчанию."
   },
   "patterns": [

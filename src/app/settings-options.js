@@ -9,7 +9,7 @@ import { hasLlmPatchDeliveryTasks, llmTasks } from '../llm/tasks.js';
 import { ZIPFLOW_VERSION } from '../version.js';
 import { BINARY_TOOL_IDS, binaryDefinition, configuredBinaryPath } from '../security/binaries.js';
 import { environmentPolicyLabel } from '../security/environment.js';
-import { DEFAULT_CODEX_ENDPOINT } from '../llm/codex-websocket.js';
+import { DEFAULT_CODEX_ENDPOINT, codexEndpointDisplayValue } from '../llm/codex-websocket.js';
 
 export function settingsDefinitions(state) {
   const definitions = [
@@ -259,7 +259,7 @@ export function settingsEditorValue(state, fieldId) {
   if (fieldId.startsWith('binaryPath:')) return configuredBinaryPath(state.settings, fieldId.slice('binaryPath:'.length));
   if (fieldId === 'llmApiToken') return '';
   if (fieldId === 'llmBaseUrl') return String(state.settings.llmBaseUrl ?? '');
-  if (fieldId === 'llmCodexEndpoint') return String(state.settings.llmCodexEndpoint ?? '');
+  if (fieldId === 'llmCodexEndpoint') return codexEndpointDisplayValue(state.settings.llmCodexEndpoint);
   if (['archiveMaxBytes', 'backupMaxBytes'].includes(fieldId)) return formatByteSize(state.settings[fieldId]).replace(/\s+/g, '');
   return String(state.settings[fieldId] ?? '');
 }
@@ -294,8 +294,8 @@ function localLlmParameters(state) {
       ),
       {
         id: 'llmCodexEndpoint', type: 'input', fieldId: 'llmCodexEndpoint', label: 'Codex server endpoint',
-        value: external ? state.settings.llmCodexEndpoint : DEFAULT_CODEX_ENDPOINT,
-        description: 'Supported endpoints: unix://, unix:///absolute/path, ws://localhost:port, wss://host/path, and stdio://.',
+        value: codexEndpointDisplayValue(external ? state.settings.llmCodexEndpoint : DEFAULT_CODEX_ENDPOINT),
+        description: 'Supported endpoints: unix:///absolute/path, ws://127.0.0.1:4500, wss://host/path, and stdio://.',
         disabled: !external,
         disabledReason: external ? '' : 'Enable Use an external Codex server to edit this endpoint.',
       },
@@ -818,9 +818,9 @@ const FIELD_DEFINITIONS = Object.freeze({
     id: 'llmCodexEndpoint',
     label: 'Codex app-server endpoint',
     description: 'Transport endpoint used for Codex JSON-RPC.',
-    placeholder: 'unix://',
+    placeholder: 'ws://127.0.0.1:4500',
     instructions: [
-      'Supported: unix://, unix:///absolute/path, ws://localhost:port, wss://host/path, and stdio://.',
+      'Supported: unix:///absolute/path, ws://127.0.0.1:4500, wss://host/path, and stdio://.',
       'When Use an external Codex server is enabled, Zipflow uses this value instead of the managed default endpoint.',
     ],
   },
