@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.6.1 — Codex timeout determinism and faster RPC tests
+
+- Separated Codex app-server RPC connection timeouts from the model turn's total completion deadline.
+- Start idle and total generation timers only after `turn/start` returns a concrete turn ID.
+- Made cancellation deterministic by emitting `stream-open` only after both thread and turn IDs are known, then sending `turn/interrupt` with both IDs.
+- Kept awaited RPC and completion timers referenced so Node cannot exit with unresolved promises.
+- Close Codex app-server processes deterministically and wait briefly for shutdown before escalating to `SIGKILL`.
+- Replaced timing-sensitive spawned-process Codex tests with an in-memory stdio RPC fixture, reducing the suite from roughly 16 seconds to under one second on the same runtime.
+
 ## 1.6.0 — LLM completion integrity and Codex app-server
 
 - Decouple **Test selected model** from enabled workflow output tasks: its first request now validates a fixed transport marker, while the second request validates only the autonomous-decision schema, so enabling commit-message generation cannot produce a misleading `missing commit message` failure.

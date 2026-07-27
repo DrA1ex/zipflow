@@ -14,6 +14,7 @@ export async function requestAutonomyDecision({
   signal = null,
   onEvent = () => {},
   fetchImpl = fetch,
+  completionOptions = {},
 }) {
   if (!allowedActions?.length) throw new Error(`No actions are available for autonomy gate ${gate}.`);
   const session = await resolveLocalLlmSession(settings, { signal, fetchImpl });
@@ -33,7 +34,7 @@ export async function requestAutonomyDecision({
     reasoningEffort: settings.llmReasoningEffort,
     contextLength: Math.min(session.profile.contextLength || 16_384, 32_768),
     reasoningOffSupported: session.profile.reasoningOffSupported,
-  }, { signal, onEvent, fetchImpl, settings });
+  }, { ...completionOptions, signal, onEvent, fetchImpl, settings });
   let parsed = parseDecision(completion.content || completion.reasoning, gate, allowedActions);
   let repaired = false;
   if (!parsed) {
@@ -55,7 +56,7 @@ export async function requestAutonomyDecision({
       reasoningEffort: settings.llmReasoningEffort,
       contextLength: Math.min(session.profile.contextLength || 8_192, 8_192),
       reasoningOffSupported: session.profile.reasoningOffSupported,
-    }, { signal, onEvent, fetchImpl, settings });
+    }, { ...completionOptions, signal, onEvent, fetchImpl, settings });
     parsed = parseDecision(completion.content || completion.reasoning, gate, allowedActions);
   }
   if (!parsed) {

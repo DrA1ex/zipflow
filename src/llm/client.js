@@ -148,6 +148,7 @@ export async function createLocalCompletion({
   if (provider === 'codex') {
     return createCodexAppServerCompletion({ model, messages, responseSchema, reasoningEffort, maxTokens }, {
       settings, signal, timeoutMs: limits.totalDeadlineMs, idleTimeoutMs: limits.idleTimeoutMs,
+      rpcTimeoutMs: limits.connectionTimeoutMs,
       maxAnswerBytes: limits.maxAnswerBytes, maxReasoningBytes: limits.maxReasoningBytes,
       onEvent, spawnImpl, executable,
     });

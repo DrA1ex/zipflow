@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { resolveInternalBinary } from '../security/binaries.js';
 import { ByteChunkCollector } from '../utils/byte-buffer.js';
+import { ZIPFLOW_VERSION } from '../version.js';
 import { classifyServerError, LocalLlmError } from './errors.js';
 
 const STDERR_LIMIT = 256 * 1024;
@@ -60,6 +61,7 @@ export async function createCodexAppServerCompletion({
   signal = null,
   timeoutMs = 600_000,
   idleTimeoutMs = 120_000,
+  rpcTimeoutMs = 15_000,
   maxAnswerBytes = 5 * 1024 * 1024,
   maxReasoningBytes = 5 * 1024 * 1024,
   onEvent = () => {},
@@ -68,7 +70,7 @@ export async function createCodexAppServerCompletion({
 } = {}) {
   const scratch = await mkdtemp(path.join(os.tmpdir(), 'zipflow-codex-'));
   try {
-    return await withCodexClient({ settings, signal, timeoutMs, spawnImpl, executable }, async (client) => {
+    return await withCodexClient({ settings, signal, timeoutMs: rpcTimeoutMs, spawnImpl, executable }, async (client) => {
       const content = new ByteChunkCollector(maxAnswerBytes, { label: 'Codex answer' });
       const reasoning = new ByteChunkCollector(maxReasoningBytes, { label: 'Codex reasoning' });
       let finalContent = '';
@@ -77,25 +79,42 @@ export async function createCodexAppServerCompletion({
       let threadId = null;
       let turnId = null;
       let completed = false;
+      let completionSettled = false;
+      let timersStarted = false;
       let idleTimer = null;
       let deadlineTimer = null;
       let settle;
       let fail;
       const completion = new Promise((resolve, reject) => { settle = resolve; fail = reject; });
+      const resolveCompletion = () => {
+        if (completionSettled) return false;
+        completionSettled = true;
+        settle();
+        return true;
+      };
+      const rejectCompletion = (error) => {
+        if (completionSettled) return false;
+        completionSettled = true;
+        fail(error);
+        return true;
+      };
       const resetIdle = () => {
+        if (!timersStarted || completionSettled) return;
         if (idleTimer) clearTimeout(idleTimer);
-        idleTimer = setTimeout(() => fail(new LocalLlmError(
+        idleTimer = setTimeout(() => rejectCompletion(new LocalLlmError(
           `Codex app-server produced no events for ${Math.round(idleTimeoutMs / 1000)} seconds.`,
           { code: 'idle_timeout', provider: 'codex', retryableWithSmallerPrompt: true },
         )), idleTimeoutMs);
-        idleTimer.unref?.();
       };
-      resetIdle();
-      deadlineTimer = setTimeout(() => fail(new LocalLlmError(
-        `Codex app-server did not complete within ${Math.round(timeoutMs / 1000)} seconds. Partial output was preserved.`,
-        { code: 'total_deadline', provider: 'codex', retryableWithSmallerPrompt: true },
-      )), timeoutMs);
-      deadlineTimer.unref?.();
+      const startCompletionTimers = () => {
+        if (timersStarted || completionSettled) return;
+        timersStarted = true;
+        resetIdle();
+        deadlineTimer = setTimeout(() => rejectCompletion(new LocalLlmError(
+          `Codex app-server did not complete within ${Math.round(timeoutMs / 1000)} seconds. Partial output was preserved.`,
+          { code: 'total_deadline', provider: 'codex', retryableWithSmallerPrompt: true },
+        )), timeoutMs);
+      };
 
       client.onNotification = (message) => {
         resetIdle();
@@ -124,20 +143,23 @@ export async function createCodexAppServerCompletion({
           const turn = params.turn ?? {};
           if (turnId && turn.id && turn.id !== turnId) return;
           completed = true;
-          if (turn.status === 'completed') settle();
-          else if (turn.status === 'interrupted') fail(new LocalLlmError(
+          if (turn.status === 'completed') resolveCompletion();
+          else if (turn.status === 'interrupted') rejectCompletion(new LocalLlmError(
             'Codex app-server interrupted the model turn before completion. Partial output was preserved.',
             { code: signal?.aborted ? 'cancelled' : 'incomplete_generation', provider: 'codex', retryableWithSmallerPrompt: !signal?.aborted },
           ));
-          else fail(codexTurnError(turn.error));
+          else rejectCompletion(codexTurnError(turn.error));
         }
       };
 
       const abort = () => {
-        if (threadId && turnId) client.notify('turn/interrupt', { threadId, turnId });
-        fail(new LocalLlmError('Codex app-server request cancelled.', { code: 'cancelled', provider: 'codex' }));
+        if (threadId && turnId) {
+          try { client.notify('turn/interrupt', { threadId, turnId }); } catch {}
+        }
+        rejectCompletion(new LocalLlmError('Codex app-server request cancelled.', { code: 'cancelled', provider: 'codex' }));
       };
       signal?.addEventListener('abort', abort, { once: true });
+      if (signal?.aborted) abort();
       try {
         onEvent({
           type: 'request', attempt: 1, format: responseSchema ? 'json_schema' : 'text',
@@ -154,7 +176,6 @@ export async function createCodexAppServerCompletion({
         });
         threadId = threadResult?.thread?.id;
         if (!threadId) throw new LocalLlmError('Codex app-server did not return a thread ID.', { code: 'protocol_error', provider: 'codex' });
-        onEvent({ type: 'stream-open' });
         const turnResult = await client.request('turn/start', compactObject({
           threadId,
           input: [{ type: 'text', text: codexPrompt(messages, maxTokens) }],
@@ -166,6 +187,10 @@ export async function createCodexAppServerCompletion({
           outputSchema: responseSchema || undefined,
         }));
         turnId = turnResult?.turn?.id ?? null;
+        if (!turnId) throw new LocalLlmError('Codex app-server did not return a turn ID.', { code: 'protocol_error', provider: 'codex' });
+        onEvent({ type: 'stream-open' });
+        if (signal?.aborted) abort();
+        startCompletionTimers();
         await completion;
         if (!completed) throw new LocalLlmError(
           'Codex app-server ended without a turn/completed event. Partial output was preserved.',
@@ -199,8 +224,8 @@ export async function createCodexAppServerCompletion({
 async function withCodexClient(options, task) {
   const binary = options.executable || await resolveInternalBinary('codex', { settings: options.settings });
   const client = new CodexRpcClient(binary, options);
-  await client.start();
   try {
+    await client.start();
     return await task(client);
   } finally {
     await client.close();
@@ -218,10 +243,15 @@ class CodexRpcClient {
     this.onNotification = () => {};
     this.stderr = '';
     this.closed = false;
+    this.abortHandler = () => this.failAll(new LocalLlmError(
+      'Codex app-server request cancelled.',
+      { code: 'cancelled', provider: 'codex' },
+    ));
   }
 
   async start() {
     if (this.signal?.aborted) throw new LocalLlmError('Codex app-server request cancelled.', { code: 'cancelled', provider: 'codex' });
+    this.signal?.addEventListener('abort', this.abortHandler, { once: true });
     this.child = this.spawnImpl(this.executable, ['app-server', '--listen', 'stdio://'], {
       stdio: ['pipe', 'pipe', 'pipe'], shell: false, env: process.env,
     });
@@ -236,23 +266,27 @@ class CodexRpcClient {
         code: 'app_server_exited', provider: 'codex', retryableWithSmallerPrompt: false,
       }));
     });
+    if (this.signal?.aborted) throw new LocalLlmError('Codex app-server request cancelled.', { code: 'cancelled', provider: 'codex' });
     this.lines = createInterface({ input: this.child.stdout, crlfDelay: Infinity });
     this.lines.on('line', (line) => this.handleLine(line));
     await this.request('initialize', {
-      clientInfo: { name: 'zipflow', title: 'Zipflow', version: '1.6.0' },
+      clientInfo: { name: 'zipflow', title: 'Zipflow', version: ZIPFLOW_VERSION },
       capabilities: { experimentalApi: false },
     });
     this.notify('initialized', {});
   }
 
   request(method, params = {}) {
+    if (this.signal?.aborted) return Promise.reject(new LocalLlmError(
+      'Codex app-server request cancelled.',
+      { code: 'cancelled', provider: 'codex' },
+    ));
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new LocalLlmError(`Codex app-server RPC ${method} timed out.`, { code: 'rpc_timeout', provider: 'codex' }));
       }, this.timeoutMs);
-      timer.unref?.();
       this.pending.set(id, { resolve, reject, timer, method });
       this.write({ method, id, params });
     });
@@ -301,10 +335,35 @@ class CodexRpcClient {
   async close() {
     if (this.closed) return;
     this.closed = true;
+    this.signal?.removeEventListener('abort', this.abortHandler);
     this.lines?.close();
     this.failAll(new LocalLlmError('Codex app-server session closed.', { code: 'cancelled', provider: 'codex' }));
-    if (this.child && !this.child.killed) this.child.kill('SIGTERM');
+    const child = this.child;
+    if (!child) return;
+    child.stdin?.end?.();
+    if (child.exitCode !== null && child.exitCode !== undefined) return;
+    const exited = waitForChildExit(child, 250);
+    if (!child.killed) child.kill('SIGTERM');
+    if (await exited) return;
+    if (child.exitCode === null || child.exitCode === undefined) child.kill('SIGKILL');
+    await waitForChildExit(child, 250);
   }
+}
+
+
+function waitForChildExit(child, timeoutMs) {
+  if (child.exitCode !== null && child.exitCode !== undefined) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    let timer = null;
+    const finish = (value) => {
+      if (timer) clearTimeout(timer);
+      child.removeListener?.('exit', onExit);
+      resolve(value);
+    };
+    const onExit = () => finish(true);
+    child.once?.('exit', onExit);
+    timer = setTimeout(() => finish(false), timeoutMs);
+  });
 }
 
 function codexPrompt(messages, maxTokens) {

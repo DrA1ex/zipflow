@@ -5,7 +5,7 @@ import { requestAutonomyDecision } from '../autonomy/decision-engine.js';
 import { updateSettings } from '../settings/store.js';
 import { canonicalModelId, modelIdentityKey } from '../llm/model-identity.js';
 
-export async function testSelectedModel(controller) {
+export async function testSelectedModel(controller, { fetchImpl = fetch, completionOptions = {} } = {}) {
   const { state } = controller;
   const settings = state.settings;
   const panel = state.settingsPanel;
@@ -22,7 +22,7 @@ export async function testSelectedModel(controller) {
   state.status = `Testing ${settings.llmModel}`;
   controller.invalidate();
   try {
-    const session = await resolveLocalLlmSession(settings, { signal: operation.signal });
+    const session = await resolveLocalLlmSession(settings, { signal: operation.signal, fetchImpl });
     let streamSupported = false;
     const compatibilityMarker = 'ZIPFLOW_COMPATIBILITY_OK';
     const completion = await createLocalCompletion({
@@ -47,8 +47,10 @@ export async function testSelectedModel(controller) {
       contextLength: Math.min(session.profile.contextLength || 16_384, 16_384),
       reasoningOffSupported: session.profile.reasoningOffSupported,
     }, {
+      ...completionOptions,
       signal: operation.signal,
       settings,
+      fetchImpl,
       onEvent: (event) => { if (event.type === 'stream-open' || event.type === 'chunk') streamSupported = true; },
     });
     const compatibilityText = String(completion.content || completion.reasoning || '').trim();
@@ -68,8 +70,9 @@ export async function testSelectedModel(controller) {
       },
       allowedActions: ['continue'],
       signal: operation.signal,
-      settings,
       onEvent: (event) => { if (event.type === 'stream-open' || event.type === 'chunk') streamSupported = true; },
+      fetchImpl,
+      completionOptions,
     });
     if (autonomousDecision.action !== 'continue') throw new Error('Autonomous decision protocol returned an unexpected action.');
     const canonicalModel = canonicalModelId(settings.llmProvider, settings.llmModel);
