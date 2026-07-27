@@ -20,7 +20,11 @@
       },
       "engines": {
         "node": ">=20"
-      }
+      },
+      "os": [
+        "darwin",
+        "linux"
+      ]
     },
     "node_modules/buffer-crc32": {
       "version": "1.0.0",

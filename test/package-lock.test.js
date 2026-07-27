@@ -20,6 +20,9 @@ test('package lock keeps public npm tarball URLs', async () => {
 test('runtime dependencies and published shrinkwrap are exact and identical', async () => {
   const lock = JSON.parse(await readFile(new URL('../package-lock.json', import.meta.url), 'utf8'));
   const shrinkwrap = JSON.parse(await readFile(new URL('../npm-shrinkwrap.json', import.meta.url), 'utf8'));
+  for (const manifest of [lock, shrinkwrap]) {
+    assert.deepEqual(manifest.packages[''].os, packageJson.os);
+  }
   for (const [name, version] of Object.entries(packageJson.dependencies)) {
     assert.match(version, /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/);
     assert.equal(lock.packages[''].dependencies[name], version);
