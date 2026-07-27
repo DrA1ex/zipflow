@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { handleInputEditorKey } from 'terlio.js';
+import { normalizeZipflowKey } from './key-normalization.js';
 import { copyZipflowText } from '../ui/clipboard.js';
 import { cleanupRunStorage, runReportPath } from '../runs/store.js';
 import { revealFile } from '../utils/reveal.js';
@@ -116,7 +117,7 @@ export class ZipflowController {
 
   handleKey(key) {
     this.state.inputGeneration = (Number(this.state.inputGeneration) || 0) + 1;
-    const normalized = key.printable && key.text === ' ' ? { ...key, name: 'space' } : key;
+    const normalized = normalizeZipflowKey(key);
     if (pathInputKeySupersedesCompletion(this.state, normalized)) {
       this.state.pathSuggestionAbortController?.abort?.('superseded-input');
     }
@@ -160,6 +161,11 @@ export class ZipflowController {
     // Active text editors own ordinary and Shift-modified printable input.
     // Route them before screen/global shortcuts such as G report, ? help, or / search.
     if (isEditorScreen(this.state.screen)) return this.handleEditorKey(normalized);
+    // Setup shortcuts must run before unrelated async screen routing. Besides
+    // giving the active workflow editor priority, this keeps repeated modified
+    // arrow input synchronous and prevents it from falling through as ordinary
+    // menu navigation.
+    if (handleSetupShortcut(this, normalized)) return this.invalidate();
     if (await handleRunShortcut(this, normalized)) return this.invalidate();
     if (normalized.name === 'escape' && this.state.exportAbortController) {
       this.state.exportAbortController.abort();
@@ -223,7 +229,7 @@ export class ZipflowController {
         return this.invalidate();
       }
     }
-    if (!this.state.busy && (handleSetupShortcut(this, normalized) || handleExportShortcut(this, normalized))) return this.invalidate();
+    if (!this.state.busy && handleExportShortcut(this, normalized)) return this.invalidate();
     if (normalized.name === 'up' || normalized.name === 'down') {
       this.clearMenuActivationBarrier();
       this.moveSelection(normalized.name === 'up' ? -1 : 1);

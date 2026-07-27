@@ -1,6 +1,7 @@
 import {
   commandLocationLabel, formatCommandSpec, validateCommandSpec,
 } from '../project/command-spec.js';
+import { shiftArrowDirection } from './key-normalization.js';
 
 export function showChecksStep(controller, selectedIndex = null) {
   const checks = controller.state.draft.checks;
@@ -93,9 +94,9 @@ export function handleChecksShortcut(controller, key) {
   const { state } = controller;
   if (state.screen !== 'setup-checks') return false;
   const selected = state.menuItems[state.selectedIndex];
-  if (key.shift && (key.name === 'up' || key.name === 'down') && selected?.id.startsWith('check:')) {
+  const direction = shiftArrowDirection(key);
+  if (direction && selected?.id.startsWith('check:')) {
     const index = Number(selected.id.slice(6));
-    const direction = key.name === 'up' ? -1 : 1;
     const target = Math.max(0, Math.min(state.draft.checks.length - 1, index + direction));
     if (target !== index) {
       const [moved] = state.draft.checks.splice(index, 1);

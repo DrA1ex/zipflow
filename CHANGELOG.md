@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.15 — Workflow check reordering repair
+
+- Restored `Shift+Up` and `Shift+Down` reordering in the workflow checks menu instead of letting modified arrows fall through to ordinary selection movement.
+- Routed setup-specific shortcuts before unrelated asynchronous run-screen handling and the generic busy gate, so modified arrows cannot fall through to ordinary menu navigation.
+- Added a Zipflow key-normalization boundary that preserves Shift intent from Terlio raw sequences and accepts compatible modifier representations without changing plain-arrow navigation.
+- Added regression coverage using actual Terlio 1.2.0 terminal input events, a full fake-TTY WorkspaceApp path, an active-operation state, and degraded adapter events that retain only the raw escape sequence.
+
 ## 1.3.14 — Terlio.js 1.2.0 compatibility
 
 - Updated the pinned Terlio.js dependency and published lock metadata from 1.1.3 to 1.2.0.

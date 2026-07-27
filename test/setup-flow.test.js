@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
+import { parseInputEvent } from 'terlio.js';
 import { createInitialState } from '../src/app/state.js';
 import { ZipflowController } from '../src/app/controller.js';
 import { activateSetup, beginSetup } from '../src/app/setup-flow.js';
@@ -89,13 +90,19 @@ test('Shift+Up and Shift+Down reorder workflow checks without toggling them', as
   await activateSetup(controller, 'use-project');
   state.selectedIndex = state.menuItems.findIndex((item) => item.id === 'check:1');
 
-  await controller.handleKey({ name: 'up', shift: true });
+  // A stale or unrelated busy flag must not demote a local reorder command
+  // into ordinary menu navigation.
+  state.activeOperation = { kind: 'unrelated-test-operation' };
+  const terminalShiftUp = parseInputEvent('\x1b[1;2A');
+  await controller.handleKey(terminalShiftUp);
   assert.deepEqual(state.draft.checks.map((check) => check.id), ['test', 'lint', 'types']);
   assert.equal(state.menuItems[state.selectedIndex].id, 'check:0');
   assert.equal(state.draft.checks[0].selected, true);
   assert.equal(state.status, 'Check moved up');
 
-  await controller.handleKey({ name: 'down', shift: true });
+  // Preserve the modifier from the raw sequence even if an input adapter
+  // supplies an incomplete normalized event.
+  await controller.handleKey({ name: 'down', shift: false, sequence: '\x1b[1;2B' });
   assert.deepEqual(state.draft.checks.map((check) => check.id), ['lint', 'test', 'types']);
   assert.equal(state.menuItems[state.selectedIndex].id, 'check:1');
   assert.equal(state.status, 'Check moved down');
