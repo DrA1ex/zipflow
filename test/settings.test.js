@@ -528,22 +528,47 @@ test('OpenAI-compatible base URL validation rejects embedded credentials', async
 });
 
 
-test('Codex app-server settings expose model and effort controls while using CLI authentication', async () => withSettingsHome(async () => {
+test('Codex endpoint validation accepts supported transports and rejects unsafe plain remote WebSockets', async () => {
+  const field = { id: 'llmCodexEndpoint' };
+  assert.equal(await validateSettingValue(field, 'ws://127.0.0.1:4500'), 'ws://127.0.0.1:4500/');
+  assert.equal(await validateSettingValue(field, 'wss://codex.example.test/rpc'), 'wss://codex.example.test/rpc');
+  assert.equal(await validateSettingValue(field, 'unix:///tmp/codex.sock'), 'unix:///tmp/codex.sock');
+  assert.equal(await validateSettingValue(field, 'stdio://'), 'stdio://');
+  await assert.rejects(validateSettingValue(field, 'ws://codex.example.test:4500'), /localhost/);
+  await assert.rejects(validateSettingValue(field, 'http://127.0.0.1:4500'), /must use/);
+});
+
+
+
+test('Codex endpoint remains editable before choosing the Codex provider', async () => withSettingsHome(async () => {
+  const { state, controller } = await settingsController({ llmProvider: 'disabled' });
+  const view = await selectCategory(controller, 'localLlm');
+  const endpoint = view.parameters.find((item) => item.id === 'llmCodexEndpoint');
+  assert.ok(endpoint);
+  assert.equal(endpoint.disabled, false);
+  assert.equal(endpoint.value, 'unix://');
+}));
+
+test('Codex app-server settings expose endpoint, model, effort, and optional authentication controls', async () => withSettingsHome(async () => {
   const { state, controller } = await settingsController({
     llmProvider: 'codex',
     llmModel: 'gpt-test',
     llmReasoningEffort: 'high',
+    llmCodexEndpoint: 'ws://127.0.0.1:4600/',
     binaryPaths: { codex: '/usr/local/bin/codex' },
   });
   let view = await selectCategory(controller, 'localLlm');
   const byId = Object.fromEntries(view.parameters.map((item) => [item.id, item]));
   assert.equal(byId.llmBaseUrl.disabled, true);
   assert.equal(byId.llmOpenAiApiMode.disabled, true);
+  assert.equal(byId.llmCodexEndpoint.disabled, false);
+  assert.equal(byId.llmCodexEndpoint.value, 'ws://127.0.0.1:4600/');
+  assert.match(byId.llmCodexEndpoint.description, /only connects/i);
   assert.equal(byId.llmReasoningEffort.disabled, false);
   assert.equal(byId.llmReasoningEffort.value, 'High');
   assert.equal(byId.llmModel.value, 'gpt-test');
-  assert.equal(byId.llmApiToken.disabled, true);
-  assert.match(byId.llmApiToken.description, /Codex CLI login/);
+  assert.equal(byId.llmApiToken.disabled, false);
+  assert.match(byId.llmApiToken.description, /bearer token/i);
 
   view = await openParameter(controller, 'llmProvider');
   assert.ok(view.choices.some((item) => item.id === 'llmProvider:codex'));

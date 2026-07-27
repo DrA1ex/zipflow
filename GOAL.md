@@ -973,3 +973,28 @@ Make model testing and historical replay report only verified provider completio
 - the model compatibility button cannot fail merely because a workflow output task such as commit-message generation is enabled;
 - large replay output remains scrollable and cancellable without rebuilding the complete rendered transcript on every chunk;
 - Codex model selection and generation work through the configured local CLI and require a successful `turn/completed` state.
+
+
+---
+
+# Phase 6.1 — Shared Codex transport and Terlio 1.2.1
+
+## Goal
+
+Make Codex app-server connection ownership explicit and reusable while adopting the portable interaction and rendering fixes from Terlio.js 1.2.1.
+
+## Delivered work
+
+- upgrade and test against the user-provided Terlio.js 1.2.1 package;
+- rely on Terlio-normalized `Shift+K/J` input and cover the new compact/default versus explicit `block` progress behavior;
+- expose an editable Codex endpoint for stdio, local/secure WebSocket, and Unix sockets;
+- probe and reuse the default shared Unix-socket server before starting a background listener;
+- keep all custom endpoints connect-only and preserve `stdio://` as an explicit private compatibility mode;
+- cover authenticated WebSocket handshakes, Unix-socket framing, no-spawn custom endpoints, and concurrent managed launch reuse.
+
+## Exit criteria
+
+- two operations can use an already running compatible Codex server without starting another instance;
+- changing the endpoint never causes Zipflow to launch that user-managed server;
+- the endpoint is editable even before Codex is selected as the active provider;
+- the complete suite passes using the uploaded Terlio.js 1.2.1 package.

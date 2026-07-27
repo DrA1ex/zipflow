@@ -7,8 +7,13 @@ import { resolveInternalBinary } from '../security/binaries.js';
 import { ByteChunkCollector } from '../utils/byte-buffer.js';
 import { ZIPFLOW_VERSION } from '../version.js';
 import { classifyServerError, LocalLlmError } from './errors.js';
+import {
+  connectCodexWebSocket, DEFAULT_CODEX_ENDPOINT, normalizeCodexEndpoint, parseCodexEndpoint,
+} from './codex-websocket.js';
 
 const STDERR_LIMIT = 256 * 1024;
+const MANAGED_CONNECT_RETRY_MS = 50;
+let managedLaunchPromise = null;
 
 export async function listCodexAppServerModels({
   settings = null,
@@ -16,8 +21,12 @@ export async function listCodexAppServerModels({
   timeoutMs = 15_000,
   spawnImpl = nodeSpawn,
   executable = '',
+  endpoint = '',
+  apiToken = '',
+  connectImpl = connectCodexWebSocket,
+  sleepImpl = delay,
 } = {}) {
-  return withCodexClient({ settings, signal, timeoutMs, spawnImpl, executable }, async (client) => {
+  return withCodexClient({ settings, signal, timeoutMs, spawnImpl, executable, endpoint, apiToken, connectImpl, sleepImpl }, async (client) => {
     const models = [];
     let cursor = null;
     do {
@@ -67,10 +76,14 @@ export async function createCodexAppServerCompletion({
   onEvent = () => {},
   spawnImpl = nodeSpawn,
   executable = '',
+  endpoint = '',
+  apiToken = '',
+  connectImpl = connectCodexWebSocket,
+  sleepImpl = delay,
 } = {}) {
   const scratch = await mkdtemp(path.join(os.tmpdir(), 'zipflow-codex-'));
   try {
-    return await withCodexClient({ settings, signal, timeoutMs: rpcTimeoutMs, spawnImpl, executable }, async (client) => {
+    return await withCodexClient({ settings, signal, timeoutMs: rpcTimeoutMs, spawnImpl, executable, endpoint, apiToken, connectImpl, sleepImpl }, async (client) => {
       const content = new ByteChunkCollector(maxAnswerBytes, { label: 'Codex answer' });
       const reasoning = new ByteChunkCollector(maxReasoningBytes, { label: 'Codex reasoning' });
       let finalContent = '';
@@ -267,20 +280,116 @@ function isPermissionProfileApiUnavailable(error) {
 }
 
 async function withCodexClient(options, task) {
-  const binary = options.executable || await resolveInternalBinary('codex', { settings: options.settings });
-  const client = new CodexRpcClient(binary, options);
+  const endpoint = resolveCodexEndpoint(options);
+  const target = parseCodexEndpoint(endpoint);
+  if (target.transport === 'stdio') {
+    const binary = options.executable || await resolveInternalBinary('codex', { settings: options.settings });
+    const client = new CodexRpcClient({ ...options, endpoint, executable: binary });
+    try {
+      await client.start();
+      return await task(client);
+    } finally {
+      await client.close();
+    }
+  }
+
+  let client = new CodexRpcClient({ ...options, endpoint, executable: '' });
   try {
     await client.start();
+  } catch (error) {
+    await client.close();
+    if (!isManagedEndpoint(endpoint)) {
+      if (isConnectionUnavailable(error)) throw new LocalLlmError(
+        `The user-managed Codex app-server at ${endpoint} is unavailable. Start that server and try again; Zipflow never starts custom endpoints.`,
+        { code: error.code, provider: 'codex', diagnostics: { endpoint } },
+      );
+      throw error;
+    }
+    if (!isConnectionUnavailable(error)) throw error;
+    await ensureManagedCodexServer({ ...options, endpoint });
+    client = await connectManagedCodexClient({ ...options, endpoint });
+  }
+  try {
     return await task(client);
   } finally {
     await client.close();
   }
 }
 
+function resolveCodexEndpoint({ endpoint, settings }) {
+  if (String(endpoint ?? '').trim()) return normalizeCodexEndpoint(endpoint);
+  if (settings) return normalizeCodexEndpoint(settings.llmCodexEndpoint || DEFAULT_CODEX_ENDPOINT);
+  return 'stdio://';
+}
+
+function isManagedEndpoint(endpoint) {
+  return normalizeCodexEndpoint(endpoint) === normalizeCodexEndpoint(DEFAULT_CODEX_ENDPOINT);
+}
+
+function isConnectionUnavailable(error) {
+  return ['connection_failed', 'connection_timeout'].includes(error?.code);
+}
+
+async function ensureManagedCodexServer(options) {
+  if (!managedLaunchPromise) {
+    managedLaunchPromise = launchManagedCodexServer(options)
+      .finally(() => { managedLaunchPromise = null; });
+  }
+  await managedLaunchPromise;
+}
+
+async function launchManagedCodexServer({ endpoint, executable, settings, spawnImpl = nodeSpawn, sleepImpl = delay }) {
+  const binary = executable || await resolveInternalBinary('codex', { settings });
+  let child;
+  try {
+    child = spawnImpl(binary, ['app-server', '--listen', codexListenEndpoint(endpoint)], {
+      stdio: 'ignore', shell: false, detached: true, env: process.env,
+    });
+  } catch (error) {
+    throw classifyServerError(`Could not start the shared Codex app-server: ${error.message}`, { provider: 'codex' });
+  }
+  child.once?.('error', () => {});
+  child.unref?.();
+  await sleepImpl(MANAGED_CONNECT_RETRY_MS);
+}
+
+function codexListenEndpoint(endpoint) {
+  const target = parseCodexEndpoint(endpoint);
+  if (['ws', 'wss'].includes(target.transport)) {
+    const parsed = new URL(target.endpoint);
+    if (parsed.pathname === '/' && !parsed.search) parsed.pathname = '';
+    return parsed.toString().replace(/\/$/, '');
+  }
+  return endpoint;
+}
+
+async function connectManagedCodexClient(options) {
+  const deadline = Date.now() + Math.max(1_000, Number(options.timeoutMs) || 15_000);
+  let lastError = null;
+  do {
+    const client = new CodexRpcClient({ ...options, executable: '' });
+    try {
+      await client.start();
+      return client;
+    } catch (error) {
+      lastError = error;
+      await client.close();
+      if (!isConnectionUnavailable(error)) throw error;
+      await options.sleepImpl(MANAGED_CONNECT_RETRY_MS);
+    }
+  } while (Date.now() < deadline);
+  throw lastError ?? new LocalLlmError('The shared Codex app-server did not become ready.', {
+    code: 'connection_timeout', provider: 'codex',
+  });
+}
+
 class CodexRpcClient {
-  constructor(executable, { spawnImpl, signal, timeoutMs }) {
+  constructor({ executable, endpoint, apiToken, settings, spawnImpl, connectImpl, signal, timeoutMs }) {
     this.executable = executable;
+    this.endpoint = endpoint;
+    this.apiToken = String(apiToken || settings?.llmApiToken || '').trim();
     this.spawnImpl = spawnImpl;
+    this.connectImpl = connectImpl;
     this.signal = signal;
     this.timeoutMs = timeoutMs;
     this.nextId = 1;
@@ -297,6 +406,18 @@ class CodexRpcClient {
   async start() {
     if (this.signal?.aborted) throw new LocalLlmError('Codex app-server request cancelled.', { code: 'cancelled', provider: 'codex' });
     this.signal?.addEventListener('abort', this.abortHandler, { once: true });
+    const target = parseCodexEndpoint(this.endpoint);
+    if (target.transport === 'stdio') this.startStdioTransport();
+    else await this.startWebSocketTransport();
+    if (this.signal?.aborted) throw new LocalLlmError('Codex app-server request cancelled.', { code: 'cancelled', provider: 'codex' });
+    await this.request('initialize', {
+      clientInfo: { name: 'zipflow', title: 'Zipflow', version: ZIPFLOW_VERSION },
+      capabilities: { experimentalApi: true },
+    });
+    this.notify('initialized', {});
+  }
+
+  startStdioTransport() {
     this.child = this.spawnImpl(this.executable, ['app-server', '--listen', 'stdio://'], {
       stdio: ['pipe', 'pipe', 'pipe'], shell: false, env: process.env,
     });
@@ -311,14 +432,25 @@ class CodexRpcClient {
         code: 'app_server_exited', provider: 'codex', retryableWithSmallerPrompt: false,
       }));
     });
-    if (this.signal?.aborted) throw new LocalLlmError('Codex app-server request cancelled.', { code: 'cancelled', provider: 'codex' });
     this.lines = createInterface({ input: this.child.stdout, crlfDelay: Infinity });
     this.lines.on('line', (line) => this.handleLine(line));
-    await this.request('initialize', {
-      clientInfo: { name: 'zipflow', title: 'Zipflow', version: ZIPFLOW_VERSION },
-      capabilities: { experimentalApi: true },
+  }
+
+  async startWebSocketTransport() {
+    this.socket = await this.connectImpl(this.endpoint, {
+      token: this.apiToken,
+      signal: this.signal,
+      timeoutMs: this.timeoutMs,
     });
-    this.notify('initialized', {});
+    this.socket.on('message', (message) => this.handleLine(message));
+    this.socket.on('error', (error) => {
+      if (!this.closed) this.failAll(error);
+    });
+    this.socket.on('close', () => {
+      if (!this.closed) this.failAll(new LocalLlmError('Codex app-server connection closed unexpectedly.', {
+        code: 'app_server_closed', provider: 'codex', retryableWithSmallerPrompt: true,
+      }));
+    });
   }
 
   request(method, params = {}) {
@@ -342,8 +474,14 @@ class CodexRpcClient {
   }
 
   write(message) {
-    if (this.closed || !this.child?.stdin?.writable) throw new LocalLlmError('Codex app-server stdin is unavailable.', { code: 'app_server_closed', provider: 'codex' });
-    this.child.stdin.write(`${JSON.stringify(message)}\n`);
+    if (this.closed) throw new LocalLlmError('Codex app-server connection is unavailable.', { code: 'app_server_closed', provider: 'codex' });
+    const json = JSON.stringify(message);
+    if (this.socket) {
+      this.socket.send(json);
+      return;
+    }
+    if (!this.child?.stdin?.writable) throw new LocalLlmError('Codex app-server stdin is unavailable.', { code: 'app_server_closed', provider: 'codex' });
+    this.child.stdin.write(`${json}\n`);
   }
 
   handleLine(line) {
@@ -383,6 +521,10 @@ class CodexRpcClient {
     this.signal?.removeEventListener('abort', this.abortHandler);
     this.lines?.close();
     this.failAll(new LocalLlmError('Codex app-server session closed.', { code: 'cancelled', provider: 'codex' }));
+    if (this.socket) {
+      this.socket.close();
+      return;
+    }
     const child = this.child;
     if (!child) return;
     child.stdin?.end?.();
@@ -409,6 +551,10 @@ function waitForChildExit(child, timeoutMs) {
     child.once?.('exit', onExit);
     timer = setTimeout(() => finish(false), timeoutMs);
   });
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function codexPrompt(messages, maxTokens) {

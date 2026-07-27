@@ -127,7 +127,7 @@ export async function submitSettingsEditor(controller) {
     const value = await validateSettingValue(modal.field, entered);
     if (modal.field.binaryId) await saveBinaryPath(controller, modal.field.binaryId, value);
     else state.settings = await updateSettings({ [modal.field.id]: value }, { allowClearToken: modal.field.id === 'llmApiToken', baseSettings: state.settings });
-    if (modal.field.id === 'llmApiToken' || modal.field.id === 'llmBaseUrl') resetModelCache(state.settingsPanel);
+    if (['llmApiToken', 'llmBaseUrl', 'llmCodexEndpoint'].includes(modal.field.id)) resetModelCache(state.settingsPanel);
     state.settingsPanel.modal = null;
     resetPathSuggestionInput(state);
     restoreParameter(state, modal.returnParameterId);

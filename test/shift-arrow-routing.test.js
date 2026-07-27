@@ -29,9 +29,15 @@ test('Zipflow recovers Shift+arrow intent from sequence, aliases, and modifier c
 });
 
 
-test('Shift+K/J provide a printable fallback when arrows do not carry Shift', () => {
-  assert.equal(checkReorderDirection(parseInputEvent('K')), -1);
-  assert.equal(checkReorderDirection(parseInputEvent('J')), 1);
+test('Terlio 1.2.1 normalizes Shift+K/J and Zipflow uses it for portable reordering', () => {
+  const upperK = parseInputEvent('K');
+  const upperJ = parseInputEvent('J');
+  assert.equal(upperK.name, 'k');
+  assert.equal(upperK.shift, true);
+  assert.equal(upperJ.name, 'j');
+  assert.equal(upperJ.shift, true);
+  assert.equal(checkReorderDirection(upperK), -1);
+  assert.equal(checkReorderDirection(upperJ), 1);
   assert.equal(checkReorderDirection(parseInputEvent('k')), 0);
   assert.equal(checkReorderDirection(parseInputEvent('j')), 0);
   assert.equal(checkReorderDirection(parseInputEvent('\x1b[A')), 0);

@@ -171,7 +171,18 @@
     "Codex CLI": "Codex CLI",
     "Use the locally authenticated Codex CLI through its stdio RPC app-server.": "Die lokal authentifizierte Codex CLI über ihren stdio-RPC-App-Server verwenden.",
     "Send an explicit reasoning effort to OpenAI-compatible or Codex app-server models.": "Einen expliziten Reasoning-Aufwand an OpenAI-kompatible oder Codex-app-server-Modelle senden.",
-    "Codex app-server uses the existing Codex CLI login; no API token is required here.": "Codex app-server verwendet die vorhandene Codex-CLI-Anmeldung; hier ist kein API-Token erforderlich."
+    "Codex app-server uses the existing Codex CLI login; no API token is required here.": "Codex app-server verwendet die vorhandene Codex-CLI-Anmeldung; hier ist kein API-Token erforderlich.",
+    "Use Codex JSON-RPC through a shared local server, a custom WebSocket/Unix endpoint, or explicit stdio mode.": "Codex JSON-RPC über einen gemeinsam genutzten lokalen Server, einen benutzerdefinierten WebSocket/Unix-Endpunkt oder den expliziten stdio-Modus verwenden.",
+    "Codex server endpoint": "Codex-Server-Endpunkt",
+    "External app-server. Zipflow only connects to custom endpoints and never starts them.": "Externer app-server. Zipflow verbindet sich nur mit benutzerdefinierten Endpunkten und startet sie niemals selbst.",
+    "This setting is used only by the Codex app-server provider.": "Diese Einstellung wird nur vom Codex-app-server-Anbieter verwendet.",
+    "Optional bearer token for authenticated ws://, wss://, or Unix-socket Codex endpoints. Local unauthenticated servers can leave it empty.": "Optionales Bearer-Token für authentifizierte Codex-Endpunkte über ws://, wss:// oder Unix-Socket. Bei lokalen Servern ohne Authentifizierung kann das Feld leer bleiben.",
+    "Codex app-server endpoint": "Codex-app-server-Endpunkt",
+    "Transport endpoint used for Codex JSON-RPC.": "Transport-Endpunkt für Codex JSON-RPC.",
+    "Use stdio:// only for a private app-server process per request.": "Verwenden Sie stdio:// nur für einen privaten app-server-Prozess pro Anfrage.",
+    "Shared local Unix-socket server. Zipflow reuses it when available and starts it only when the socket is unavailable.": "Gemeinsam genutzter lokaler Server über einen Unix-Socket. Zipflow verwendet ihn erneut, wenn er verfügbar ist, und startet ihn nur, wenn der Socket nicht erreichbar ist.",
+    "Default: shared local unix:// socket. Zipflow reuses an existing compatible server or starts one in the background.": "Standard: gemeinsam genutzter lokaler unix://-Socket. Zipflow verwendet einen vorhandenen kompatiblen Server oder startet ihn im Hintergrund.",
+    "Any changed ws://, wss://, or unix:///absolute/path endpoint is connect-only; start that server yourself.": "Jeder geänderte Endpunkt ws://, wss:// oder unix:///absoluter/pfad wird nur verbunden; starten Sie diesen Server selbst."
   },
   "patterns": [
     {

@@ -50,14 +50,13 @@ export function checkReorderDirection(key) {
   const arrowDirection = shiftArrowDirection(key);
   if (arrowDirection) return arrowDirection;
 
-  // Some terminal emulators, notably the default macOS Terminal profile, do
-  // not preserve Shift as a distinct modifier for arrow keys. Uppercase K/J
-  // are ordinary printable bytes, so they provide a reliable Shift-based
-  // fallback without changing plain list navigation.
+  // Terlio 1.2.1 normalizes uppercase ASCII as a Shift-modified lowercase
+  // key. This remains portable in terminals that cannot distinguish
+  // Shift+Arrow from the unmodified arrow sequence.
   const normalized = normalizeZipflowKey(key);
-  if (!normalized.printable) return 0;
-  if (normalized.text === 'K' || normalized.name === 'K') return -1;
-  if (normalized.text === 'J' || normalized.name === 'J') return 1;
+  if (!normalized.printable || !normalized.shift) return 0;
+  if (normalized.name === 'k') return -1;
+  if (normalized.name === 'j') return 1;
   return 0;
 }
 

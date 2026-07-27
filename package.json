@@ -1,6 +1,6 @@
 {
   "name": "zipflow",
-  "version": "1.6.3",
+  "version": "1.6.4",
   "description": "Interactive terminal workflow for safely reviewing and applying source-code ZIP updates",
   "type": "module",
   "bin": {
@@ -21,7 +21,7 @@
   "dependencies": {
     "ignore": "7.0.6",
     "picomatch": "4.0.5",
-    "terlio.js": "1.2.0",
+    "terlio.js": "1.2.1",
     "yauzl": "3.4.0",
     "yazl": "3.3.1"
   },

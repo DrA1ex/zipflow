@@ -2,6 +2,7 @@ import path from 'node:path';
 import { ensureDir } from '../utils/fs.js';
 import { expandHome } from '../utils/paths.js';
 import { parseByteSize } from '../utils/size.js';
+import { normalizeCodexEndpoint } from '../llm/codex-websocket.js';
 
 export async function validateSettingValue(field, entered) {
   if (field.binaryId) return entered;
@@ -23,6 +24,10 @@ export async function validateSettingValue(field, entered) {
     return value;
   }
   if (field.id === 'llmApiToken') return entered;
+  if (field.id === 'llmCodexEndpoint') {
+    if (!entered) throw new Error('Enter a Codex app-server endpoint.');
+    return normalizeCodexEndpoint(entered);
+  }
   if (field.id === 'llmBaseUrl') {
     if (!entered) throw new Error('Enter an OpenAI-compatible base URL.');
     let parsed;

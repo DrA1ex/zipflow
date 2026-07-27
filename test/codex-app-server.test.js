@@ -186,6 +186,7 @@ test('Codex app-server passes the complete settings model compatibility check wi
       llmProvider: 'codex',
       llmModel: 'gpt-test',
       llmReasoningEffort: 'high',
+      llmCodexEndpoint: 'stdio://',
       llmUseCommitMessage: true,
       binaryPaths: { ...DEFAULT_SETTINGS.binaryPaths, codex: runtime.executable },
     };
@@ -319,3 +320,129 @@ test('Codex app-server falls back to the documented legacy read-only shape only 
   assert.equal(Object.hasOwn(turn.params.sandboxPolicy, 'access'), false);
 });
 
+
+function fakeCodexWebSocketRuntime({ connectionFailures = 0 } = {}) {
+  const requests = [];
+  const connections = [];
+  const spawns = [];
+  let attempts = 0;
+  const connectImpl = async (endpoint, options = {}) => {
+    attempts += 1;
+    connections.push({ endpoint, token: options.token ?? '' });
+    if (attempts <= connectionFailures) {
+      const error = new Error('connection refused');
+      error.code = 'connection_failed';
+      throw error;
+    }
+    const socket = new EventEmitter();
+    socket.closed = false;
+    socket.send = (text) => {
+      const message = JSON.parse(text);
+      requests.push(message);
+      const send = (value) => queueMicrotask(() => socket.emit('message', JSON.stringify(value)));
+      if (message.method === 'initialize') send({ id: message.id, result: { userAgent: 'fake-shared-codex' } });
+      else if (message.method === 'model/list') send({ id: message.id, result: {
+        data: [{ id: 'shared-model', model: 'shared-model', displayName: 'Shared Model', isDefault: true }],
+        nextCursor: null,
+      } });
+    };
+    socket.close = () => {
+      socket.closed = true;
+      queueMicrotask(() => socket.emit('close'));
+    };
+    return socket;
+  };
+  const spawnImpl = (...args) => {
+    const child = new EventEmitter();
+    child.unrefCalled = false;
+    child.unref = () => { child.unrefCalled = true; };
+    spawns.push({ args, child });
+    return child;
+  };
+  return { requests, connections, spawns, connectImpl, spawnImpl };
+}
+
+test('Codex custom endpoint connects to the user-managed server and never starts a process', async () => {
+  const runtime = fakeCodexWebSocketRuntime();
+  const models = await listLocalModelChoices('codex', {
+    settings: { ...DEFAULT_SETTINGS, llmCodexEndpoint: 'ws://127.0.0.1:4600/', llmApiToken: 'remote-token' },
+    apiToken: 'remote-token',
+    connectImpl: runtime.connectImpl,
+    spawnImpl: () => { throw new Error('custom endpoints must not spawn'); },
+  });
+
+  assert.deepEqual(models.map((item) => item.id), ['shared-model']);
+  assert.deepEqual(runtime.connections, [{ endpoint: 'ws://127.0.0.1:4600/', token: 'remote-token' }]);
+  assert.equal(runtime.requests[0].method, 'initialize');
+  assert.equal(runtime.spawns.length, 0);
+});
+
+test('Codex default shared endpoint reuses a compatible running server without spawning', async () => {
+  const runtime = fakeCodexWebSocketRuntime();
+  const models = await listLocalModelChoices('codex', {
+    settings: { ...DEFAULT_SETTINGS },
+    connectImpl: runtime.connectImpl,
+    spawnImpl: runtime.spawnImpl,
+  });
+
+  assert.deepEqual(models.map((item) => item.id), ['shared-model']);
+  assert.equal(runtime.connections[0].endpoint, DEFAULT_SETTINGS.llmCodexEndpoint);
+  assert.equal(runtime.spawns.length, 0);
+});
+
+test('Codex default shared endpoint starts one detached server only after the probe fails', async () => {
+  const runtime = fakeCodexWebSocketRuntime({ connectionFailures: 1 });
+  const models = await listLocalModelChoices('codex', {
+    settings: { ...DEFAULT_SETTINGS, binaryPaths: { codex: '/usr/local/bin/codex' } },
+    executable: '/usr/local/bin/codex',
+    connectImpl: runtime.connectImpl,
+    spawnImpl: runtime.spawnImpl,
+    sleepImpl: async () => {},
+  });
+
+  assert.deepEqual(models.map((item) => item.id), ['shared-model']);
+  assert.equal(runtime.connections.length, 2);
+  assert.equal(runtime.spawns.length, 1);
+  assert.deepEqual(runtime.spawns[0].args.slice(0, 2), [
+    '/usr/local/bin/codex',
+    ['app-server', '--listen', DEFAULT_SETTINGS.llmCodexEndpoint],
+  ]);
+  assert.equal(runtime.spawns[0].args[2].detached, true);
+  assert.equal(runtime.spawns[0].args[2].stdio, 'ignore');
+  assert.equal(runtime.spawns[0].child.unrefCalled, true);
+});
+
+
+test('parallel Codex callers share one managed launch when the default server is initially unavailable', async () => {
+  const runtime = fakeCodexWebSocketRuntime({ connectionFailures: 2 });
+  const options = {
+    settings: { ...DEFAULT_SETTINGS, binaryPaths: { codex: '/usr/local/bin/codex' } },
+    executable: '/usr/local/bin/codex',
+    connectImpl: runtime.connectImpl,
+    spawnImpl: runtime.spawnImpl,
+    sleepImpl: async () => {},
+  };
+
+  const [first, second] = await Promise.all([
+    listLocalModelChoices('codex', options),
+    listLocalModelChoices('codex', options),
+  ]);
+
+  assert.deepEqual(first.map((item) => item.id), ['shared-model']);
+  assert.deepEqual(second.map((item) => item.id), ['shared-model']);
+  assert.equal(runtime.spawns.length, 1);
+});
+
+test('Codex unavailable custom endpoint fails without falling back to a local process', async () => {
+  const runtime = fakeCodexWebSocketRuntime({ connectionFailures: 1 });
+  await assert.rejects(() => listLocalModelChoices('codex', {
+    settings: { ...DEFAULT_SETTINGS, llmCodexEndpoint: 'ws://127.0.0.1:4700/' },
+    connectImpl: runtime.connectImpl,
+    spawnImpl: runtime.spawnImpl,
+  }), (error) => {
+    assert.equal(error.code, 'connection_failed');
+    assert.match(error.message, /user-managed.*never starts custom endpoints/i);
+    return true;
+  });
+  assert.equal(runtime.spawns.length, 0);
+});

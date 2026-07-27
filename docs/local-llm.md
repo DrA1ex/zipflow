@@ -6,10 +6,10 @@ Zipflow supports four provider modes:
 Ollama:            http://127.0.0.1:11434
 LM Studio:         http://127.0.0.1:1234
 OpenAI-compatible: configurable base URL, normally ending in /v1
-Codex app-server:  local Codex CLI over stdio RPC
+Codex app-server:  configurable stdio, WebSocket, or Unix-socket RPC
 ```
 
-The provider, optional bearer token, selected model, and output languages are configured in global settings. OpenAI-compatible and Codex app-server providers expose a reasoning-effort setting; only OpenAI-compatible uses the configurable HTTP API mode and bearer token. Bearer tokens are stored in macOS Keychain or the Linux system keyring rather than `~/.zipflow` JSON files. On Linux, persistence requires `secret-tool` and an active Secret Service provider; when secure storage is unavailable, Zipflow refuses to save a new token instead of falling back to plaintext.
+The provider, optional bearer token, selected model, and output languages are configured in global settings. OpenAI-compatible and Codex app-server providers expose a reasoning-effort setting; only OpenAI-compatible uses the configurable HTTP API mode. Codex can use a bearer token during an authenticated WebSocket handshake. Bearer tokens are stored in macOS Keychain or the Linux system keyring rather than `~/.zipflow` JSON files. On Linux, persistence requires `secret-tool` and an active Secret Service provider; when secure storage is unavailable, Zipflow refuses to save a new token instead of falling back to plaintext.
 
 ## Choose the LLM tasks
 
@@ -120,7 +120,11 @@ Model discovery uses `GET /models`. The selected model ID is sent unchanged, so 
 
 ## Codex app-server behavior
 
-Choose **Codex app-server** to use the locally installed and already authenticated Codex CLI without exposing an HTTP API token. Zipflow resolves the configured `codex` binary, starts `codex app-server --listen stdio://` without a shell, performs the initialize handshake, and discovers selectable models through `model/list`.
+Choose **Codex app-server** to use an already authenticated Codex installation through JSON-RPC. **Codex server endpoint** accepts `unix://`, `unix:///absolute/path`, local `ws://`, remote `wss://`, or `stdio://`. The field remains editable before the provider is selected, so the connection can be configured first.
+
+The default `unix://` endpoint is a shared local control socket. Zipflow first connects and completes the `initialize` handshake. If that exact managed socket is unavailable, Zipflow resolves the configured `codex` binary, starts one detached `codex app-server --listen unix://` process without a shell, and reconnects. A compatible server that is already listening is always reused, including by multiple Zipflow operations. Concurrent requests inside one Zipflow process share the same launch attempt.
+
+Any endpoint changed from the default is user-managed and connect-only. Zipflow never starts a process for a custom WebSocket or Unix-socket address. Use `stdio://` only when a separate private app-server process for each request is explicitly desired. Plain `ws://` is accepted only for localhost; use `wss://` or an SSH port forward for remote connections. **Authentication** supplies an optional bearer token during the WebSocket handshake.
 
 Each generation uses an ephemeral thread rooted in a private temporary directory and `approvalPolicy: never`. Zipflow opts into the experimental app-server surface, reads the paginated `permissionProfile/list` catalog for that directory, requires the built-in `:read-only` profile to be explicitly allowed, and passes its id through `thread/start.permissions`. It does not combine the profile with the legacy thread `sandbox` field or a turn-level `sandboxPolicy`.
 
@@ -151,7 +155,7 @@ Press `Esc` during review generation to cancel only that local LLM request. Arch
 - a read-only replay of a historical archive update using current settings;
 - a read-only Guarded-versus-Full autopilot simulation reconstructed from historical run state.
 
-Replay and autopilot simulation show the selected historical update and safety scope before opening the generation workspace. Neither changes project files, Git state, backups, source archives, or run history. Terlio 1.2.0 syntax highlighting is applied consistently to fenced code blocks and standalone JSON in live output, saved raw model responses, Activity, and historical replay. Zipflow infers JSON for partial structured streams so the response remains readable before the closing brace arrives.
+Replay and autopilot simulation show the selected historical update and safety scope before opening the generation workspace. Neither changes project files, Git state, backups, source archives, or run history. Terlio 1.2.1 syntax highlighting is applied consistently to fenced code blocks and standalone JSON in live output, saved raw model responses, Activity, and historical replay. Zipflow infers JSON for partial structured streams so the response remains readable before the closing brace arrives.
 
 During generation, raw model output is streamed in Activity. By default that temporary block disappears when Zipflow produces its parsed result. Enable **Raw model responses → Keep raw responses** to retain the completed raw response as a collapsed Activity block immediately before the parsed explanation or review. The setting uses a two-option radio list. Both values are stored as booleans, so switching between **Hide raw responses** and **Keep raw responses** updates the marker immediately and persists across restarts.
 

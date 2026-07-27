@@ -21,7 +21,7 @@ const PROVIDERS = {
   },
   codex: {
     label: 'Codex app-server',
-    rpcTransport: 'stdio JSONL',
+    rpcTransport: 'stdio, WebSocket, or Unix socket',
   },
 };
 
@@ -40,9 +40,15 @@ export async function listLocalModelChoices(provider, {
   settings = null,
   spawnImpl = undefined,
   executable = '',
+  codexEndpoint = '',
+  connectImpl = undefined,
+  sleepImpl = undefined,
 } = {}) {
   const definition = requireProvider(provider);
-  if (provider === 'codex') return listCodexAppServerModels({ settings, signal, timeoutMs, spawnImpl, executable });
+  if (provider === 'codex') return listCodexAppServerModels({
+    settings, signal, timeoutMs, spawnImpl, executable, endpoint: codexEndpoint, apiToken,
+    ...(connectImpl ? { connectImpl } : {}), ...(sleepImpl ? { sleepImpl } : {}),
+  });
   const url = provider === 'lmstudio'
     ? `${definition.nativeBaseUrl}/models`
     : provider === 'ollama'
@@ -137,6 +143,9 @@ export async function createLocalCompletion({
   settings = null,
   spawnImpl = undefined,
   executable = '',
+  codexEndpoint = '',
+  connectImpl = undefined,
+  sleepImpl = undefined,
 } = {}) {
   const limits = normalizeLlmStreamLimits({
     ...(streamLimits ?? {}),
@@ -150,7 +159,8 @@ export async function createLocalCompletion({
       settings, signal, timeoutMs: limits.totalDeadlineMs, idleTimeoutMs: limits.idleTimeoutMs,
       rpcTimeoutMs: limits.connectionTimeoutMs,
       maxAnswerBytes: limits.maxAnswerBytes, maxReasoningBytes: limits.maxReasoningBytes,
-      onEvent, spawnImpl, executable,
+      onEvent, spawnImpl, executable, endpoint: codexEndpoint, apiToken,
+      ...(connectImpl ? { connectImpl } : {}), ...(sleepImpl ? { sleepImpl } : {}),
     });
   }
   if (provider === 'lmstudio') {

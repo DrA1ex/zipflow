@@ -3,6 +3,10 @@ import { llmTasks } from '../llm/tasks.js';
 const RUN_SETTING_KEYS = Object.freeze([
   'checkOutput',
   'llmProvider',
+  'llmBaseUrl',
+  'llmCodexEndpoint',
+  'llmOpenAiApiMode',
+  'llmReasoningEffort',
   'llmModel',
   'llmLanguage',
   'llmPromptLanguage',

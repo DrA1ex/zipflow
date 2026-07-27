@@ -17,12 +17,12 @@ function dependencyVersion(document) {
   };
 }
 
-test('Zipflow pins Terlio.js 1.2.0 in public package metadata', () => {
-  assert.equal(packageJson.dependencies['terlio.js'], '1.2.0');
+test('Zipflow pins Terlio.js 1.2.1 in public package metadata', () => {
+  assert.equal(packageJson.dependencies['terlio.js'], '1.2.1');
   const expected = {
-    requested: '1.2.0',
-    installed: '1.2.0',
-    resolved: 'https://registry.npmjs.org/terlio.js/-/terlio.js-1.2.0.tgz',
+    requested: '1.2.1',
+    installed: '1.2.1',
+    resolved: 'https://registry.npmjs.org/terlio.js/-/terlio.js-1.2.1.tgz',
   };
   assert.deepEqual(dependencyVersion(packageLock), expected);
   assert.deepEqual(dependencyVersion(shrinkwrap), expected);
@@ -71,9 +71,21 @@ test('Terlio 1.2 syntax styling remains ANSI-styled through the safe Text render
   assert.match(rendered, /ok/);
 });
 
-test('Terlio 1.2 progress rendering uses smooth fractional blocks rather than hash filling', () => {
-  const rendered = renderToString(ProgressBar({ value: 42, total: 100, width: 32, theme: themes.ocean }), 32);
-  assert.match(rendered, /42%/);
-  assert.match(rendered, /[█▉▊▋▌▍▎▏]/u);
-  assert.doesNotMatch(rendered, /#+/);
+test('Terlio 1.2.1 uses compact progress by default and preserves fractional block rendering explicitly', () => {
+  const compact = renderToString(ProgressBar({ value: 42, total: 100, width: 32, theme: themes.ocean }), 32);
+  assert.match(compact, /42%/);
+  assert.match(compact, /▬/u);
+  assert.match(compact, /═/u);
+  assert.doesNotMatch(compact, /[█▉▊▋▌▍▎▏]/u);
+
+  const block = renderToString(ProgressBar({
+    value: 42,
+    total: 100,
+    width: 32,
+    variant: 'block',
+    theme: themes.ocean,
+  }), 32);
+  assert.match(block, /42%/);
+  assert.match(block, /[█▉▊▋▌▍▎▏]/u);
+  assert.doesNotMatch(block, /#+/);
 });

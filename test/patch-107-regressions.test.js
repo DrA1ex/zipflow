@@ -72,11 +72,11 @@ test('rich text recognizes fenced code, complete JSON, and streaming JSON langua
   assert.equal(inferLanguage('{"action":"apply",'), 'json');
 });
 
-test('current release requires Terlio 1.2.0 and keeps package metadata synchronized', () => {
+test('current release requires Terlio 1.2.1 and keeps package metadata synchronized', () => {
   assert.equal(packageJson.version, packageLock.version);
   assert.equal(packageJson.version, packageLock.packages[''].version);
-  assert.equal(packageJson.dependencies['terlio.js'], '1.2.0');
-  assert.equal(packageLock.packages[''].dependencies['terlio.js'], '1.2.0');
-  assert.equal(packageLock.packages['node_modules/terlio.js'].version, '1.2.0');
-  assert.equal(packageLock.packages['node_modules/terlio.js'].resolved, 'https://registry.npmjs.org/terlio.js/-/terlio.js-1.2.0.tgz');
+  assert.equal(packageJson.dependencies['terlio.js'], '1.2.1');
+  assert.equal(packageLock.packages[''].dependencies['terlio.js'], '1.2.1');
+  assert.equal(packageLock.packages['node_modules/terlio.js'].version, '1.2.1');
+  assert.equal(packageLock.packages['node_modules/terlio.js'].resolved, 'https://registry.npmjs.org/terlio.js/-/terlio.js-1.2.1.tgz');
 });

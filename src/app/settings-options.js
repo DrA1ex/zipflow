@@ -9,6 +9,7 @@ import { hasLlmPatchDeliveryTasks, llmTasks } from '../llm/tasks.js';
 import { ZIPFLOW_VERSION } from '../version.js';
 import { BINARY_TOOL_IDS, binaryDefinition, configuredBinaryPath } from '../security/binaries.js';
 import { environmentPolicyLabel } from '../security/environment.js';
+import { DEFAULT_CODEX_ENDPOINT } from '../llm/codex-websocket.js';
 
 export function settingsDefinitions(state) {
   const definitions = [
@@ -159,7 +160,7 @@ export function settingsChoices(state, parameter) {
     option(parameter, 'ollama', 'Ollama', 'Local server at 127.0.0.1:11434.'),
     option(parameter, 'lmstudio', 'LM Studio', 'Native API at 127.0.0.1:1234/api/v1.'),
     option(parameter, 'openai', 'OpenAI-compatible', 'Configurable /v1 server using the Responses API or Chat Completions.'),
-    option(parameter, 'codex', 'Codex app-server', 'Use the locally authenticated Codex CLI through its stdio RPC app-server.'),
+    option(parameter, 'codex', 'Codex app-server', 'Use Codex JSON-RPC through a shared local server, a custom WebSocket/Unix endpoint, or explicit stdio mode.'),
   ];
   if (parameter.settingId === 'llmModel') return modelChoices(state, parameter);
   if (parameter.settingId === 'llmOpenAiApiMode') return [
@@ -258,6 +259,7 @@ export function settingsEditorValue(state, fieldId) {
   if (fieldId.startsWith('binaryPath:')) return configuredBinaryPath(state.settings, fieldId.slice('binaryPath:'.length));
   if (fieldId === 'llmApiToken') return '';
   if (fieldId === 'llmBaseUrl') return String(state.settings.llmBaseUrl ?? '');
+  if (fieldId === 'llmCodexEndpoint') return String(state.settings.llmCodexEndpoint ?? '');
   if (['archiveMaxBytes', 'backupMaxBytes'].includes(fieldId)) return formatByteSize(state.settings[fieldId]).replace(/\s+/g, '');
   return String(state.settings[fieldId] ?? '');
 }
@@ -276,6 +278,15 @@ function localLlmParameters(state) {
       description: 'Root URL ending in /v1 for the OpenAI-compatible provider.',
       disabled: state.settings.llmProvider !== 'openai',
       disabledReason: 'This setting is used only by the OpenAI-compatible provider.',
+    },
+    {
+      id: 'llmCodexEndpoint', type: 'input', fieldId: 'llmCodexEndpoint', label: 'Codex server endpoint',
+      value: state.settings.llmCodexEndpoint,
+      description: state.settings.llmCodexEndpoint === DEFAULT_CODEX_ENDPOINT
+        ? 'Shared local Unix-socket server. Zipflow reuses it when available and starts it only when the socket is unavailable.'
+        : 'External app-server. Zipflow only connects to custom endpoints and never starts them.',
+      disabled: false,
+      disabledReason: '',
     },
     {
       ...choiceParameter('llmOpenAiApiMode', 'OpenAI API mode', openAiApiModeLabel(state.settings.llmOpenAiApiMode), 'Choose the generation endpoint used by the OpenAI-compatible provider.'),
@@ -327,9 +338,11 @@ function localLlmParameters(state) {
     {
       id: 'llmApiToken', type: 'input', fieldId: 'llmApiToken', label: 'Authentication',
       value: state.settings.llmApiToken ? 'Bearer token configured' : 'Not configured',
-      description: state.settings.llmProvider === 'codex' ? 'Codex app-server uses the existing Codex CLI login; no API token is required here.' : 'Optional API token for model discovery and generation.',
-      disabled: state.settings.llmProvider === 'codex',
-      disabledReason: 'Codex app-server uses the existing Codex CLI login.',
+      description: state.settings.llmProvider === 'codex'
+        ? 'Optional bearer token for authenticated ws://, wss://, or Unix-socket Codex endpoints. Local unauthenticated servers can leave it empty.'
+        : 'Optional API token for model discovery and generation.',
+      disabled: false,
+      disabledReason: '',
     },
     {
       id: 'llmModelTests', type: 'subpage', label: 'Test selected model',
@@ -789,6 +802,17 @@ const FIELD_DEFINITIONS = Object.freeze({
     description: 'Root API URL used for model discovery and generation.',
     placeholder: 'http://127.0.0.1:8080/v1',
     instructions: ['Include the API version prefix, usually /v1.', 'Zipflow appends /models, /responses, or /chat/completions.'],
+  },
+  llmCodexEndpoint: {
+    id: 'llmCodexEndpoint',
+    label: 'Codex app-server endpoint',
+    description: 'Transport endpoint used for Codex JSON-RPC.',
+    placeholder: 'unix://',
+    instructions: [
+      'Default: shared local unix:// socket. Zipflow reuses an existing compatible server or starts one in the background.',
+      'Any changed ws://, wss://, or unix:///absolute/path endpoint is connect-only; start that server yourself.',
+      'Use stdio:// only for a private app-server process per request.',
+    ],
   },
   llmApiToken: {
     id: 'llmApiToken',

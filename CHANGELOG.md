@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.6.4 — Terlio 1.2.1 and shared Codex endpoints
+
+- Upgrade the exact Terlio.js dependency to 1.2.1 from the user-provided local package, adopt its compact default progress rendering, preserve the prior fractional-cell appearance through the explicit `block` variant, and rely on normalized `Shift+K/J` events for portable check reordering.
+- Add an editable **Codex server endpoint** setting supporting `stdio://`, `ws://`, `wss://`, `unix://`, and `unix:///absolute/path`, with optional bearer-token authentication for WebSocket handshakes.
+- Use the shared local `unix://` control socket by default: Zipflow first connects and completes `initialize`; only when that managed socket is unavailable does it start one detached `codex app-server --listen unix://` process and reconnect.
+- Treat every changed endpoint as connect-only, so user-managed Codex servers are never started, replaced, or duplicated by Zipflow. Keep `stdio://` as an explicit private process-per-request compatibility mode.
+- Add real TCP WebSocket and Unix-socket handshake tests, endpoint validation and settings coverage, custom-server no-spawn assertions, and concurrent managed-launch deduplication.
+
 ## 1.6.3 — Codex permission-profile protocol
 
 - Initialize Codex app-server with `capabilities.experimentalApi: true`, enumerate `permissionProfile/list` with the replay working directory, and select the built-in `:read-only` profile only when the server reports it as allowed.

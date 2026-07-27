@@ -297,7 +297,7 @@ test('workflow and settings migration use safe Phase-2 defaults', () => {
   assert.equal(migrated.git.hooks, 'disabled');
 
   const settings = normalizeSettings({ version: 20, binaryPaths: { git: '/usr/bin/git', unknown: '/tmp/tool' } });
-  assert.equal(SETTINGS_VERSION, 26);
+  assert.equal(SETTINGS_VERSION, 27);
   assert.equal(settings.checkCommandEnvironment, 'sanitized');
   assert.equal(settings.deployCommandEnvironment, 'inherit');
   assert.equal(settings.projectCommandEnvironment, undefined);
