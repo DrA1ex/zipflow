@@ -33,7 +33,7 @@ const INTERNAL_BINARY_IDS = new Set(['git', 'npm', 'node', 'opener', 'python', '
 export const DEFAULT_SETTINGS = Object.freeze({
   version: SETTINGS_VERSION,
   storageRevision: 0,
-  interfaceLanguage: 'en',
+  interfaceLanguage: 'system',
   theme: 'ocean',
   checkForUpdatesOnStartup: true,
   checkOutput: 'last-line',

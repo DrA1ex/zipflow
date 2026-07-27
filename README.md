@@ -54,7 +54,7 @@ Archive → Review → Apply → Checks → Finish
 - Manual, Guarded autopilot, and Full autopilot decision modes.
 - Run history, performance analytics, reports, stored patches, and ZIP export.
 - Configurable startup update checks, manual version checks, and one-step global npm updates.
-- English and Russian interface coverage, with additional built-in and custom language packs.
+- System-locale interface selection by default, complete English and Russian catalogs, expanded core German, French, Italian, and Spanish translations, and custom JSON language packs.
 
 ## Useful controls
 

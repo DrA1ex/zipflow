@@ -9,7 +9,7 @@ import { hasLlmPatchDeliveryTasks, llmTasks } from '../llm/tasks.js';
 import { ZIPFLOW_VERSION } from '../version.js';
 import { BINARY_TOOL_IDS, binaryDefinition, configuredBinaryPath } from '../security/binaries.js';
 import { environmentPolicyLabel } from '../security/environment.js';
-import { DEFAULT_CODEX_ENDPOINT, codexEndpointDisplayValue } from '../llm/codex-websocket.js';
+import { codexEndpointDisplayValue } from '../llm/codex-websocket.js';
 
 export function settingsDefinitions(state) {
   const definitions = [
@@ -285,21 +285,19 @@ function localLlmParameters(state) {
   }
   if (state.settings.llmProvider === 'codex') {
     const external = state.settings.llmUseExternalCodexServer === true;
-    providerParameters.push(
-      toggleParameter(
-        'llmUseExternalCodexServer',
-        'Use an external Codex server',
-        external,
-        'Connect to an app-server that you start and manage yourself. Otherwise Zipflow uses its managed default endpoint.',
-      ),
-      {
-        id: 'llmCodexEndpoint', type: 'input', fieldId: 'llmCodexEndpoint', label: 'Codex server endpoint',
-        value: codexEndpointDisplayValue(external ? state.settings.llmCodexEndpoint : DEFAULT_CODEX_ENDPOINT),
-        description: 'Supported endpoints: unix:///absolute/path, ws://127.0.0.1:4500, wss://host/path, and stdio://.',
-        disabled: !external,
-        disabledReason: external ? '' : 'Enable Use an external Codex server to edit this endpoint.',
-      },
-    );
+    providerParameters.push(toggleParameter(
+      'llmUseExternalCodexServer',
+      'Use an external Codex server',
+      external,
+      'Connect to an app-server that you start and manage yourself. Otherwise Zipflow uses its managed default endpoint.',
+    ));
+    if (external) providerParameters.push({
+      id: 'llmCodexEndpoint', type: 'input', fieldId: 'llmCodexEndpoint', label: 'Codex server endpoint',
+      value: codexEndpointDisplayValue(state.settings.llmCodexEndpoint),
+      description: 'Supported endpoints: unix:///absolute/path, ws://127.0.0.1:4500, wss://host/path, and stdio://.',
+      disabled: false,
+      disabledReason: '',
+    });
   }
   return [
     choiceParameter('llmProvider', 'Provider', providerLabel(state.settings.llmProvider), 'Choose the local server Zipflow should contact.'),
@@ -735,7 +733,7 @@ function option(parameter, value, label, description = '') {
 
 
 function interfaceLanguageLabel(state) {
-  const configured = state.settings.interfaceLanguage ?? 'en';
+  const configured = state.settings.interfaceLanguage ?? 'system';
   if (configured === 'system') {
     const active = state.i18n?.available?.find((item) => item.id === state.i18n?.languageId);
     return active ? `System · ${active.nativeName}` : 'System language';

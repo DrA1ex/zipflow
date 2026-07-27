@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.7 — System language defaults and practical localization
+
+- Default new installations to **System language**, resolving the operating-system locale to a bundled pack and falling back to English only when no matching pack exists. Explicit existing language selections remain unchanged.
+- Hide the managed Codex endpoint entirely while **Use an external Codex server** is disabled; reveal the editable endpoint only after the user enables external-server mode.
+- Expand the German, French, Italian, and Spanish packs from small navigation samples to 252-message core catalogs covering project setup, archives, Git, checks, history, settings, LLM/Codex controls, common actions, and error states.
+- Add concrete per-language regression assertions for representative translations, alongside a minimum core-catalog size, so copied English values cannot satisfy the localization baseline.
+
 ## 1.6.6 — Concrete Codex endpoints and stable model selection
 
 - Display the fully resolved managed Codex Unix-socket address instead of the `unix://` shorthand, so the settings screen shows the real endpoint used on the current machine.

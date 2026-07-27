@@ -582,11 +582,7 @@ test('Codex app-server settings use a checkbox to enable a custom endpoint', asy
   assert.equal(byId.llmBaseUrl, undefined);
   assert.equal(byId.llmOpenAiApiMode, undefined);
   assert.equal(byId.llmUseExternalCodexServer.selected, false);
-  assert.equal(byId.llmCodexEndpoint.disabled, true);
-  assert.equal(byId.llmCodexEndpoint.value, codexEndpointDisplayValue('unix://'));
-  assert.match(byId.llmCodexEndpoint.value, /^unix:\/\/\//);
-  assert.match(byId.llmCodexEndpoint.value, /app-server-control\.sock$/);
-  assert.match(byId.llmCodexEndpoint.description, /supported endpoints/i);
+  assert.equal(byId.llmCodexEndpoint, undefined);
   assert.equal(byId.llmReasoningEffort.disabled, false);
   assert.equal(byId.llmReasoningEffort.value, 'High');
   assert.equal(byId.llmModel.value, 'gpt-test');

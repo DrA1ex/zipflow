@@ -12,11 +12,11 @@ const NUMERIC_PATTERN_NAMES = new Set([
 ]);
 const builtins = loadBuiltins();
 let registry = new Map(builtins);
-let configuredLanguage = 'en';
+let configuredLanguage = 'system';
 let activeLanguage = resolveLanguageId(configuredLanguage, registry);
 let userDirectory = null;
 
-export async function configureI18n(language = 'en', { directory = languageDirectory() } = {}) {
+export async function configureI18n(language = 'system', { directory = languageDirectory() } = {}) {
   userDirectory = path.resolve(directory);
   await mkdir(userDirectory, { recursive: true, mode: 0o700 });
   await chmod(userDirectory, 0o700).catch(() => {});
@@ -136,13 +136,12 @@ export function languageDirectory() {
   return path.join(getZipflowHome(), 'languages');
 }
 
-export function resolveSystemLanguage() {
-  const locale = Intl.DateTimeFormat().resolvedOptions().locale || process.env.LC_ALL || process.env.LANG || 'en';
-  const normalized = String(locale).toLowerCase();
-  const exact = [...registry.values()].find((pack) => pack.locale.toLowerCase() === normalized)?.id;
+export function resolveSystemLanguage(locale = detectedSystemLocale(), packs = registry) {
+  const normalized = String(locale || 'en').toLowerCase();
+  const exact = [...packs.values()].find((pack) => pack.locale.toLowerCase() === normalized)?.id;
   if (exact) return exact;
   const prefix = normalized.split(/[-_.]/)[0];
-  return registry.has(prefix) ? prefix : 'en';
+  return packs.has(prefix) ? prefix : 'en';
 }
 
 function loadBuiltins() {
@@ -237,15 +236,13 @@ function normalizeConfiguredLanguage(value) {
 
 function resolveLanguageId(value, packs) {
   const id = String(value ?? 'system').trim().toLowerCase();
-  if (id === 'system') {
-    const locale = Intl.DateTimeFormat().resolvedOptions().locale || process.env.LC_ALL || process.env.LANG || 'en';
-    const normalized = String(locale).toLowerCase();
-    const exact = [...packs.values()].find((pack) => pack.locale.toLowerCase() === normalized)?.id;
-    if (exact) return exact;
-    const prefix = normalized.split(/[-_.]/)[0];
-    return packs.has(prefix) ? prefix : 'en';
-  }
+  if (id === 'system') return resolveSystemLanguage(detectedSystemLocale(), packs);
   return packs.has(id) ? id : 'en';
+}
+
+
+function detectedSystemLocale() {
+  return Intl.DateTimeFormat().resolvedOptions().locale || process.env.LC_ALL || process.env.LANG || 'en';
 }
 
 function escapeRegex(value) {

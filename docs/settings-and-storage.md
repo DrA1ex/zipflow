@@ -187,11 +187,11 @@ Temporary and lock directories are managed by Zipflow. Active operations own the
 
 ## Interface language packs
 
-`interfaceLanguage` is stored in ordinary settings because it is not sensitive. It defaults to `en`. The optional `system` value resolves the operating-system locale to an installed pack and falls back to English. Built-in packs are shipped with Zipflow; user packs are loaded from `~/.zipflow/languages/*.json` during startup or with **Refresh languages** in the picker.
+`interfaceLanguage` is stored in ordinary settings because it is not sensitive. It defaults to `system`, which resolves the operating-system locale to an installed pack and falls back to English. An explicitly selected language remains fixed until the user changes it. Built-in packs are shipped with Zipflow; user packs are loaded from `~/.zipflow/languages/*.json` during startup or with **Refresh languages** in the picker.
 
 Each pack is validated against [`docs/i18n/language.schema.json`](i18n/language.schema.json). Invalid files are ignored and never partially registered. Message lookup uses the active pack first and English second, so a small custom pack can override selected strings without copying the complete catalog. The built-in English pack is canonical and complete; `npm run check` verifies that audited source strings and every key used by another built-in pack exist in `en.json`.
 
-Language files do not contain executable code. Zipflow reads JSON only, validates metadata, strings, and placeholder patterns, and does not evaluate expressions from a pack. The bundled Russian pack is checked against static user-facing fields and common status/toast calls during `npm test`; missing entries fail the suite. English catalog drift fails `npm run check` before tests begin.
+Language files do not contain executable code. Zipflow reads JSON only, validates metadata, strings, and placeholder patterns, and does not evaluate expressions from a pack. The bundled Russian pack is checked against static user-facing fields and common status/toast calls during `npm test`; missing entries fail the suite. German, French, Italian, and Spanish additionally have concrete baseline assertions for representative workflow and settings strings plus a minimum core-catalog size. English catalog drift fails `npm run check` before tests begin.
 
 
 

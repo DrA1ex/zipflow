@@ -38,7 +38,7 @@ export function buildTranscript(state, theme, width) {
 
 function activityMessageLines(message, theme, width, state) {
   const cached = messageLineCache.get(message);
-  const language = state?.i18n?.languageId ?? state?.settings?.interfaceLanguage ?? 'en';
+  const language = state?.i18n?.languageId ?? state?.settings?.interfaceLanguage ?? 'system';
   if (cached?.theme === theme && cached.width === width && cached.language === language && cached.at === message.at
     && cached.collapsed === message.collapsed && cached.linesRef === message.lines
     && cached.title === message.title && cached.tone === message.tone

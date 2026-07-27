@@ -1,6 +1,6 @@
 # Interface localization
 
-Zipflow loads interface languages from JSON. Built-in packs live in `src/i18n/locales`; user packs live in `~/.zipflow/languages` or under `ZIPFLOW_HOME/languages` when that environment variable is set. English is the default interface language; users can explicitly choose **System language** to follow the operating-system locale when a matching pack exists.
+Zipflow loads interface languages from JSON. Built-in packs live in `src/i18n/locales`; user packs live in `~/.zipflow/languages` or under `ZIPFLOW_HOME/languages` when that environment variable is set. **System language** is the default for new settings. Zipflow follows the operating-system locale when a matching pack exists and falls back to English otherwise.
 
 `src/i18n/locales/en.json` is the canonical complete source catalog. Add every new user-facing English string or placeholder pattern there first, then translate it in other packs. English entries map source text to itself. Other packs may remain incremental and fall back to English, but they may not introduce a message or pattern that is absent from the English catalog. `npm run check` scans audited static UI fields and rejects either kind of drift.
 
@@ -29,7 +29,7 @@ Create a `.json` file that validates against [`language.schema.json`](language.s
 }
 ```
 
-Choose **Refresh languages** under **Settings → Language**, or restart Zipflow. The pack appears when validation succeeds. Unknown or invalid files are ignored. A missing message falls back to English, which allows a pack to be introduced incrementally. The source audit verifies that static labels, descriptions, context help, dialog fields, common statuses, and toast titles are represented by the canonical English catalog. The bundled Russian pack has an additional full-coverage regression audit. Overlapping placeholder patterns are evaluated from the most specific source string to the least specific one.
+Choose **Refresh languages** under **Settings → Language**, or restart Zipflow. The pack appears when validation succeeds. Unknown or invalid files are ignored. A missing message falls back to English, which allows a pack to be introduced incrementally. The source audit verifies that static labels, descriptions, context help, dialog fields, common statuses, and toast titles are represented by the canonical English catalog. The bundled Russian pack has an additional full-coverage regression audit. German, French, Italian, and Spanish each have a tested core catalog: the suite asserts both a minimum catalog size and exact translations for representative project, archive, settings, LLM, Codex, action, and error strings, so English placeholders cannot satisfy the baseline. Overlapping placeholder patterns are evaluated from the most specific source string to the least specific one.
 
 `id` is the value stored in settings. It must be lowercase and may contain ASCII letters, digits, and hyphens. `locale` is used when **System language** is selected. `nativeName` is the label shown in the language picker.
 

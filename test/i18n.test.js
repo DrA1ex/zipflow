@@ -6,15 +6,20 @@ import path from 'node:path';
 import {
   availableLanguages,
   configureI18n,
+  resolveSystemLanguage,
   translate,
   validateLanguagePack,
 } from '../src/i18n/index.js';
 
-test('English is the default interface language and built-in languages are discoverable', async () => {
+test('system language is the default and resolves to a matching built-in pack', async () => {
   const storeSource = await readFile(new URL('../src/settings/store.js', import.meta.url), 'utf8');
-  assert.match(storeSource, /interfaceLanguage: 'en'/);
-  await configureI18n('en', { directory: await mkdtemp(path.join(os.tmpdir(), 'zipflow-language-')) });
-  assert.equal(translate('Settings'), 'Settings');
+  assert.match(storeSource, /interfaceLanguage: 'system'/);
+  assert.equal(resolveSystemLanguage('de-DE'), 'de');
+  assert.equal(resolveSystemLanguage('fr-CA'), 'fr');
+  assert.equal(resolveSystemLanguage('pt-BR'), 'en');
+  const snapshot = await configureI18n(undefined, { directory: await mkdtemp(path.join(os.tmpdir(), 'zipflow-language-')) });
+  assert.equal(snapshot.configuredLanguage, 'system');
+  assert.equal(snapshot.languageId, resolveSystemLanguage());
 });
 
 test('built-in interface languages are discoverable and Russian translates shared UI', async () => {
