@@ -137,7 +137,8 @@ export async function inspectArchivePath(controller, enteredPath, { allowDuplica
       let previous = null;
       if (!allowDuplicate) {
         previous = await findAppliedArchiveRun(state.project.root, digest);
-        if (previous) return showDuplicateWarning(controller, archivePath, digest, previous);
+        const autopilot = ['guarded', 'full'].includes(state.workflow?.autonomy?.mode);
+        if (previous && !autopilot) return showDuplicateWarning(controller, archivePath, digest, previous);
       }
       return await inspectArchive(controller, source, archivePath, digest, archiveInfo, operation, previous);
     }, { signal: operation.signal });

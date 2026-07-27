@@ -1,5 +1,5 @@
 import { inspectRollback, rollbackRun } from '../apply/rollback.js';
-import { copyTextToClipboard } from 'terlio.js';
+import { copyZipflowText } from '../ui/clipboard.js';
 import { displayPath } from '../utils/paths.js';
 import { runTypeDescription, runTypeTag } from '../history/presentation.js';
 import { loadRunRecord, runReportPath, saveRunRecord } from '../runs/store.js';
@@ -33,7 +33,7 @@ export async function activateRollback(controller, itemId) {
     if (itemId === 'view-run-diff') return showCompleteRunDiff(controller);
     if (itemId === 'view-run-decisions') return showRunDecisions(controller);
     if (itemId === 'copy-run-summary') {
-      const copied = await copyTextToClipboard(formatCompletionForClipboard(controller.state.run), { output: controller.runtime?.output });
+      const copied = await copyZipflowText(formatCompletionForClipboard(controller.state.run), { output: controller.runtime?.output });
       return copied ? controller.toast('Run summary copied', 'success') : controller.setStatus('Clipboard transfer unavailable');
     }
     if (itemId === 'back-home') return returnFromDetails(controller);

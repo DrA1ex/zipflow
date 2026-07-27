@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { copyTextToClipboard } from 'terlio.js';
+import { copyZipflowText } from '../ui/clipboard.js';
 import { loadStoredPatch } from '../diff/stored-patch.js';
 import { generateChangeDescription } from '../llm/generate.js';
 import { listProjectRuns } from '../runs/store.js';
@@ -147,12 +147,12 @@ export async function handleModelReplayWorkspaceKey(controller, key) {
     return true;
   }
   if (key.printable && key.text?.toLowerCase() === 'c' && workspace.result) {
-    const copied = await copyTextToClipboard(workspace.kind === 'autopilot' ? autopilotResultText(workspace) : replayResultText(workspace), { output: controller.runtime?.output });
+    const copied = await copyZipflowText(workspace.kind === 'autopilot' ? autopilotResultText(workspace) : replayResultText(workspace), { output: controller.runtime?.output });
     controller.toast(copied ? 'Replay result copied' : 'Clipboard transfer unavailable', copied ? 'success' : 'warning');
     return true;
   }
   if (key.printable && key.text?.toLowerCase() === 'd') {
-    const copied = await copyTextToClipboard(replayDiagnosticsText(workspace), { output: controller.runtime?.output });
+    const copied = await copyZipflowText(replayDiagnosticsText(workspace), { output: controller.runtime?.output });
     controller.toast(copied ? 'Replay diagnostics copied' : 'Clipboard transfer unavailable', copied ? 'success' : 'warning');
     return true;
   }

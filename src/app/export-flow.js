@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { stat } from 'node:fs/promises';
-import { copyTextToClipboard } from 'terlio.js';
+import { copyZipflowText } from '../ui/clipboard.js';
 import { collectCustomExportPaths, collectExportPaths, classifyCustomExportPaths } from '../export/candidates.js';
 import { inspectPotentiallySensitivePaths, sensitivePathMap } from '../export/sensitive.js';
 import { createProjectArchive } from '../export/create.js';
@@ -65,7 +65,7 @@ export async function activateExport(controller, itemId) {
   }
   if (state.screen === 'export-complete') {
     if (itemId === 'export-copy-path') {
-      const copied = await copyTextToClipboard(state.exportDraft.result.outputPath, { output: controller.runtime?.output });
+      const copied = await copyZipflowText(state.exportDraft.result.outputPath, { output: controller.runtime?.output });
       return copied ? controller.toast('ZIP path copied', 'success') : controller.setStatus('Clipboard transfer unavailable');
     }
     if (itemId === 'export-open-folder') return openArchiveLocation(controller);

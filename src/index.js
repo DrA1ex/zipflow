@@ -19,6 +19,7 @@ export async function startZipflow({ input = process.stdin, output = process.std
     input: workspaceInput,
     output,
     pointer: 'auto',
+    processHandlers: 'none',
     tickMs: 120,
     animationMs: 100,
     tick: ({ overlays }) => overlays?.tick?.(0.12) ?? false,

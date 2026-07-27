@@ -83,8 +83,8 @@ test('Activity visually separates key labels and mutes the collapsed expansion h
     'Condition: Deployment remains disabled',
     'Extra detail',
   ], 'info');
-  const theme = { accent: '\\x1b[35m', textMuted: '\\x1b[2m', title: '\\x1b[1m' };
+  const theme = { accent: '\x1b[35m', textMuted: '\x1b[2m', title: '\x1b[1m' };
   const output = buildTranscript(state, theme, 90).lines.join('\n');
-  assert.match(output, /\\x1b\[35mDelivery:/);
-  assert.match(output, /\\x1b\[2m… 3 more lines · click or press E to expand/);
+  assert.match(output, /\x1b\[35mDelivery:/);
+  assert.match(output, /\x1b\[2m… 3 more lines · click or press E to expand/);
 });

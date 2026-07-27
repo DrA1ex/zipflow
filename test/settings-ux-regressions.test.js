@@ -100,7 +100,7 @@ test('long Russian Settings categories wrap instead of being truncated', () => {
   };
 
   const output = stripAnsi(renderToString(renderZipflow({ state, width: 58, height: 24 }), { width: 58, height: 24 }));
-  assert.match(output.replace(/\s+/g, ' '), /История управляемых файлов/);
+  assert.match(output.replace(/[│\s]+/g, ' '), /История управляемых файлов/);
   assert.doesNotMatch(output, /История управляемых…|История управляемых ф…/);
 });
 

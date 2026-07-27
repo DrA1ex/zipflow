@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.3.14 — Terlio.js 1.2.0 compatibility
+
+- Updated the pinned Terlio.js dependency and published lock metadata from 1.1.3 to 1.2.0.
+- Adapted clipboard actions to Terlio.js 1.2.0 structured copy results so failed copies are no longer reported as successful.
+- Explicitly enabled the `auto` clipboard policy to retain native clipboard support with bounded OSC 52 fallback in remote terminals.
+- Kept process-level signal ownership in Zipflow by explicitly disabling Terlio.js process handlers.
+- Added regression coverage for the dependency metadata, clipboard compatibility layer, runtime ownership, safe syntax styling, and the new smooth progress-bar rendering.
+- Updated Terlio-facing interface tests for validated SGR sequences, screen-bound pointer actions, and adaptive multi-line `SelectList` rows.
+- Let Guarded and Full autopilot re-evaluate an already used archive without stopping at the manual duplicate warning.
+- Made recent-archive age checks portable across filesystems that expose both creation and modification timestamps.
+
 ## 1.3.13 — Interrupted recovery actions and selection copy
 
 - Keep interrupted-run recovery on screen during startup instead of immediately replacing it with archive input.

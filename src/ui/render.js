@@ -13,7 +13,6 @@ import {
   WorkspacePane,
   WorkspaceShell,
   color,
-  copyTextToClipboard,
   resolveWorkspaceShellLayout,
   scrollBy,
   themes,
@@ -42,6 +41,7 @@ import { commandLocationLabel } from '../project/command-spec.js';
 import { llmProgressLabel } from '../app/llm-progress.js';
 import { isEditorScreen } from '../app/controller-screen-rules.js';
 import { estimatedProgress } from '../app/runtime-progress.js';
+import { copyZipflowText } from './clipboard.js';
 
 export function renderZipflow({ state, width, height, animationFrame = 0 }) {
   const theme = themes[state.settings?.theme] ?? themes.ocean;
@@ -191,10 +191,10 @@ function renderTranscript(state, width, height, theme) {
       state.dispatch?.({ type: 'activity-toggle-row', row });
     },
     onCopy: (text, _selection, _event, context) => {
-      const result = copyTextToClipboard(text, { output: context.runtime.output });
-      if (result.copied) state.overlays?.toast?.(t(state, 'Activity text copied'), 'success', 2);
+      const copied = copyZipflowText(text, { output: context.runtime.output });
+      if (copied) state.overlays?.toast?.(t(state, 'Activity text copied'), 'success', 2);
       else state.status = 'Clipboard transfer unavailable';
-      return result.copied;
+      return copied;
     },
   });
   if (!unread || state.transcriptSticky) return pane;
@@ -437,7 +437,7 @@ function renderDiffView(state, width, height, theme) {
       event.preventDefault();
       event.stopPropagation?.();
     },
-    onCopy: (text, _selection, _event, context) => copyTextToClipboard(text, { output: context.runtime.output }).copied,
+    onCopy: (text, _selection, _event, context) => copyZipflowText(text, { output: context.runtime.output }),
   });
 }
 

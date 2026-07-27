@@ -1,5 +1,6 @@
 import path from 'node:path';
-import { copyTextToClipboard, handleInputEditorKey } from 'terlio.js';
+import { handleInputEditorKey } from 'terlio.js';
+import { copyZipflowText } from '../ui/clipboard.js';
 import { cleanupRunStorage, runReportPath } from '../runs/store.js';
 import { revealFile } from '../utils/reveal.js';
 import { configureWorkspaceProjects, discoverProject } from '../project/detect.js';
@@ -370,7 +371,7 @@ export class ZipflowController {
       if (item.id === 'open-llm-settings') return openSettings(this, { categoryId: 'localLlm' });
       if (item.id === 'continue-without-llm') return this.continueRecoveryWithoutLlm();
       if (item.id === 'copy-diagnostics') {
-        const copied = await copyTextToClipboard(this.recoveryText(), { output: this.runtime?.output });
+        const copied = await copyZipflowText(this.recoveryText(), { output: this.runtime?.output });
         return copied ? this.toast('Diagnostics copied', 'success') : this.setStatus('Clipboard transfer unavailable');
       }
       if (item.id === 'view-report' && this.state.run) {

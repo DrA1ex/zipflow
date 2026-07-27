@@ -16,6 +16,8 @@ function findNode(node, predicate) {
 function previewState() {
   const actions = [];
   const state = {
+    screen: 'settings',
+    screenGeneration: 7,
     settingsPanel: {
       modelTestWorkspace: {
         mode: 'preview', previewIndex: 0, runId: 'run-1', archiveName: 'update.zip',
@@ -33,11 +35,15 @@ test('historical replay preview wheel moves one action and does not wrap', () =>
   let region = findNode(tree.props.manager.top().node, (node) => node.props?.pointerId === 'zipflow:model-replay-preview');
 
   region.props.onWheel({ deltaY: 1, preventDefault() {}, stopPropagation() {} });
-  assert.deepEqual(actions.pop(), { type: 'model-replay-preview-select', index: 1 });
+  assert.deepEqual(actions.pop(), {
+    type: 'model-replay-preview-select', index: 1, sourceScreen: 'settings', sourceGeneration: 7,
+  });
 
   state.settingsPanel.modelTestWorkspace.previewIndex = 1;
   tree = renderModelReplayWorkspace({ content: Text('background'), state, width: 100, height: 24, theme: themes.ocean });
   region = findNode(tree.props.manager.top().node, (node) => node.props?.pointerId === 'zipflow:model-replay-preview');
   region.props.onWheel({ deltaY: 1, preventDefault() {}, stopPropagation() {} });
-  assert.deepEqual(actions.pop(), { type: 'model-replay-preview-select', index: 1 });
+  assert.deepEqual(actions.pop(), {
+    type: 'model-replay-preview-select', index: 1, sourceScreen: 'settings', sourceGeneration: 7,
+  });
 });

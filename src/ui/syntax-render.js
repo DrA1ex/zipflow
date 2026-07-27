@@ -21,7 +21,7 @@ function tryTerlioSyntax(code, language, { width, theme }) {
     try {
       return Terlio.highlightSyntaxLines(code, options);
     } catch {
-      // Fall through to the other documented Terlio 1.1.3 syntax surfaces.
+      // Fall through to the other documented Terlio syntax surfaces.
     }
   }
   if (typeof Terlio.highlightSyntax === 'function') {

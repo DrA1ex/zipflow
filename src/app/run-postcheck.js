@@ -1,4 +1,4 @@
-import { copyTextToClipboard } from 'terlio.js';
+import { copyZipflowText } from '../ui/clipboard.js';
 import { runChecks } from '../checks/runner.js';
 import { listProjectRuns, saveRunRecord, runReportPath } from '../runs/store.js';
 import { buildRunAnalytics } from '../history/analytics.js';
@@ -52,7 +52,7 @@ export async function activatePostCheck(controller, itemId) {
   if (state.screen === 'completed') {
     if (itemId === 'run-deploy') return startDeploy(controller, { fromCompleted: true });
     if (itemId === 'copy-summary') {
-      const copied = await copyTextToClipboard(formatCompletionForClipboard(state.run), { output: controller.runtime.output });
+      const copied = await copyZipflowText(formatCompletionForClipboard(state.run), { output: controller.runtime.output });
       return copied ? controller.toast('Run summary copied', 'success') : controller.setStatus(`Report saved at ${runReportPath(state.run.id)}`);
     }
     if (itemId === 'view-report') return showRunDetails(controller, state.run, { origin: 'completed' });
@@ -207,7 +207,7 @@ async function activateFailedCheck(controller, itemId) {
     return handled === false ? showFailedCheck(controller) : handled;
   }
   if (itemId === 'copy-failure') {
-    const copied = await copyTextToClipboard(formatFailureForClipboard(state.run), { output: controller.runtime.output });
+    const copied = await copyZipflowText(formatFailureForClipboard(state.run), { output: controller.runtime.output });
     return copied ? controller.toast('Failure report copied', 'success') : controller.setStatus(`Report saved at ${runReportPath(state.run.id)}`);
   }
   if (itemId === 'view-failure') {

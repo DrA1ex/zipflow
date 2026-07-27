@@ -66,7 +66,8 @@ async function inspectDiscoveredArchive(archivePath) {
   const info = await lstat(archivePath);
   if (info.isSymbolicLink() || !info.isFile()) throw new Error('Archive candidate is not a regular file.');
   const birthtime = Number.isFinite(info.birthtimeMs) && info.birthtimeMs > 0 ? info.birthtime : null;
-  return { size: info.size, createdAt: birthtime ?? info.mtime, modifiedAt: info.mtime };
+  const createdAt = birthtime && birthtime.getTime() < info.mtime.getTime() ? birthtime : info.mtime;
+  return { size: info.size, createdAt, modifiedAt: info.mtime };
 }
 
 export async function listArchivePaths(archivePath, { signal = null, limits = DEFAULT_ARCHIVE_LIMITS } = {}) {
