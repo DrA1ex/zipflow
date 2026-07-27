@@ -409,6 +409,7 @@ async function activateParameter(controller) {
   if (parameter.type === 'action' || parameter.type === 'toggle') {
     if (parameter.action === 'toggle-setting') {
       state.settings = await updateSettings({ [parameter.settingId]: !parameter.selected }, { baseSettings: state.settings });
+      if (parameter.settingId === 'llmUseExternalCodexServer') resetModelCache(state.settingsPanel);
       state.status = parameter.label;
       controller.invalidate();
     } else if (parameter.action === 'storage-refresh') await refreshSettingsStorage(controller);

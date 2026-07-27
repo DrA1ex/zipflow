@@ -186,6 +186,7 @@ test('Codex app-server passes the complete settings model compatibility check wi
       llmProvider: 'codex',
       llmModel: 'gpt-test',
       llmReasoningEffort: 'high',
+      llmUseExternalCodexServer: true,
       llmCodexEndpoint: 'stdio://',
       llmUseCommitMessage: true,
       binaryPaths: { ...DEFAULT_SETTINGS.binaryPaths, codex: runtime.executable },
@@ -365,7 +366,7 @@ function fakeCodexWebSocketRuntime({ connectionFailures = 0 } = {}) {
 test('Codex custom endpoint connects to the user-managed server and never starts a process', async () => {
   const runtime = fakeCodexWebSocketRuntime();
   const models = await listLocalModelChoices('codex', {
-    settings: { ...DEFAULT_SETTINGS, llmCodexEndpoint: 'ws://127.0.0.1:4600/', llmApiToken: 'remote-token' },
+    settings: { ...DEFAULT_SETTINGS, llmUseExternalCodexServer: true, llmCodexEndpoint: 'ws://127.0.0.1:4600/', llmApiToken: 'remote-token' },
     apiToken: 'remote-token',
     connectImpl: runtime.connectImpl,
     spawnImpl: () => { throw new Error('custom endpoints must not spawn'); },
@@ -374,6 +375,23 @@ test('Codex custom endpoint connects to the user-managed server and never starts
   assert.deepEqual(models.map((item) => item.id), ['shared-model']);
   assert.deepEqual(runtime.connections, [{ endpoint: 'ws://127.0.0.1:4600/', token: 'remote-token' }]);
   assert.equal(runtime.requests[0].method, 'initialize');
+  assert.equal(runtime.spawns.length, 0);
+});
+
+test('Codex ignores a saved custom endpoint while the external-server switch is disabled', async () => {
+  const runtime = fakeCodexWebSocketRuntime();
+  const models = await listLocalModelChoices('codex', {
+    settings: {
+      ...DEFAULT_SETTINGS,
+      llmUseExternalCodexServer: false,
+      llmCodexEndpoint: 'ws://127.0.0.1:4600/',
+    },
+    connectImpl: runtime.connectImpl,
+    spawnImpl: runtime.spawnImpl,
+  });
+
+  assert.deepEqual(models.map((item) => item.id), ['shared-model']);
+  assert.equal(runtime.connections[0].endpoint, DEFAULT_SETTINGS.llmCodexEndpoint);
   assert.equal(runtime.spawns.length, 0);
 });
 
@@ -436,7 +454,7 @@ test('parallel Codex callers share one managed launch when the default server is
 test('Codex unavailable custom endpoint fails without falling back to a local process', async () => {
   const runtime = fakeCodexWebSocketRuntime({ connectionFailures: 1 });
   await assert.rejects(() => listLocalModelChoices('codex', {
-    settings: { ...DEFAULT_SETTINGS, llmCodexEndpoint: 'ws://127.0.0.1:4700/' },
+    settings: { ...DEFAULT_SETTINGS, llmUseExternalCodexServer: true, llmCodexEndpoint: 'ws://127.0.0.1:4700/' },
     connectImpl: runtime.connectImpl,
     spawnImpl: runtime.spawnImpl,
   }), (error) => {

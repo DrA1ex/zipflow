@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.5 — Simplified Codex connection settings
+
+- Show OpenAI-compatible Base URL and API-mode controls only when the OpenAI-compatible provider is selected.
+- Add **Use an external Codex server** as the single ownership switch for Codex connections. With it disabled, the endpoint field is read-only and displays the managed default actually used by Zipflow; with it enabled, the saved custom endpoint becomes editable and connect-only.
+- Preserve existing custom Codex endpoint configurations during settings migration by enabling the external-server switch automatically when an older settings document contains a non-default endpoint.
+- Replace transport-specific ownership prose in the settings page with a compact list of supported endpoint forms while retaining detailed behavior in the Local LLM guide.
+
 ## 1.6.4 — Terlio 1.2.1 and shared Codex endpoints
 
 - Upgrade the exact Terlio.js dependency to 1.2.1 from the user-provided local package, adopt its compact default progress rendering, preserve the prior fractional-cell appearance through the explicit `block` variant, and rely on normalized `Shift+K/J` events for portable check reordering.

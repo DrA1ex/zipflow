@@ -15,7 +15,7 @@ import {
   deleteLlmApiToken, readLlmApiToken, SecureCredentialStoreError, writeLlmApiToken,
 } from '../security/credential-store.js';
 
-export const SETTINGS_VERSION = 27;
+export const SETTINGS_VERSION = 28;
 export const THEME_NAMES = Object.keys(themes);
 export const LLM_PROVIDERS = ['disabled', 'ollama', 'lmstudio', 'openai', 'codex'];
 export const OPENAI_API_MODES = ['auto', 'responses', 'chat-completions'];
@@ -43,6 +43,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   projectEnvironmentNoticeVersion: 0,
   llmProvider: 'disabled',
   llmBaseUrl: 'http://127.0.0.1:8080/v1',
+  llmUseExternalCodexServer: false,
   llmCodexEndpoint: DEFAULT_CODEX_ENDPOINT,
   llmOpenAiApiMode: 'auto',
   llmReasoningEffort: 'auto',
@@ -303,11 +304,15 @@ export function normalizeSettings(settings) {
   if (!LLM_PROVIDERS.includes(value.llmProvider)) value.llmProvider = DEFAULT_SETTINGS.llmProvider;
   if (typeof value.llmBaseUrl !== 'string' || !value.llmBaseUrl.trim()) value.llmBaseUrl = DEFAULT_SETTINGS.llmBaseUrl;
   value.llmBaseUrl = normalizeBaseUrl(value.llmBaseUrl);
+  const hasExternalCodexSetting = Object.prototype.hasOwnProperty.call(source, 'llmUseExternalCodexServer');
   try {
     value.llmCodexEndpoint = normalizeCodexEndpoint(value.llmCodexEndpoint || DEFAULT_CODEX_ENDPOINT);
   } catch {
     value.llmCodexEndpoint = DEFAULT_CODEX_ENDPOINT;
   }
+  value.llmUseExternalCodexServer = hasExternalCodexSetting
+    ? source.llmUseExternalCodexServer === true
+    : value.llmCodexEndpoint !== normalizeCodexEndpoint(DEFAULT_CODEX_ENDPOINT);
   if (!OPENAI_API_MODES.includes(value.llmOpenAiApiMode)) value.llmOpenAiApiMode = DEFAULT_SETTINGS.llmOpenAiApiMode;
   if (!LLM_REASONING_EFFORTS.includes(value.llmReasoningEffort)) value.llmReasoningEffort = DEFAULT_SETTINGS.llmReasoningEffort;
   if (typeof value.llmModel !== 'string') value.llmModel = '';
@@ -391,6 +396,7 @@ function migrateLegacySettingAliases(source) {
     llmProvider: ['localLlmProvider'],
     llmModel: ['localLlmModel', 'selectedModel'],
     llmBaseUrl: ['localLlmBaseUrl', 'openAiBaseUrl'],
+    llmUseExternalCodexServer: ['useExternalCodexServer', 'codexUseExternalServer'],
     llmCodexEndpoint: ['codexEndpoint', 'codexAppServerEndpoint'],
     llmOpenAiApiMode: ['openAiApiMode'],
     llmReasoningEffort: ['reasoningEffort'],

@@ -182,7 +182,13 @@
     "Use stdio:// only for a private app-server process per request.": "Use stdio:// solo para un proceso app-server privado por solicitud.",
     "Shared local Unix-socket server. Zipflow reuses it when available and starts it only when the socket is unavailable.": "Servidor local compartido mediante socket Unix. Zipflow lo reutiliza si está disponible y solo lo inicia cuando el socket no está disponible.",
     "Default: shared local unix:// socket. Zipflow reuses an existing compatible server or starts one in the background.": "Predeterminado: socket local compartido unix://. Zipflow reutiliza un servidor compatible existente o lo inicia en segundo plano.",
-    "Any changed ws://, wss://, or unix:///absolute/path endpoint is connect-only; start that server yourself.": "Cualquier endpoint modificado ws://, wss:// o unix:///ruta/absoluta es solo de conexión; inicie ese servidor usted mismo."
+    "Any changed ws://, wss://, or unix:///absolute/path endpoint is connect-only; start that server yourself.": "Cualquier endpoint modificado ws://, wss:// o unix:///ruta/absoluta es solo de conexión; inicie ese servidor usted mismo.",
+    "Use an external Codex server": "Use an external Codex server",
+    "Connect to an app-server that you start and manage yourself. Otherwise Zipflow uses its managed default endpoint.": "Connect to an app-server that you start and manage yourself. Otherwise Zipflow uses its managed default endpoint.",
+    "Supported endpoints: unix://, unix:///absolute/path, ws://localhost:port, wss://host/path, and stdio://.": "Supported endpoints: unix://, unix:///absolute/path, ws://localhost:port, wss://host/path, and stdio://.",
+    "Enable Use an external Codex server to edit this endpoint.": "Enable Use an external Codex server to edit this endpoint.",
+    "Supported: unix://, unix:///absolute/path, ws://localhost:port, wss://host/path, and stdio://.": "Supported: unix://, unix:///absolute/path, ws://localhost:port, wss://host/path, and stdio://.",
+    "When Use an external Codex server is enabled, Zipflow uses this value instead of the managed default endpoint.": "When Use an external Codex server is enabled, Zipflow uses this value instead of the managed default endpoint."
   },
   "patterns": [
     {

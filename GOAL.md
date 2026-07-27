@@ -998,3 +998,24 @@ Make Codex app-server connection ownership explicit and reusable while adopting 
 - changing the endpoint never causes Zipflow to launch that user-managed server;
 - the endpoint is editable even before Codex is selected as the active provider;
 - the complete suite passes using the uploaded Terlio.js 1.2.1 package.
+
+
+# Phase 6.2 — Clear provider-specific LLM settings
+
+## Goal
+
+Keep Codex connection ownership explicit without exposing unrelated OpenAI-compatible controls or requiring users to infer behavior from endpoint spelling.
+
+## Scope
+
+- show Base URL and OpenAI API mode only for the OpenAI-compatible provider;
+- add one external-Codex-server toggle;
+- show the actual managed default endpoint as a disabled value when the toggle is off;
+- restore the saved custom endpoint when the toggle is enabled;
+- preserve older non-default endpoint configurations through migration.
+
+## Acceptance
+
+- Codex settings contain no OpenAI-compatible Base URL or API-mode rows;
+- disabling the external-server toggle forces the managed default at runtime even when a custom endpoint remains saved;
+- enabling the toggle makes the saved endpoint editable and prevents managed fallback for custom network or socket endpoints.

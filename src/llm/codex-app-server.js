@@ -318,7 +318,12 @@ async function withCodexClient(options, task) {
 
 function resolveCodexEndpoint({ endpoint, settings }) {
   if (String(endpoint ?? '').trim()) return normalizeCodexEndpoint(endpoint);
-  if (settings) return normalizeCodexEndpoint(settings.llmCodexEndpoint || DEFAULT_CODEX_ENDPOINT);
+  if (settings) {
+    if (settings.llmUseExternalCodexServer === true) {
+      return normalizeCodexEndpoint(settings.llmCodexEndpoint || DEFAULT_CODEX_ENDPOINT);
+    }
+    return normalizeCodexEndpoint(DEFAULT_CODEX_ENDPOINT);
+  }
   return 'stdio://';
 }
 

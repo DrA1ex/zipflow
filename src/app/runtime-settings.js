@@ -4,6 +4,7 @@ const RUN_SETTING_KEYS = Object.freeze([
   'checkOutput',
   'llmProvider',
   'llmBaseUrl',
+  'llmUseExternalCodexServer',
   'llmCodexEndpoint',
   'llmOpenAiApiMode',
   'llmReasoningEffort',

@@ -270,29 +270,40 @@ function localLlmParameters(state) {
   const selected = models.find((item) => item.id === state.settings.llmModel || item.key === state.settings.llmModel);
   const tasks = llmTasks(state.settings);
   const changeTasksDisabled = !hasLlmPatchDeliveryTasks(state.settings);
+  const providerParameters = [];
+  if (state.settings.llmProvider === 'openai') {
+    providerParameters.push(
+      {
+        id: 'llmBaseUrl', type: 'input', fieldId: 'llmBaseUrl', label: 'Base URL',
+        value: state.settings.llmBaseUrl,
+        description: 'Root URL ending in /v1 for the OpenAI-compatible provider.',
+        disabled: false,
+        disabledReason: '',
+      },
+      choiceParameter('llmOpenAiApiMode', 'OpenAI API mode', openAiApiModeLabel(state.settings.llmOpenAiApiMode), 'Choose the generation endpoint used by the OpenAI-compatible provider.'),
+    );
+  }
+  if (state.settings.llmProvider === 'codex') {
+    const external = state.settings.llmUseExternalCodexServer === true;
+    providerParameters.push(
+      toggleParameter(
+        'llmUseExternalCodexServer',
+        'Use an external Codex server',
+        external,
+        'Connect to an app-server that you start and manage yourself. Otherwise Zipflow uses its managed default endpoint.',
+      ),
+      {
+        id: 'llmCodexEndpoint', type: 'input', fieldId: 'llmCodexEndpoint', label: 'Codex server endpoint',
+        value: external ? state.settings.llmCodexEndpoint : DEFAULT_CODEX_ENDPOINT,
+        description: 'Supported endpoints: unix://, unix:///absolute/path, ws://localhost:port, wss://host/path, and stdio://.',
+        disabled: !external,
+        disabledReason: external ? '' : 'Enable Use an external Codex server to edit this endpoint.',
+      },
+    );
+  }
   return [
     choiceParameter('llmProvider', 'Provider', providerLabel(state.settings.llmProvider), 'Choose the local server Zipflow should contact.'),
-    {
-      id: 'llmBaseUrl', type: 'input', fieldId: 'llmBaseUrl', label: 'Base URL',
-      value: state.settings.llmBaseUrl,
-      description: 'Root URL ending in /v1 for the OpenAI-compatible provider.',
-      disabled: state.settings.llmProvider !== 'openai',
-      disabledReason: 'This setting is used only by the OpenAI-compatible provider.',
-    },
-    {
-      id: 'llmCodexEndpoint', type: 'input', fieldId: 'llmCodexEndpoint', label: 'Codex server endpoint',
-      value: state.settings.llmCodexEndpoint,
-      description: state.settings.llmCodexEndpoint === DEFAULT_CODEX_ENDPOINT
-        ? 'Shared local Unix-socket server. Zipflow reuses it when available and starts it only when the socket is unavailable.'
-        : 'External app-server. Zipflow only connects to custom endpoints and never starts them.',
-      disabled: false,
-      disabledReason: '',
-    },
-    {
-      ...choiceParameter('llmOpenAiApiMode', 'OpenAI API mode', openAiApiModeLabel(state.settings.llmOpenAiApiMode), 'Choose the generation endpoint used by the OpenAI-compatible provider.'),
-      disabled: state.settings.llmProvider !== 'openai',
-      disabledReason: 'This setting is used only by the OpenAI-compatible provider.',
-    },
+    ...providerParameters,
     {
       ...choiceParameter('llmReasoningEffort', 'Reasoning effort', reasoningEffortLabel(state.settings.llmReasoningEffort), 'Send an explicit reasoning effort to OpenAI-compatible or Codex app-server models.'),
       disabled: !['openai', 'codex'].includes(state.settings.llmProvider),
@@ -809,9 +820,8 @@ const FIELD_DEFINITIONS = Object.freeze({
     description: 'Transport endpoint used for Codex JSON-RPC.',
     placeholder: 'unix://',
     instructions: [
-      'Default: shared local unix:// socket. Zipflow reuses an existing compatible server or starts one in the background.',
-      'Any changed ws://, wss://, or unix:///absolute/path endpoint is connect-only; start that server yourself.',
-      'Use stdio:// only for a private app-server process per request.',
+      'Supported: unix://, unix:///absolute/path, ws://localhost:port, wss://host/path, and stdio://.',
+      'When Use an external Codex server is enabled, Zipflow uses this value instead of the managed default endpoint.',
     ],
   },
   llmApiToken: {

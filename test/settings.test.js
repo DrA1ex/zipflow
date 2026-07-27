@@ -528,6 +528,25 @@ test('OpenAI-compatible base URL validation rejects embedded credentials', async
 });
 
 
+test('legacy custom Codex endpoints migrate to the external-server switch', () => {
+  const migrated = normalizeSettings({
+    version: 27,
+    llmProvider: 'codex',
+    llmCodexEndpoint: 'ws://127.0.0.1:4600/',
+  });
+  assert.equal(migrated.llmUseExternalCodexServer, true);
+  assert.equal(migrated.llmCodexEndpoint, 'ws://127.0.0.1:4600/');
+
+  const managed = normalizeSettings({
+    version: 28,
+    llmProvider: 'codex',
+    llmUseExternalCodexServer: false,
+    llmCodexEndpoint: 'ws://127.0.0.1:4600/',
+  });
+  assert.equal(managed.llmUseExternalCodexServer, false);
+  assert.equal(managed.llmCodexEndpoint, 'ws://127.0.0.1:4600/');
+});
+
 test('Codex endpoint validation accepts supported transports and rejects unsafe plain remote WebSockets', async () => {
   const field = { id: 'llmCodexEndpoint' };
   assert.equal(await validateSettingValue(field, 'ws://127.0.0.1:4500'), 'ws://127.0.0.1:4500/');
@@ -540,16 +559,16 @@ test('Codex endpoint validation accepts supported transports and rejects unsafe 
 
 
 
-test('Codex endpoint remains editable before choosing the Codex provider', async () => withSettingsHome(async () => {
-  const { state, controller } = await settingsController({ llmProvider: 'disabled' });
+test('Codex settings hide provider-specific fields until Codex is selected', async () => withSettingsHome(async () => {
+  const { controller } = await settingsController({ llmProvider: 'disabled' });
   const view = await selectCategory(controller, 'localLlm');
-  const endpoint = view.parameters.find((item) => item.id === 'llmCodexEndpoint');
-  assert.ok(endpoint);
-  assert.equal(endpoint.disabled, false);
-  assert.equal(endpoint.value, 'unix://');
+  assert.equal(view.parameters.some((item) => item.id === 'llmCodexEndpoint'), false);
+  assert.equal(view.parameters.some((item) => item.id === 'llmUseExternalCodexServer'), false);
+  assert.equal(view.parameters.some((item) => item.id === 'llmBaseUrl'), false);
+  assert.equal(view.parameters.some((item) => item.id === 'llmOpenAiApiMode'), false);
 }));
 
-test('Codex app-server settings expose endpoint, model, effort, and optional authentication controls', async () => withSettingsHome(async () => {
+test('Codex app-server settings use a checkbox to enable a custom endpoint', async () => withSettingsHome(async () => {
   const { state, controller } = await settingsController({
     llmProvider: 'codex',
     llmModel: 'gpt-test',
@@ -558,17 +577,25 @@ test('Codex app-server settings expose endpoint, model, effort, and optional aut
     binaryPaths: { codex: '/usr/local/bin/codex' },
   });
   let view = await selectCategory(controller, 'localLlm');
-  const byId = Object.fromEntries(view.parameters.map((item) => [item.id, item]));
-  assert.equal(byId.llmBaseUrl.disabled, true);
-  assert.equal(byId.llmOpenAiApiMode.disabled, true);
-  assert.equal(byId.llmCodexEndpoint.disabled, false);
-  assert.equal(byId.llmCodexEndpoint.value, 'ws://127.0.0.1:4600/');
-  assert.match(byId.llmCodexEndpoint.description, /only connects/i);
+  let byId = Object.fromEntries(view.parameters.map((item) => [item.id, item]));
+  assert.equal(byId.llmBaseUrl, undefined);
+  assert.equal(byId.llmOpenAiApiMode, undefined);
+  assert.equal(byId.llmUseExternalCodexServer.selected, false);
+  assert.equal(byId.llmCodexEndpoint.disabled, true);
+  assert.equal(byId.llmCodexEndpoint.value, 'unix://');
+  assert.match(byId.llmCodexEndpoint.description, /supported endpoints/i);
   assert.equal(byId.llmReasoningEffort.disabled, false);
   assert.equal(byId.llmReasoningEffort.value, 'High');
   assert.equal(byId.llmModel.value, 'gpt-test');
   assert.equal(byId.llmApiToken.disabled, false);
   assert.match(byId.llmApiToken.description, /bearer token/i);
+
+  await openParameter(controller, 'llmUseExternalCodexServer');
+  view = settingsViewModel(state);
+  byId = Object.fromEntries(view.parameters.map((item) => [item.id, item]));
+  assert.equal(state.settings.llmUseExternalCodexServer, true);
+  assert.equal(byId.llmCodexEndpoint.disabled, false);
+  assert.equal(byId.llmCodexEndpoint.value, 'ws://127.0.0.1:4600/');
 
   view = await openParameter(controller, 'llmProvider');
   assert.ok(view.choices.some((item) => item.id === 'llmProvider:codex'));

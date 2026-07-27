@@ -50,7 +50,7 @@ Archive → Review → Apply → Checks → Finish
 - Node.js, Python, CMake/C++, Go, SwiftPM, and Xcode detection.
 - Multi-project workspaces with commands executed from their configured subdirectories.
 - Custom checks and deployment commands using `web/ :: npm test` syntax.
-- Optional local LLM integration through native Ollama, native LM Studio, a configurable OpenAI-compatible `/v1` server, or Codex app-server RPC over a shared local Unix socket, user-managed WebSocket/Unix endpoint, or private stdio process.
+- Optional local LLM integration through native Ollama, native LM Studio, a configurable OpenAI-compatible `/v1` server, or Codex app-server RPC with a managed default endpoint and an explicit external-server toggle.
 - Manual, Guarded autopilot, and Full autopilot decision modes.
 - Run history, performance analytics, reports, stored patches, and ZIP export.
 - Configurable startup update checks, manual version checks, and one-step global npm updates.
