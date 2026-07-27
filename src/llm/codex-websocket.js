@@ -222,10 +222,12 @@ class CodexWebSocketConnection extends EventEmitter {
     this.closed = true;
     this.open = false;
     try {
-      if (this.socket.writable) this.socket.write(encodeClientFrame(0x8, Buffer.alloc(0)));
+      if (this.socket.writable) {
+        this.socket.end(encodeClientFrame(0x8, Buffer.alloc(0)));
+        return;
+      }
     } catch {}
     this.socket.end();
-    this.socket.destroySoon?.();
   }
 
   parseFrames() {

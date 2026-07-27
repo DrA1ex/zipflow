@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.8 — Locale-independent tests and graceful Codex WebSocket shutdown
+
+- Make `npm test` force an English test locale through an explicit test-only locale override, so visual assertions remain deterministic on Russian, German, French, Italian, Spanish, and other developer machines while production still defaults to the actual system language.
+- Add regression coverage proving that the test locale override can select a non-English pack independently of the host locale.
+- Close Codex WebSocket connections with one graceful final close frame instead of following `socket.end()` with `destroySoon()`, preventing intermittent `ECONNRESET` failures on macOS during test teardown.
+- Strengthen the TCP WebSocket test to wait for peer shutdown and assert that graceful close produces no server-side socket errors.
+
 ## 1.6.7 — System language defaults and practical localization
 
 - Default new installations to **System language**, resolving the operating-system locale to a bundled pack and falling back to English only when no matching pack exists. Explicit existing language selections remain unchanged.

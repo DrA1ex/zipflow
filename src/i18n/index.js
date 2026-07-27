@@ -242,7 +242,11 @@ function resolveLanguageId(value, packs) {
 
 
 function detectedSystemLocale() {
-  return Intl.DateTimeFormat().resolvedOptions().locale || process.env.LC_ALL || process.env.LANG || 'en';
+  return process.env.ZIPFLOW_TEST_LOCALE
+    || Intl.DateTimeFormat().resolvedOptions().locale
+    || process.env.LC_ALL
+    || process.env.LANG
+    || 'en';
 }
 
 function escapeRegex(value) {

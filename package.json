@@ -1,6 +1,6 @@
 {
   "name": "zipflow",
-  "version": "1.6.7",
+  "version": "1.6.8",
   "description": "Interactive terminal workflow for safely reviewing and applying source-code ZIP updates",
   "type": "module",
   "bin": {
@@ -9,7 +9,7 @@
   "scripts": {
     "start": "node ./bin/zipflow.js",
     "check": "node ./scripts/check-source.js && node ./scripts/check-i18n.js",
-    "test": "node --test",
+    "test": "ZIPFLOW_TEST_LOCALE=en node --test",
     "verify": "npm run check && npm test",
     "release:check": "npm run verify && npm run test:package && npm pack --dry-run",
     "prepublishOnly": "npm run verify && npm run test:package",

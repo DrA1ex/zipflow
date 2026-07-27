@@ -13,13 +13,29 @@ import {
 
 test('system language is the default and resolves to a matching built-in pack', async () => {
   const storeSource = await readFile(new URL('../src/settings/store.js', import.meta.url), 'utf8');
+  const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
   assert.match(storeSource, /interfaceLanguage: 'system'/);
+  assert.equal(packageJson.scripts.test, 'ZIPFLOW_TEST_LOCALE=en node --test');
   assert.equal(resolveSystemLanguage('de-DE'), 'de');
   assert.equal(resolveSystemLanguage('fr-CA'), 'fr');
   assert.equal(resolveSystemLanguage('pt-BR'), 'en');
   const snapshot = await configureI18n(undefined, { directory: await mkdtemp(path.join(os.tmpdir(), 'zipflow-language-')) });
   assert.equal(snapshot.configuredLanguage, 'system');
   assert.equal(snapshot.languageId, resolveSystemLanguage());
+});
+
+test('test locale override isolates UI assertions from the developer machine locale', async () => {
+  const previous = process.env.ZIPFLOW_TEST_LOCALE;
+  try {
+    process.env.ZIPFLOW_TEST_LOCALE = 'fr-CA';
+    const snapshot = await configureI18n('system', { directory: await mkdtemp(path.join(os.tmpdir(), 'zipflow-language-')) });
+    assert.equal(snapshot.languageId, 'fr');
+    assert.equal(translate('Settings'), 'Paramètres');
+  } finally {
+    if (previous === undefined) delete process.env.ZIPFLOW_TEST_LOCALE;
+    else process.env.ZIPFLOW_TEST_LOCALE = previous;
+    await configureI18n('en', { directory: await mkdtemp(path.join(os.tmpdir(), 'zipflow-language-')) });
+  }
 });
 
 test('built-in interface languages are discoverable and Russian translates shared UI', async () => {

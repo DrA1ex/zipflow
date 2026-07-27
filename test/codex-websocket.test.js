@@ -26,7 +26,11 @@ test('Codex endpoint validation supports stdio, local WebSocket, and Unix socket
 test('Codex WebSocket client performs an authenticated upgrade and exchanges text frames', async () => {
   let requestHeaders = '';
   let receivedPayload = '';
+  let serverSocketClosed = Promise.resolve();
+  const serverSocketErrors = [];
   const server = net.createServer((socket) => {
+    serverSocketClosed = new Promise((resolve) => socket.once('close', resolve));
+    socket.on('error', (error) => serverSocketErrors.push(error));
     let buffer = Buffer.alloc(0);
     let upgraded = false;
     socket.on('data', (chunk) => {
@@ -68,6 +72,8 @@ test('Codex WebSocket client performs an authenticated upgrade and exchanges tex
   assert.equal(response, '{"id":1,"result":{"ok":true}}');
 
   connection.close();
+  await serverSocketClosed;
+  assert.deepEqual(serverSocketErrors, []);
   server.close();
   await once(server, 'close');
 });
