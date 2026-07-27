@@ -12,7 +12,17 @@ export function showChecksStep(controller, selectedIndex = null) {
   }));
   items.push({ id: 'add-check', label: '+ Add custom command', description: 'Use a command directly, or path/ :: command to run in a subdirectory.' });
   items.push({ id: 'checks-continue', label: 'Continue', description: `${checks.filter((item) => item.selected).length} checks selected` });
-  const initialIndex = selectedIndex ?? (controller.state.setupEditing && controller.state.screen !== 'setup-checks' ? items.length - 1 : null);
+  // The checks section is the only workflow editor where the selected row is
+  // also the subject of a local command (Shift+Up/Down). Entering an existing
+  // workflow on Continue made that shortcut look broken because the modified
+  // arrow legitimately fell through to ordinary menu navigation. Start on the
+  // first enabled check instead; explicit refreshes still preserve or supply
+  // their own selected index.
+  const enteringChecksSection = controller.state.setupEditing && controller.state.screen !== 'setup-checks';
+  const firstSelectedCheck = checks.findIndex((check) => check.selected);
+  const initialIndex = selectedIndex ?? (enteringChecksSection
+    ? Math.max(0, firstSelectedCheck)
+    : null);
   controller.showMenu('setup-checks', items, 'Select checks', initialIndex, [
     'Commands without a directory run from the workspace root.',
     'Use path/ :: command for a project or any other directory inside the workspace.',
@@ -95,6 +105,10 @@ export function handleChecksShortcut(controller, key) {
   if (state.screen !== 'setup-checks') return false;
   const selected = state.menuItems[state.selectedIndex];
   const direction = shiftArrowDirection(key);
+  if (direction && !selected?.id.startsWith('check:')) {
+    controller.setStatus('Select a check before moving it');
+    return true;
+  }
   if (direction && selected?.id.startsWith('check:')) {
     const index = Number(selected.id.slice(6));
     const target = Math.max(0, Math.min(state.draft.checks.length - 1, index + direction));
@@ -103,6 +117,8 @@ export function handleChecksShortcut(controller, key) {
       state.draft.checks.splice(target, 0, moved);
       showChecksStep(controller, target);
       controller.setStatus(direction < 0 ? 'Check moved up' : 'Check moved down');
+    } else {
+      controller.setStatus(direction < 0 ? 'Check is already first' : 'Check is already last');
     }
     return true;
   }

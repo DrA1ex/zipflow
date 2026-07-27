@@ -108,6 +108,46 @@ test('Shift+Up and Shift+Down reorder workflow checks without toggling them', as
   assert.equal(state.status, 'Check moved down');
 });
 
+test('editing an existing workflow opens Checks on a movable check and never demotes Shift+arrow to menu navigation', async () => {
+  const root = await tempDir('zipflow-edit-check-order-');
+  await writeFiles(root, {
+    'package.json': JSON.stringify({
+      name: 'edit-check-order',
+      scripts: {
+        lint: 'node --check src.js',
+        test: 'node --test',
+        typecheck: 'node --check types.js',
+      },
+    }),
+    'src.js': 'export const value = 1;\n',
+    'types.js': 'export const typed = true;\n',
+  });
+  const state = createInitialState();
+  state.project = await discoverProject(root);
+  state.workflow = createRecommendedWorkflow(state.project);
+  const controller = new ZipflowController(state);
+
+  await beginSetup(controller, { fresh: false });
+  await activateSetup(controller, 'section-checks');
+
+  assert.equal(state.screen, 'setup-checks');
+  assert.match(state.menuItems[state.selectedIndex].id, /^check:/);
+  const selectedId = state.draft.checks[state.selectedIndex].id;
+  const originalOrder = state.draft.checks.map((check) => check.id);
+
+  await controller.handleKey(parseInputEvent('\x1b[1;2B'));
+
+  assert.notDeepEqual(state.draft.checks.map((check) => check.id), originalOrder);
+  assert.equal(state.draft.checks[state.selectedIndex].id, selectedId);
+  assert.equal(state.status, 'Check moved down');
+
+  state.selectedIndex = state.menuItems.findIndex((item) => item.id === 'checks-continue');
+  const continueIndex = state.selectedIndex;
+  await controller.handleKey(parseInputEvent('\x1b[1;2A'));
+  assert.equal(state.selectedIndex, continueIndex);
+  assert.equal(state.status, 'Select a check before moving it');
+});
+
 test('radio selection stays on the activated item and Space selects it', async () => {
   const state = createInitialState();
   state.project = projectFixture();

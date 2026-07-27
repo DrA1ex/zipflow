@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.16 — Existing-workflow check reorder entry fix
+
+- Open the **Change workflow → Checks** section with an actual check selected instead of the trailing Continue action, so `Shift+Up` and `Shift+Down` work immediately on the screen where ordering is edited.
+- Consume modified arrows on non-check rows with a clear status message rather than silently treating them as ordinary menu navigation.
+- Report first/last-boundary attempts explicitly and add regression coverage for the complete existing-workflow route without manually forcing the selected index.
+
 ## 1.3.15 — Workflow check reordering repair
 
 - Restored `Shift+Up` and `Shift+Down` reordering in the workflow checks menu instead of letting modified arrows fall through to ordinary selection movement.
