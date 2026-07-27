@@ -170,7 +170,9 @@ export async function createCodexAppServerCompletion({
           model,
           cwd: scratch,
           approvalPolicy: 'never',
-          sandbox: 'readOnly',
+          // Keep the thread request compatible with Codex app-server versions
+          // that use different enum spellings for the legacy `sandbox` field.
+          // The actual execution policy is applied explicitly on turn/start.
           ephemeral: true,
           serviceName: 'zipflow',
         });

@@ -133,6 +133,8 @@ test('Codex app-server lists models with effort capabilities and completes a tex
   assert.ok(events.some((event) => event.type === 'stream-open'));
   assert.ok(events.some((event) => event.type === 'complete'));
 
+  const thread = runtime.requests.find((item) => item.method === 'thread/start');
+  assert.equal(Object.hasOwn(thread.params, 'sandbox'), false);
   const turn = runtime.requests.find((item) => item.method === 'turn/start');
   assert.equal(turn.params.model, 'gpt-test');
   assert.equal(turn.params.effort, 'high');

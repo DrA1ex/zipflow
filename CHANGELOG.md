@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.2 — Codex sandbox compatibility
+
+- Stop sending the legacy `thread/start.sandbox` enum, whose spelling differs between Codex app-server protocol generations (`readOnly` versus `read-only`).
+- Continue enforcing read-only execution through the explicit `turn/start.sandboxPolicy`, so omitting the thread-level compatibility field does not weaken the replay sandbox.
+- Add an RPC payload regression assertion that the thread request contains no legacy sandbox field while the turn remains restricted to the replay scratch directory.
+
 ## 1.6.1 — Codex timeout determinism and faster RPC tests
 
 - Separated Codex app-server RPC connection timeouts from the model turn's total completion deadline.
