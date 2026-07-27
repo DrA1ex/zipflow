@@ -157,6 +157,140 @@ export async function reviewArchiveSample({ settings, project, workflow, extract
   };
 }
 
+
+export async function reviewSnapshotDeletionIntent({ settings, project, workflow, extracted, plan, patchContent }, options = {}) {
+  const notify = options.onEvent ?? (() => {});
+  notify({ type: 'phase', phase: 'deletion-intent', label: 'Checking whether snapshot removals look intentional' });
+  const comparison = await createTreeComparison({ project, workflow, extracted });
+  let session = options.session;
+  if (!session) {
+    session = await resolveLocalLlmSession(settings, {
+      fetchImpl: options.fetchImpl, timeoutMs: options.metadataTimeoutMs ?? 10_000, signal: options.signal,
+    });
+    notify({ type: 'model-profile', profile: session.profile });
+  }
+  const profile = session.profile;
+  const tree = fitComparison(comparison, Math.min(profile.contextLength, 10_000));
+  const sample = createRepresentativePatch(patchContent, { maxFiles: 6 });
+  const fitted = fitPatchToBudget(sample.content, Math.max(1_600, Math.min(5_000, Math.floor(profile.contextLength * 0.28))));
+  const deletedPaths = (plan.deleted ?? []).map((item) => item.path).sort();
+  const deletedManifest = fitDeletionManifest(deletedPaths, Math.max(2_000, Math.floor(profile.contextLength * 1.2)));
+  notify({
+    type: 'tree-budget',
+    originalEntries: comparison.project.entries.length + comparison.archive.entries.length,
+    sentEntries: tree.sentEntries,
+    truncated: tree.truncated,
+  });
+  notify({ type: 'coverage', ...sample.coverage });
+  const completion = await createLocalCompletion({
+    provider: settings.llmProvider,
+    model: profile.requestModel,
+    loadedModel: profile.loadedModel,
+    messages: [
+      { role: 'system', content: deletionIntentSystemPrompt(promptLanguage(settings), summaryLanguage(settings)) },
+      { role: 'user', content: deletionIntentUserPrompt(project, plan, tree.text, deletedManifest, fitted.content, sample.coverage) },
+    ],
+    responseSchema: null,
+    maxTokens: 512,
+    apiToken: session.apiToken,
+    contextLength: Math.min(profile.contextLength, 16_384),
+    reasoningOffSupported: profile.reasoningOffSupported,
+  }, {
+    ...options,
+    onEvent: (event) => notify({ ...event, stage: 'deletion-intent' }),
+  });
+  const parsed = parseSnapshotDeletionAssessment(completion.content)
+    ?? parseSnapshotDeletionAssessment(completion.reasoning);
+  if (!parsed) {
+    const error = new Error('The local model did not return a usable snapshot-deletion assessment.');
+    error.code = 'no_deletion_intent_assessment';
+    error.diagnostics = { completion, profile, tree, deletedManifest, coverage: sample.coverage };
+    throw error;
+  }
+  return {
+    ...parsed,
+    diagnostics: {
+      profile,
+      tree: {
+        projectFiles: comparison.project.fileCount,
+        archiveFiles: comparison.archive.fileCount,
+        originalEntries: comparison.project.entries.length + comparison.archive.entries.length,
+        sentEntries: tree.sentEntries,
+        truncated: tree.truncated,
+      },
+      deletedManifest: {
+        totalPaths: deletedPaths.length,
+        sentPaths: deletedManifest.sentPaths,
+        truncated: deletedManifest.truncated,
+      },
+      coverage: sample.coverage,
+      patch: fitted,
+      finishReason: completion.finishReason,
+      usage: completion.usage,
+      chunks: completion.chunks,
+    },
+  };
+}
+
+export function parseSnapshotDeletionAssessment(content) {
+  const text = String(content ?? '').trim();
+  if (!text) return null;
+  const assessment = text.match(/^\s*ASSESSMENT\s*:\s*(intentional|ambiguous|likely-partial)\s*$/im)?.[1]?.toLowerCase();
+  const confidence = text.match(/^\s*CONFIDENCE\s*:\s*(low|medium|high)\s*$/im)?.[1]?.toLowerCase();
+  const reasonBlock = text.split(/^\s*REASONS\s*:\s*$/im)[1] ?? '';
+  const reasons = reasonBlock.split(/\r?\n/).map(clean).filter(Boolean).slice(0, 5);
+  if (!assessment || !confidence || !reasons.length) return null;
+  return { assessment, confidence, reasons };
+}
+
+function fitDeletionManifest(paths, maxChars) {
+  const lines = [];
+  let size = 0;
+  for (const filePath of paths) {
+    const next = filePath.length + 1;
+    if (size + next > maxChars) break;
+    lines.push(filePath);
+    size += next;
+  }
+  const truncated = lines.length < paths.length;
+  return {
+    text: [...lines, ...(truncated ? [`… ${paths.length - lines.length} additional deleted paths omitted`] : [])].join('\n'),
+    sentPaths: lines.length,
+    truncated,
+  };
+}
+
+function deletionIntentSystemPrompt(promptLang, outputLanguage) {
+  return [
+    promptLanguageDirective(promptLang),
+    'You are checking a full-snapshot interpretation of a source-code ZIP before local files are deleted.',
+    'Decide whether the planned removals are supported by the visible change evidence or whether the ZIP is more likely a partial patch that omitted unchanged files.',
+    'Use intentional only when changed files, manifests, imports, configuration, migrations, or broad tree replacement provide affirmative evidence for the removals.',
+    'Use likely-partial when the archive is change-focused, many unrelated local files are absent, and the visible changes do not justify removing them.',
+    'Use ambiguous when evidence is insufficient in either direction. Absence from a ZIP alone is never evidence that deletion is intended.',
+    'Do not treat generated, dependency, cache, build, environment, or ignored files as required snapshot content.',
+    'Return plain text, not JSON or Markdown fences, using exactly these headings:',
+    'ASSESSMENT: followed by intentional, ambiguous, or likely-partial.',
+    'CONFIDENCE: followed by low, medium, or high.',
+    'REASONS: followed by one to five factual bullet points.',
+    'Do not include planning notes or claim to have read omitted patch content.',
+    `Write reasons in ${outputLanguage}. Assessment and confidence remain English enum values.`,
+  ].join(' ');
+}
+
+function deletionIntentUserPrompt(project, plan, treeText, deletedManifest, patchText, coverage) {
+  return [
+    `Expected project: ${project.name}`,
+    `Detected technologies: ${(project.workspaceLabels ?? project.labels ?? []).join(', ') || 'unknown'}`,
+    `Full-snapshot plan: created=${plan.counts.created}, updated=${plan.counts.updated}, deleted=${plan.counts.deleted}, unchanged=${plan.counts.unchanged}`,
+    '', treeText,
+    '', 'COMPLETE OR BOUNDED DELETED-PATH MANIFEST:', deletedManifest.text || '(none)',
+    '', `REPRESENTATIVE NON-DELETION PATCH SAMPLE: ${coverage.reviewedFiles} of ${coverage.totalFiles} changed files include content.`,
+    'Do not infer unseen implementation details from omitted files.',
+    '', 'PATCH SAMPLE START', patchText || '(no patch excerpts available)', 'PATCH SAMPLE END',
+  ].join('\n');
+}
+
 export async function createTreeComparison({ project, workflow, extracted }) {
   const excluded = createPathMatcher(workflow.exclude);
   const projectFiles = (await walkFiles(project.root, {

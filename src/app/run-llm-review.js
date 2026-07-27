@@ -1,4 +1,4 @@
-import { reviewArchiveSample, reviewArchiveStructure } from '../llm/archive-review.js';
+import { reviewArchiveSample, reviewArchiveStructure, reviewSnapshotDeletionIntent } from '../llm/archive-review.js';
 import { saveLlmDiagnostics } from '../llm/diagnostics.js';
 import { generateChangeDescription, isLocalLlmEnabled } from '../llm/generate.js';
 import { resolveLocalLlmSession } from '../llm/session.js';
@@ -9,6 +9,7 @@ import { hasLlmChangeTasks, llmTasks } from '../llm/tasks.js';
 import { beginLlmProgress } from './llm-progress.js';
 import { activeRunSettings } from './runtime-settings.js';
 import { showArchiveSafetyReview, showPlanReview } from './run-review.js';
+import { activeArchiveMode, activeArchiveWorkflow } from './archive-interpretation.js';
 
 export function startLlmReview(controller, input) {
   const { state } = controller;
@@ -20,11 +21,17 @@ export function startLlmReview(controller, input) {
   const generation = ++state.llmReviewGeneration;
   state.llmReviewPromise = generateLlmSummary(controller, input, operation)
     .then((llm) => finishLlmReview(controller, llm, generation))
-    .catch((error) => finishLlmReview(controller, {
-      error: error.message,
-      assessment: null,
-      record: { error: error.message },
-    }, generation));
+    .catch((error) => {
+      const deletionOnly = input.taskOverride === 'deletion-intent';
+      return finishLlmReview(controller, {
+        error: error.message,
+        ...(deletionOnly ? {} : { assessment: null }),
+        record: {
+          error: error.message,
+          ...(deletionOnly ? { taskOverride: 'deletion-intent' } : {}),
+        },
+      }, generation);
+    });
   return state.llmReviewPromise;
 }
 
@@ -59,6 +66,23 @@ export function restartLlmReview(controller) {
   return true;
 }
 
+export function startDeletionIntentReview(controller) {
+  const { state } = controller;
+  if (state.llmReviewPending || state.activeOperation?.kind === 'llm-review') return false;
+  if (!state.plan?.deleted?.length || activeArchiveMode(state) !== 'snapshot') {
+    controller.toast('No snapshot deletions to review', 'info', 3, 'Recheck the archive as a full snapshot first.');
+    return showPlanReview(controller);
+  }
+  startLlmReview(controller, {
+    plan: state.plan,
+    patch: state.llmReviewInput?.patch ?? { path: state.run?.patch?.path ?? null, content: '', omitted: state.run?.patch?.omitted ?? 0 },
+    extracted: state.archive,
+    taskOverride: 'deletion-intent',
+  });
+  showPlanReview(controller);
+  return true;
+}
+
 export async function waitForPendingLlmReview(controllerOrState) {
   const state = controllerOrState?.state ?? controllerOrState;
   if (!state?.llmReviewPromise) return null;
@@ -74,10 +98,28 @@ async function finishLlmReview(controller, llm, generation) {
   const skippedByUser = state.llmReviewSkippedByUser;
   state.llmReviewSkippedByUser = false;
   if (!state.run) return llm;
-  state.run.llm = llm.record ? { ...llm.record, ...(skippedByUser ? { skippedByUser: true } : {}) } : llm.record;
+  if (llm.record?.taskOverride === 'deletion-intent') {
+    state.run.llm = {
+      ...(state.run.llm ?? {}),
+      ...(llm.record.deletionIntent ? { deletionIntent: llm.record.deletionIntent } : {}),
+      deletionIntentReview: {
+        durationMs: llm.record.durationMs,
+        diagnosticsPath: llm.record.diagnosticsPath,
+        provider: llm.record.provider,
+        model: llm.record.model,
+        error: llm.record.error ?? null,
+        cancelled: llm.record.cancelled === true,
+      },
+      ...(skippedByUser ? { skippedByUser: true } : {}),
+    };
+  } else {
+    state.run.llm = llm.record ? { ...llm.record, ...(skippedByUser ? { skippedByUser: true } : {}) } : llm.record;
+  }
   state.archiveSafety = {
     ...(state.archiveSafety ?? { warnings: [], acknowledged: false }),
-    llm: llm.assessment ?? null,
+    ...(llm.assessment !== undefined ? { llm: llm.assessment ?? null } : {}),
+    ...(llm.deletionIntent !== undefined ? { deletionIntent: llm.deletionIntent ?? null } : {}),
+    ...(['ambiguous', 'likely-partial'].includes(llm.deletionIntent?.assessment) ? { acknowledged: false } : {}),
   };
   state.run.archiveSafety = state.archiveSafety;
   state.run = await saveRunRecord(state.run);
@@ -93,12 +135,21 @@ function refreshReviewAfterLlm(controller) {
   if (state.screen === 'archive-safety') return showArchiveSafetyReview(controller);
 }
 
-async function generateLlmSummary(controller, { plan, patch, extracted }, operation) {
+async function generateLlmSummary(controller, { plan, patch, extracted, taskOverride = null }, operation) {
   const { state } = controller;
   const settings = activeRunSettings(state);
-  const tasks = llmTasks(settings);
+  const configuredTasks = llmTasks(settings);
+  const tasks = taskOverride === 'deletion-intent'
+    ? { archiveReview: false, deletionIntentReview: true, summary: false, failedChecks: false, commitMessage: false, dirtyTreeCommitMessage: false }
+    : configuredTasks;
   const reviewMode = tasks.archiveReview ? settings.llmArchiveReview : 'disabled';
-  if (!isLocalLlmEnabled(settings) || !hasLlmChangeTasks(settings)) return { record: null, assessment: null };
+  const deletionIntentApplicable = tasks.deletionIntentReview
+    && activeArchiveMode(state) === 'snapshot'
+    && plan.deleted.length > 0
+    && (taskOverride === 'deletion-intent'
+      || state.archiveSafety?.warnings?.some((warning) => warning.id === 'possible-patch-archive'));
+  if (!isLocalLlmEnabled(settings) || (!taskOverride && !hasLlmChangeTasks(settings))) return { record: null, assessment: null };
+  if (!tasks.archiveReview && !tasks.summary && !tasks.commitMessage && !deletionIntentApplicable) return { record: null, assessment: null };
   if (changedCount(plan) === 0 && !['structure', 'sample'].includes(reviewMode)) return { record: null, assessment: null };
   state.progress = { value: 5, total: 7, detail: `Streaming requested LLM output from ${settings.llmModel}` };
   controller.invalidate();
@@ -121,13 +172,13 @@ async function generateLlmSummary(controller, { plan, patch, extracted }, operat
     if (reviewMode === 'structure') {
       guardMode = 'structure';
       guardAssessment = await reviewArchiveStructure(
-        { settings, project: state.project, workflow: state.workflow, extracted, plan },
+        { settings, project: state.project, workflow: activeArchiveWorkflow(state), extracted, plan },
         { onEvent: progress.onEvent, signal: operation.signal, session },
       );
     } else if (reviewMode === 'sample') {
       guardMode = 'sample';
       guardAssessment = await reviewArchiveSample(
-        { settings, project: state.project, workflow: state.workflow, extracted, plan, patchContent: patch.content },
+        { settings, project: state.project, workflow: activeArchiveWorkflow(state), extracted, plan, patchContent: patch.content },
         { onEvent: progress.onEvent, signal: operation.signal, session },
       );
     }
@@ -146,9 +197,18 @@ async function generateLlmSummary(controller, { plan, patch, extracted }, operat
       }).catch(() => null);
       return {
         result, assessment: assessmentRecord(result, guardMode), diagnosticsPath,
-        record: llmRecord(state, result, diagnosticsPath, durationMs),
+        record: llmRecord(state, result, diagnosticsPath, durationMs, tasks),
       };
     }
+    const shouldReviewDeletionIntent = deletionIntentApplicable;
+    let deletionIntent = null;
+    if (shouldReviewDeletionIntent) {
+      deletionIntent = await reviewSnapshotDeletionIntent(
+        { settings, project: state.project, workflow: activeArchiveWorkflow(state), extracted, plan, patchContent: patch.content },
+        { onEvent: progress.onEvent, signal: operation.signal, session },
+      );
+    }
+
     const needsDescription = tasks.summary || tasks.commitMessage || reviewMode === 'patch';
     const descriptionSettings = guardAssessment
       ? { ...settings, llmUseArchiveReview: false }
@@ -162,6 +222,11 @@ async function generateLlmSummary(controller, { plan, patch, extracted }, operat
     if (guardAssessment) {
       result.guardAssessment = guardAssessment;
       result.diagnostics = { ...(result.diagnostics ?? {}), [guardMode]: guardAssessment.diagnostics };
+    }
+    if (taskOverride) result.taskOverride = taskOverride;
+    if (deletionIntent) {
+      result.deletionIntent = deletionIntent;
+      result.diagnostics = { ...(result.diagnostics ?? {}), deletionIntent: deletionIntent.diagnostics };
     }
     const durationMs = Date.now() - startedAt;
     const diagnosticsPath = await saveLlmDiagnostics(state.run.id, {
@@ -179,8 +244,9 @@ async function generateLlmSummary(controller, { plan, patch, extracted }, operat
     return {
       result,
       assessment,
+      deletionIntent: deletionIntent ? deletionIntentRecord(deletionIntent) : undefined,
       diagnosticsPath,
-      record: llmRecord(state, result, diagnosticsPath, durationMs),
+      record: llmRecord(state, result, diagnosticsPath, durationMs, tasks),
     };
   } catch (error) {
     const cancelled = error.code === 'cancelled';
@@ -191,30 +257,23 @@ async function generateLlmSummary(controller, { plan, patch, extracted }, operat
       model: settings.llmModel,
       ...(cancelled ? {} : { error }),
     }).catch(() => null);
+    const deletionOnly = taskOverride === 'deletion-intent';
+    const record = {
+      durationMs: Date.now() - startedAt,
+      provider: settings.llmProvider,
+      model: settings.llmModel,
+      language: settings.llmSummaryLanguage || settings.llmLanguage,
+      languages: llmLanguages(settings),
+      ...(deletionOnly ? { taskOverride: 'deletion-intent' } : {}),
+      ...(cancelled ? { cancelled: true } : { error: error.message }),
+      diagnosticsPath,
+    };
     return {
       cancelled,
       error: cancelled ? null : error.message,
       diagnosticsPath,
-      assessment: null,
-      record: cancelled
-        ? {
-          durationMs: Date.now() - startedAt,
-          provider: settings.llmProvider,
-          model: settings.llmModel,
-          language: settings.llmSummaryLanguage || settings.llmLanguage,
-          languages: llmLanguages(settings),
-          cancelled: true,
-          diagnosticsPath,
-        }
-        : {
-          durationMs: Date.now() - startedAt,
-          provider: settings.llmProvider,
-          model: settings.llmModel,
-          language: settings.llmSummaryLanguage || settings.llmLanguage,
-          languages: llmLanguages(settings),
-          error: error.message,
-          diagnosticsPath,
-        },
+      ...(deletionOnly ? {} : { assessment: null }),
+      record,
     };
   } finally {
     state.llmAbortController = null;
@@ -231,7 +290,9 @@ function projectContextLabel(project) {
 }
 
 function emitLlmResult(controller, llm, settings) {
-  const tasks = llmTasks(settings);
+  const tasks = llm.result?.taskOverride === 'deletion-intent'
+    ? { ...llmTasks(settings), archiveReview: false, summary: false, commitMessage: false, deletionIntentReview: true }
+    : llmTasks(settings);
   const reviewMode = tasks.archiveReview ? settings.llmArchiveReview : 'disabled';
   if (llm.result) {
     const attempt = llm.result.diagnostics?.attempts?.find((item) => typeof item.attempt === 'number');
@@ -253,6 +314,17 @@ function emitLlmResult(controller, llm, settings) {
     } else if (tasks.archiveReview) controller.message('Local LLM archive suitability', [
       'No suitability verdict was returned; deterministic Zipflow safety checks remain active.',
     ], 'warning', { collapsedSummary: 'Local LLM · verdict unavailable' });
+    if (llm.deletionIntent) {
+      const reasons = cleanAssessmentReasons(llm.deletionIntent.reasons);
+      controller.message('Local LLM snapshot deletion intent', [
+        `Assessment: ${deletionIntentLabel(llm.deletionIntent.assessment)}`,
+        `Confidence: ${titleCase(llm.deletionIntent.confidence)}`,
+        ...(reasons.length ? ['Reasons:', ...reasons.map((reason) => `• ${reason}`)] : []),
+      ], llm.deletionIntent.assessment === 'intentional' ? 'success' : 'warning', {
+        collapsedSummary: `Local LLM · deletions ${llm.deletionIntent.assessment} · ${llm.deletionIntent.confidence} confidence`,
+      });
+    }
+
     if (llm.result.warning) controller.message('Local LLM fallback used', [llm.result.warning], 'warning', {
       collapsedSummary: 'Local LLM · fallback used',
     });
@@ -297,7 +369,7 @@ function reviewModeLabel(value) {
   return titleCase(value);
 }
 
-function llmRecord(state, result, diagnosticsPath, durationMs = 0) {
+function llmRecord(state, result, diagnosticsPath, durationMs = 0, tasks = llmTasks(activeRunSettings(state))) {
   const settings = activeRunSettings(state);
   return {
     durationMs,
@@ -305,9 +377,10 @@ function llmRecord(state, result, diagnosticsPath, durationMs = 0) {
     model: settings.llmModel,
     language: settings.llmSummaryLanguage || settings.llmLanguage,
     languages: llmLanguages(settings),
-    tasks: llmTasks(settings),
-    summary: llmTasks(settings).summary ? result.summary : [],
-    commitMessage: llmTasks(settings).commitMessage ? result.commitMessage || null : null,
+    tasks,
+    taskOverride: result.taskOverride ?? null,
+    summary: tasks.summary ? result.summary : [],
+    commitMessage: tasks.commitMessage ? result.commitMessage || null : null,
     warning: result.warning || null,
     assessment: result.assessment ?? result.structureAssessment?.assessment ?? null,
     confidence: result.confidence ?? result.structureAssessment?.confidence ?? null,
@@ -316,6 +389,7 @@ function llmRecord(state, result, diagnosticsPath, durationMs = 0) {
     diagnosticsPath,
     contextText: result.contextText ?? null,
     delivery: result.diagnostics?.delivery ?? null,
+    deletionIntent: result.deletionIntent ? deletionIntentRecord(result.deletionIntent) : null,
   };
 }
 
@@ -335,6 +409,21 @@ function assessmentRecord(value, mode) {
     confidence: value.confidence ?? 'low',
     reasons: cleanAssessmentReasons(value.reasons ?? value.summary ?? []),
   };
+}
+
+function deletionIntentRecord(value) {
+  if (!value?.assessment) return null;
+  return {
+    assessment: value.assessment,
+    confidence: value.confidence ?? 'low',
+    reasons: cleanAssessmentReasons(value.reasons ?? []),
+  };
+}
+
+function deletionIntentLabel(value) {
+  if (value === 'likely-partial') return 'Likely partial archive';
+  if (value === 'intentional') return 'Removals look intentional';
+  return 'Ambiguous';
 }
 
 function cleanAssessmentReasons(values) {
@@ -370,6 +459,7 @@ async function previousLlmEstimate(state) {
 function taskLabel(tasks) {
   return [
     tasks.archiveReview ? 'archive review' : null,
+    tasks.deletionIntentReview ? 'snapshot deletion intent' : null,
     tasks.summary ? 'summary' : null,
     tasks.commitMessage ? 'commit message' : null,
   ].filter(Boolean).join(', ');

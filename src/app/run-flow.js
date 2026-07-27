@@ -30,7 +30,7 @@ import {
 } from './run-review.js';
 import { prepareArchiveRootReview, selectArchiveRoot, showArchiveRootChoice } from './archive-root.js';
 import { activeRunSettings, captureRunSettings, clearRunSettings } from './runtime-settings.js';
-import { restartLlmReview, skipPendingLlmReview, startLlmReview, waitForPendingLlmReview } from './run-llm-review.js';
+import { restartLlmReview, skipPendingLlmReview, startDeletionIntentReview, startLlmReview, waitForPendingLlmReview } from './run-llm-review.js';
 import { rememberArchivePath } from '../settings/recent.js';
 import { decideAtGate, autonomyEnabledFor, markAutonomyDecision } from './autonomy-flow.js';
 import { activateInterruptedRun, showInterruptedRun } from './interrupted-run.js';
@@ -45,6 +45,7 @@ import { completeNoChangeRun } from './run-completion.js';
 import { transitionScreen } from './state.js';
 import { effectiveChangedCount, excludedPlanItems, initializePlanSelections, selectedPlanCounts } from './plan-selection.js';
 import { handleEmptyArchiveEnter as handleArchiveDoubleEnter, selectedDiscoveredArchive } from './run-archive-discovery.js';
+import { activeArchiveMode, activeArchiveWorkflow, initializeArchiveInterpretation, setArchiveInterpretation } from './archive-interpretation.js';
 
 export { showLastRun };
 
@@ -93,6 +94,8 @@ export async function activateRun(controller, itemId) {
       continueAfterSafety,
       skipPendingLlmReview,
       restartLlmReview,
+      reinterpretArchive,
+      startDeletionIntentReview,
     });
   }
   if (isPostCheckScreen(state.screen)) return activatePostCheck(controller, itemId);
@@ -161,7 +164,9 @@ async function inspectArchive(controller, source, archivePath, archiveHash, arch
   const runId = createRunId();
   state.pendingArchive = null;
   try {
-    state.run = await createRunRecord({ id: runId, project: state.project, workflow: state.workflow, archivePath, archiveHash, archiveInfo });
+    initializeArchiveInterpretation(state);
+    const runWorkflow = activeArchiveWorkflow(state);
+    state.run = await createRunRecord({ id: runId, project: state.project, workflow: runWorkflow, archivePath, archiveHash, archiveInfo });
     if (previousRun) state.run.repeatOf = previousRun.id;
     captureRunSettings(state);
     state.run = await saveRunRecord(state.run);
@@ -171,7 +176,7 @@ async function inspectArchive(controller, source, archivePath, archiveHash, arch
     setBusy(controller, 'Inspecting archive', 1, 7, 'Reading ZIP entries');
     operation.update({ phase: 'Reading ZIP entries' });
     const extracted = await extractArchiveFromSource(source, temp, { signal: operation.signal });
-    const rootReview = await prepareArchiveRootReview({ project: state.project, workflow: state.workflow, extracted });
+    const rootReview = await prepareArchiveRootReview({ project: state.project, workflow: runWorkflow, extracted });
     if (rootReview.prompt) {
       state.pendingArchiveInspection = { archivePath, archiveHash, archiveInfo, rootReview };
       operation.finish();
@@ -209,7 +214,8 @@ async function continueArchiveInspection(controller, { archivePath, archiveHash,
     if (activeOperation.signal.aborted) throw Object.assign(new Error('Operation cancelled.'), { code: 'cancelled' });
     setProgress(controller, 3, 7, 'Comparing project files');
     activeOperation.update({ phase: 'Comparing project files' });
-    const resolvedPlan = plan ?? await buildUpdatePlan({ project: state.project, workflow: state.workflow, extracted, signal: activeOperation.signal });
+    const runWorkflow = activeArchiveWorkflow(state);
+    const resolvedPlan = plan ?? await buildUpdatePlan({ project: state.project, workflow: runWorkflow, extracted, signal: activeOperation.signal });
     const hasChanges = changedCount(resolvedPlan) > 0;
     setProgress(controller, 4, 7, hasChanges ? 'Creating changes.patch' : 'No file changes detected');
     activeOperation.update({ phase: hasChanges ? 'Creating changes.patch' : 'No file changes detected' });
@@ -219,7 +225,7 @@ async function continueArchiveInspection(controller, { archivePath, archiveHash,
     setProgress(controller, 5, 7, hasChanges ? 'Checking deterministic archive risks' : 'Preparing no-change result');
     const archiveRisk = hasChanges ? await evaluateArchiveRisks({
       projectPath: state.project.root,
-      workflow: state.workflow,
+      workflow: runWorkflow,
       archiveInfo,
       extracted,
       plan: resolvedPlan,
@@ -235,10 +241,12 @@ async function continueArchiveInspection(controller, { archivePath, archiveHash,
     state.run.plan = serializePlanForDecision(resolvedPlan);
     state.run.patch = patch.path ? { path: patch.path, omitted: patch.omitted } : null;
     state.run.archiveInfo = { ...archiveInfo, fileCount: extracted.fileCount, totalSize: extracted.totalSize, rootPrefix: extracted.rootPrefix };
+    state.run.archiveInterpretation = { ...state.archiveInterpretation };
     state.run.llm = null;
     state.archiveSafety = {
       warnings: archiveRisk.warnings,
       llm: null,
+      deletionIntent: null,
       acknowledged: false,
     };
     state.run.archiveSafety = state.archiveSafety;
@@ -258,6 +266,7 @@ async function continueArchiveInspection(controller, { archivePath, archiveHash,
 
     if (!hasChanges) return completeNoChangeRun(controller);
 
+    state.llmReviewInput = { plan: resolvedPlan, patch, extracted };
     const settings = activeRunSettings(state);
     const shouldRunLlm = isLocalLlmEnabled(settings) && hasLlmChangeTasks(settings) && hasChanges;
     if (shouldRunLlm) activeOperation.handoff(() => startLlmReview(controller, { plan: resolvedPlan, patch, extracted }));
@@ -390,6 +399,76 @@ export async function createCheckpoint(controller, { force = false, operation = 
   ], 'success');
 }
 
+export async function reinterpretArchive(controller, mode) {
+  const { state } = controller;
+  const nextMode = mode === 'snapshot' ? 'snapshot' : 'overlay';
+  if (!state.archive || !state.run) return false;
+  if (state.llmReviewPending || state.activeOperation?.kind === 'llm-review') {
+    controller.toast('LLM review is still running', 'warning', 4, 'Cancel or finish it before rebuilding the archive plan.');
+    return showPlanReview(controller);
+  }
+  if (activeArchiveMode(state) === nextMode) return showPlanReview(controller);
+  const operation = controller.beginOperation({
+    kind: 'archive-reinterpretation',
+    label: nextMode === 'snapshot' ? 'Rechecking as full snapshot' : 'Rechecking as patch archive',
+  });
+  try {
+    setBusy(controller, operation.label, 1, 4, 'Comparing the same extracted archive with a different deletion policy');
+    const runWorkflow = activeArchiveWorkflow(state, nextMode);
+    const plan = await buildUpdatePlan({
+      project: state.project,
+      workflow: runWorkflow,
+      extracted: state.archive,
+      signal: operation.signal,
+    });
+    const hasChanges = changedCount(plan) > 0;
+    setProgress(controller, 2, 4, hasChanges ? 'Rebuilding changes.patch' : 'No changes under this interpretation');
+    const patch = hasChanges
+      ? await createPlanPatch(state.run.id, plan, { projectPath: state.project.root, signal: operation.signal })
+      : { path: null, content: '', omitted: 0 };
+    setProgress(controller, 3, 4, 'Rechecking archive safety');
+    const archiveRisk = hasChanges ? await evaluateArchiveRisks({
+      projectPath: state.project.root,
+      workflow: runWorkflow,
+      archiveInfo: state.run.archiveInfo,
+      extracted: state.archive,
+      plan,
+    }) : { warnings: [] };
+
+    setArchiveInterpretation(state, nextMode, 'manual');
+    state.plan = plan;
+    initializePlanSelections(state, plan);
+    if (state.workflow.autonomy?.mode === 'manual' && state.workflow.policy.conflictPolicy === 'overwrite') {
+      for (const conflict of plan.conflicts) state.decisions.set(conflict.path, 'archive');
+    }
+    state.run.plan = serializePlanForDecision(plan);
+    state.run.patch = patch.path ? { path: patch.path, omitted: patch.omitted } : null;
+    state.run.archiveInterpretation = { ...state.archiveInterpretation };
+    state.run.llm = null;
+    state.archiveSafety = { warnings: archiveRisk.warnings, llm: null, deletionIntent: null, acknowledged: false };
+    state.run.archiveSafety = state.archiveSafety;
+    state.llmReviewInput = { plan, patch, extracted: state.archive };
+    state.run = await saveRunRecord(state.run);
+    setProgress(controller, 4, 4, 'Reinterpreted plan ready');
+    controller.message('Archive interpretation changed for this run', [
+      nextMode === 'snapshot'
+        ? 'The same ZIP is now treated as a full project snapshot; eligible missing files are included as removals.'
+        : 'The same ZIP is now treated as a patch / overlay; files missing from the ZIP are kept locally.',
+      compactPlanLine(plan),
+      'The saved workflow was not changed.',
+    ], 'choice', { collapsible: false });
+    return archiveRisk.warnings.length ? showArchiveSafetyReview(controller) : showPlanReview(controller);
+  } catch (error) {
+    if (error.code === 'cancelled') {
+      controller.message('Archive reinterpretation cancelled', ['The previous update plan remains selected.'], 'warning');
+      return showPlanReview(controller);
+    }
+    throw error;
+  } finally {
+    operation.finish();
+  }
+}
+
 export async function retryArchive(controller) {
   await cancelRun(controller);
   controller.message('Ready for another archive', ['Choose the corrected or rebuilt ZIP file.']);
@@ -422,6 +501,7 @@ export async function continueAfterSafety(controller) {
   if (autonomyEnabledFor(state, 'decidePlanApplication')) {
     const highRisk = Boolean(state.archiveSafety?.warnings?.length)
       || ['suspicious', 'unsuitable'].includes(state.archiveSafety?.llm?.assessment)
+      || ['ambiguous', 'likely-partial'].includes(state.archiveSafety?.deletionIntent?.assessment)
       || (state.workflow.autonomy.mode === 'guarded' && plan.conflicts.length > 0);
     if (highRisk && state.workflow.autonomy.mode === 'guarded') {
       controller.message('Guarded autopilot paused', ['Archive warnings, an adverse LLM verdict, or unresolved local conflicts require your review.'], 'warning');
@@ -474,7 +554,8 @@ export async function continueAfterSafety(controller) {
 function requiresSafetyReview(safety) {
   if (!safety) return false;
   if (safety.warnings?.length) return true;
-  return ['suspicious', 'unsuitable'].includes(safety.llm?.assessment);
+  if (['suspicious', 'unsuitable'].includes(safety.llm?.assessment)) return true;
+  return ['ambiguous', 'likely-partial'].includes(safety.deletionIntent?.assessment);
 }
 function setBusy(controller, label, value, total, detail) {
   transitionScreen(controller.state, 'applying');

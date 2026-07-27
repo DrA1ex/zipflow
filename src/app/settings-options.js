@@ -314,6 +314,8 @@ function llmTaskParameters(state) {
   return [
     toggleParameter('llmUseArchiveReview', 'Archive suitability review', tasks.archiveReview,
       'Ask the model whether the archive changes plausibly belong to this workspace. Deterministic Zipflow checks remain authoritative.'),
+    toggleParameter('llmUseDeletionIntentReview', 'Snapshot deletion intent review', tasks.deletionIntentReview,
+      'When snapshot heuristics are suspicious, ask whether the planned removals look intentional or whether the ZIP is likely a partial patch.'),
     toggleParameter('llmUseSummary', 'Change summary', tasks.summary,
       'Generate a concise human-readable summary of the applied source changes.'),
     toggleParameter('llmUseFailedChecks', 'Failed-check explanations', tasks.failedChecks,
@@ -331,6 +333,7 @@ function llmTasksSummary(settings) {
   const tasks = llmTasks(settings);
   const labels = [
     tasks.archiveReview ? 'Archive review' : null,
+    tasks.deletionIntentReview ? 'Deletion intent' : null,
     tasks.summary ? 'Summary' : null,
     tasks.failedChecks ? 'Failed checks' : null,
     tasks.commitMessage ? 'Update commit' : null,

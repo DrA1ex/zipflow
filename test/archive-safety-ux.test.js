@@ -6,6 +6,8 @@ import { showArchiveSafetyReview } from '../src/app/run-review.js';
 
 function controllerWithSafety(assessment = 'suspicious') {
   const state = createInitialState();
+  state.workflow = { archive: { mode: 'snapshot' } };
+  state.archiveInterpretation = { configuredMode: 'snapshot', mode: 'snapshot', manuallyChanged: false };
   state.archiveSafety = {
     warnings: [{
       id: 'large-deletion', severity: 'danger', title: 'Snapshot would remove a large part of the project',
@@ -27,7 +29,7 @@ test('archive safety review explains deterministic and advisory warnings before 
 
   assert.equal(state.screen, 'archive-safety');
   assert.deepEqual(state.menuItems.map((item) => item.id), [
-    'safety-review-plan', 'safety-continue', 'safety-retry',
+    'safety-review-plan', 'recheck-as-overlay', 'safety-continue', 'safety-retry',
   ]);
   assert.match(state.panelIntro.join('\n'), /Snapshot would remove a large part/);
   assert.match(state.panelIntro.join('\n'), /LLM · suspicious · high confidence/);

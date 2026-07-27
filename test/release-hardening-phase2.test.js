@@ -297,11 +297,12 @@ test('workflow and settings migration use safe Phase-2 defaults', () => {
   assert.equal(migrated.git.hooks, 'disabled');
 
   const settings = normalizeSettings({ version: 20, binaryPaths: { git: '/usr/bin/git', unknown: '/tmp/tool' } });
-  assert.equal(SETTINGS_VERSION, 23);
+  assert.equal(SETTINGS_VERSION, 24);
   assert.equal(settings.checkCommandEnvironment, 'sanitized');
   assert.equal(settings.deployCommandEnvironment, 'inherit');
   assert.equal(settings.projectCommandEnvironment, undefined);
   assert.equal(settings.projectEnvironmentNoticeVersion, 0);
+  assert.equal(settings.llmUseDeletionIntentReview, false);
   assert.deepEqual(settings.binaryPaths, { git: '/usr/bin/git' });
   assert.equal(PROJECT_ENVIRONMENT_NOTICE_VERSION, 1);
   const legacyEnvironment = normalizeSettings({ version: 22, projectCommandEnvironment: 'sanitized' });

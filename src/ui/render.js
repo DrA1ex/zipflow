@@ -498,7 +498,7 @@ function footerHints(state) {
   if (state.llmAbortController) return ['Esc cancel LLM', 'Ctrl+C cancel operation'];
   if (state.busy || ['checks-running', 'deploy-running', 'manual-checks-running', 'manual-deploy-running'].includes(state.screen)) return ['Ctrl+C cancel operation'];
   if (state.menuSearch?.active) return ['Type to filter', 'Enter keep', 'Esc clear/close'];
-  if (state.screen === 'setup-checks') return ['↑/↓ choose', 'Shift+↑/↓ move', 'Space toggle', 'Enter select', '? help'];
+  if (state.screen === 'setup-checks') return ['↑/↓ choose', 'Shift+K/J move', 'Space toggle', 'Enter select', '? help'];
   if (isEditorScreen(state.screen)) {
     if (state.screen === 'commit-message') return ['Enter commit', 'Shift+Enter new line', 'Esc back'];
     if (['archive-input', 'project-path-input', 'project-entry-path', 'custom-check-command', 'deploy-command', 'export-path'].includes(state.screen)) return ['Tab open', 'Shift+Tab up', '↑/↓ choose', 'Enter confirm', 'Esc back'];

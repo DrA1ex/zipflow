@@ -4,6 +4,9 @@ import { rememberDiffMode } from '../settings/recent.js';
 import { compactPlanLine, compactPlanMeta } from '../ui/format.js';
 import { isScreenGenerationCurrent, screenGenerationToken, setScreen } from './state.js';
 import { autopilotPaused, resumeAutopilot } from './autonomy-flow.js';
+import { activeArchiveMode, archiveInterpretationLabel } from './archive-interpretation.js';
+import { isLocalLlmEnabled } from '../llm/generate.js';
+import { activeRunSettings } from './runtime-settings.js';
 import {
   isPlanItemSelected, planItemDecision, planSelectionSummary, setPlanGroupDecision, setPlanItemDecision,
 } from './plan-selection.js';
@@ -32,6 +35,9 @@ export async function activateReview(controller, itemId, actions) {
       return showArchiveSafetyReview(controller);
     }
     if (itemId === 'restart-llm-review') return actions.restartLlmReview(controller);
+    if (itemId === 'recheck-as-overlay') return actions.reinterpretArchive(controller, 'overlay');
+    if (itemId === 'recheck-as-snapshot') return actions.reinterpretArchive(controller, 'snapshot');
+    if (itemId === 'review-deletion-intent') return actions.startDeletionIntentReview(controller);
     if (itemId === 'safety-review-plan') {
       state.archiveSafety.acknowledged = true;
       return showPlanCategories(controller);
@@ -49,6 +55,9 @@ export async function activateReview(controller, itemId, actions) {
       return showPlanReview(controller);
     }
     if (itemId === 'restart-llm-review') return actions.restartLlmReview(controller);
+    if (itemId === 'recheck-as-overlay') return actions.reinterpretArchive(controller, 'overlay');
+    if (itemId === 'recheck-as-snapshot') return actions.reinterpretArchive(controller, 'snapshot');
+    if (itemId === 'review-deletion-intent') return actions.startDeletionIntentReview(controller);
     if (itemId === 'resume-autopilot') {
       await resumeAutopilot(controller);
       return actions.continueAfterSafety(controller);
@@ -182,6 +191,39 @@ function llmReviewMenuItems(state) {
   return [];
 }
 
+function archiveModeAction(state, active) {
+  if (activeArchiveMode(state) === 'snapshot') return {
+    id: 'recheck-as-overlay',
+    label: 'Recheck as patch / overlay',
+    description: 'Rebuild this run without deleting local files that are absent from the ZIP',
+    disabled: active,
+  };
+  return {
+    id: 'recheck-as-snapshot',
+    label: 'Recheck as full snapshot',
+    description: 'Rebuild this run and include eligible missing local files as removals',
+    disabled: active,
+  };
+}
+
+function deletionIntentAction(state, active) {
+  if (activeArchiveMode(state) !== 'snapshot' || !(state.plan?.deleted?.length > 0)) return null;
+  const enabled = isLocalLlmEnabled(activeRunSettings(state));
+  const assessment = state.archiveSafety?.deletionIntent?.assessment;
+  return {
+    id: 'review-deletion-intent',
+    label: assessment ? 'Recheck deletion intent with Local LLM' : 'Check deletion intent with Local LLM',
+    description: enabled
+      ? 'Ask whether the planned removals look intentional or whether this ZIP is likely a partial patch'
+      : 'Enable a Local LLM provider in Ctrl+B settings to use this optional review',
+    disabled: active || !enabled,
+  };
+}
+
+function compactOptional(items) {
+  return items.filter(Boolean);
+}
+
 function planItemFromId(state, itemId) {
   const [, category, rawIndex] = String(itemId ?? '').split(':');
   return state.plan?.[category]?.[Number(rawIndex)] ?? null;
@@ -191,7 +233,8 @@ export function showArchiveSafetyReview(controller) {
   const { state } = controller;
   const safety = state.archiveSafety ?? { warnings: [] };
   const dangerous = safety.warnings.some((item) => item.severity === 'danger')
-    || safety.llm?.assessment === 'unsuitable';
+    || safety.llm?.assessment === 'unsuitable'
+    || safety.deletionIntent?.assessment === 'likely-partial';
   const active = llmReviewActive(state);
   const lines = safetyLines(safety);
   if (active) lines.push(state.llmReviewCancelling
@@ -199,6 +242,8 @@ export function showArchiveSafetyReview(controller) {
     : 'LLM review is still running. You can inspect the plan or cancel the review.');
   controller.showMenu('archive-safety', [
     { id: 'safety-review-plan', label: 'Review changed files', description: 'Inspect groups and diffs before deciding whether to apply', allowDuringOperation: active },
+    archiveModeAction(state, active),
+    ...compactOptional([deletionIntentAction(state, active)]),
     { id: 'safety-continue', label: active ? 'Continue · waiting for LLM review' : 'Continue despite warnings', description: active ? 'Wait for the active review or cancel it first' : dangerous ? 'The archive remains subject to backup, conflict handling, and checks' : 'Acknowledge the advisory warnings and continue normally', disabled: active },
     ...llmReviewMenuItems(state),
     { id: 'safety-retry', label: 'Choose another archive', description: active ? 'Cancel the LLM review before leaving this run' : 'Cancel this run without changing the project', disabled: active },
@@ -212,12 +257,14 @@ export function showPlanReview(controller) {
   const items = [
     { id: 'apply-plan', label: active ? 'Apply update · waiting for LLM review' : 'Apply update', description: active ? 'Wait for the active review or cancel it first' : plan.conflicts.length ? 'Uses the conflict decisions shown above' : 'Backup is created before any local file changes', disabled: active },
     { id: 'view-plan', label: 'Review changes', description: 'Open file groups and inspect unified or side-by-side diffs', allowDuringOperation: active },
+    archiveModeAction(state, active),
+    ...compactOptional([deletionIntentAction(state, active)]),
     ...llmReviewMenuItems(state),
   ];
   if (autopilotPaused(state)) items.push({ id: 'resume-autopilot', label: 'Resume autopilot', description: 'Ask the local model to decide this plan checkpoint again.' });
   items.push({ id: 'cancel-run', label: 'Cancel update', description: active ? 'Cancel the LLM review before leaving this run' : 'Return without changing the project', disabled: active });
   const selection = planSelectionSummary(plan, state.decisions);
-  const intro = [compactPlanLine(plan), compactPlanMeta(plan), ...(selection.excluded ? [`Selection: ${selection.selected} apply · ${selection.excluded} keep local`] : []), ...planWarnings(plan, state.archiveSafety)];
+  const intro = [`Interpretation: ${archiveInterpretationLabel(state)}${state.archiveInterpretation?.source === 'manual' ? ' · current run only' : ''}`, compactPlanLine(plan), compactPlanMeta(plan), ...(selection.excluded ? [`Selection: ${selection.selected} apply · ${selection.excluded} keep local`] : []), ...planWarnings(plan, state.archiveSafety)];
   if (active) intro.push(state.llmReviewCancelling
     ? 'Stopping the LLM review safely. Apply will become available after the active request closes.'
     : 'LLM review is running. Files and diffs remain available; Apply waits until the review finishes or is cancelled.');
@@ -516,6 +563,7 @@ function planWarnings(plan, safety = null) {
   if (safety?.llm && safety.llm.assessment !== 'suitable') {
     lines.push(`LLM archive assessment: ${safety.llm.assessment} · ${safety.llm.confidence} confidence`);
   }
+  if (safety?.deletionIntent) lines.push(`LLM deletion intent: ${safety.deletionIntent.assessment} · ${safety.deletionIntent.confidence} confidence`);
   if (plan.ignoredIncoming.length) lines.push(`${plan.ignoredIncoming.length} incoming paths are ignored by .gitignore`);
   if (plan.preserved.length) lines.push(`${plan.preserved.length} local paths will be preserved`);
   if (!lines.length) lines.push('No ignored or preserved paths require attention.');
@@ -528,6 +576,10 @@ function safetyLines(safety) {
   if (safety.llm) {
     lines.push(`LLM · ${safety.llm.assessment} · ${safety.llm.confidence} confidence`);
     for (const reason of safety.llm.reasons ?? []) lines.push(`  ${reason}`);
+  }
+  if (safety.deletionIntent) {
+    lines.push(`LLM deletion intent · ${safety.deletionIntent.assessment} · ${safety.deletionIntent.confidence} confidence`);
+    for (const reason of safety.deletionIntent.reasons ?? []) lines.push(`  ${reason}`);
   }
   lines.push('', 'The LLM verdict is advisory. Zipflow still applies deterministic path, Git, backup, and test protections.');
   return lines;

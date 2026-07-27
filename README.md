@@ -42,7 +42,7 @@ Archive → Review → Apply → Checks → Finish
 
 ## Main features
 
-- Overlay updates and full-project snapshots.
+- Overlay updates and full-project snapshots, with warnings when a supposed snapshot looks like a partial patch.
 - Archive validation and project-path confinement.
 - File-level conflict review and diff inspection.
 - Automatic restoration when application fails partway through.
@@ -60,7 +60,8 @@ Archive → Review → Apply → Checks → Finish
 
 ```text
 ↑ / ↓       move through choices
-Shift+↑/↓   reorder checks during workflow setup
+Shift+K/J   reorder checks during workflow setup (reliable in macOS Terminal)
+Shift+↑/↓   reorder checks when the terminal reports Shift-modified arrows
 Space       toggle or select
 Enter       open or confirm
 Esc         go back; from the archive prompt, open the project menu

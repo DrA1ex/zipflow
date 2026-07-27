@@ -404,6 +404,7 @@ export class ZipflowController {
     this.state.archive = null;
     this.state.archiveMetadata = null;
     this.state.archiveSafety = null;
+    this.state.archiveInterpretation = null;
     this.state.plan = null;
     this.state.llmReviewPending = false;
     this.state.llmReviewCancelling = false;

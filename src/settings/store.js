@@ -14,7 +14,7 @@ import {
   deleteLlmApiToken, readLlmApiToken, SecureCredentialStoreError, writeLlmApiToken,
 } from '../security/credential-store.js';
 
-export const SETTINGS_VERSION = 23;
+export const SETTINGS_VERSION = 24;
 export const THEME_NAMES = Object.keys(themes);
 export const LLM_PROVIDERS = ['disabled', 'ollama', 'lmstudio'];
 export const LLM_LANGUAGES = ['English', 'Russian', 'German', 'French', 'Spanish', 'Chinese', 'Japanese'];
@@ -47,6 +47,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   llmSelectedInstanceId: '',
   llmApiToken: '',
   llmUseArchiveReview: false,
+  llmUseDeletionIntentReview: false,
   llmUseSummary: true,
   llmUseFailedChecks: false,
   llmUseCommitMessage: true,
@@ -314,7 +315,7 @@ export function normalizeSettings(settings) {
   value.llmLanguage = value.llmSummaryLanguage;
   if (typeof value.llmSelectedInstanceId !== 'string') value.llmSelectedInstanceId = '';
   if (typeof value.llmApiToken !== 'string') value.llmApiToken = '';
-  const taskSettingIds = ['llmUseArchiveReview', 'llmUseSummary', 'llmUseFailedChecks', 'llmUseCommitMessage', 'llmUseDirtyTreeCommitMessage'];
+  const taskSettingIds = ['llmUseArchiveReview', 'llmUseDeletionIntentReview', 'llmUseSummary', 'llmUseFailedChecks', 'llmUseCommitMessage', 'llmUseDirtyTreeCommitMessage'];
   const hasTaskSettings = taskSettingIds.some((key) => Object.prototype.hasOwnProperty.call(source, key));
   const sourceVersion = Number(source.version || 0);
   const migrateLegacyTasks = !hasTaskSettings && (
@@ -329,6 +330,7 @@ export function normalizeSettings(settings) {
   value.llmUseArchiveReview = hasTaskSettings
     ? value.llmUseArchiveReview === true
     : migrateLegacyTasks ? legacyArchiveReview !== 'disabled' : DEFAULT_SETTINGS.llmUseArchiveReview;
+  value.llmUseDeletionIntentReview = value.llmUseDeletionIntentReview === true;
   value.llmUseSummary = hasTaskSettings
     ? value.llmUseSummary !== false
     : migrateLegacyTasks ? true : DEFAULT_SETTINGS.llmUseSummary;

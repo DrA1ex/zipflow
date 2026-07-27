@@ -1,7 +1,7 @@
 import {
   commandLocationLabel, formatCommandSpec, validateCommandSpec,
 } from '../project/command-spec.js';
-import { shiftArrowDirection } from './key-normalization.js';
+import { checkReorderDirection } from './key-normalization.js';
 
 export function showChecksStep(controller, selectedIndex = null) {
   const checks = controller.state.draft.checks;
@@ -26,6 +26,7 @@ export function showChecksStep(controller, selectedIndex = null) {
   controller.showMenu('setup-checks', items, 'Select checks', initialIndex, [
     'Commands without a directory run from the workspace root.',
     'Use path/ :: command for a project or any other directory inside the workspace.',
+    'If Shift+arrows only move the selection, use Shift+K/J to reorder.',
   ]);
 }
 
@@ -104,7 +105,7 @@ export function handleChecksShortcut(controller, key) {
   const { state } = controller;
   if (state.screen !== 'setup-checks') return false;
   const selected = state.menuItems[state.selectedIndex];
-  const direction = shiftArrowDirection(key);
+  const direction = checkReorderDirection(key);
   if (direction && !selected?.id.startsWith('check:')) {
     controller.setStatus('Select a check before moving it');
     return true;

@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.4.0 — Archive interpretation safeguards
+
+- Detect snapshot plans that look like change-focused patch archives by combining deletion volume, deletion ratio, unchanged-file coverage, and missing top-level areas instead of relying on one raw threshold.
+- Pause suspicious full-snapshot runs before application and explain why omitted ZIP paths may represent unchanged files rather than intentional removals.
+- Add current-run-only **Recheck as patch / overlay** and **Recheck as full snapshot** actions that rebuild the plan, patch, safety warnings, and file decisions without changing the saved workflow.
+- Add an optional **Snapshot deletion intent review** Local LLM task plus an on-demand review action that classifies planned removals as intentional, ambiguous, or likely caused by a partial patch.
+- Preserve existing LLM summaries and commit-message proposals when an on-demand deletion-intent review is cancelled or fails.
+- Add real-ZIP integration coverage, deterministic heuristic regression tests, LLM protocol tests, settings migration coverage, and complete built-in language-pack translations for the new workflow.
+
+## 1.3.17 — macOS Terminal check-reorder fallback
+
+- Added `Shift+K` and `Shift+J` as reliable check-reorder shortcuts for terminal emulators that do not report Shift-modified arrow keys distinctly, including the default macOS Terminal profile.
+- Kept `Shift+Up` and `Shift+Down` support for terminals that emit modifier-aware CSI sequences.
+- Updated the checks footer, controls documentation, and regression tests to exercise raw printable terminal input rather than assuming `CSI 1;2 A/B` is available everywhere.
+
 ## 1.3.16 — Existing-workflow check reorder entry fix
 
 - Open the **Change workflow → Checks** section with an actual check selected instead of the trailing Continue action, so `Shift+Up` and `Shift+Down` work immediately on the screen where ordering is edited.

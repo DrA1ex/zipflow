@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRunRecord, saveRunRecord } from '../src/runs/store.js';
-import { evaluateArchiveRisks } from '../src/archive/risk.js';
+import { evaluateArchiveRisks, evaluatePotentialPatchArchive } from '../src/archive/risk.js';
 import { tempDir } from '../test-support/helpers.js';
 
 async function withHome(run) {
@@ -41,7 +41,7 @@ test('snapshot risk detects an older archive, large deletion, and a much smaller
 
   assert.equal(result.previousRunId, 'risk-previous');
   assert.deepEqual(result.warnings.map((item) => item.id).sort(), [
-    'large-deletion', 'older-than-last', 'smaller-than-last',
+    'large-deletion', 'older-than-last', 'possible-patch-archive', 'smaller-than-last',
   ]);
   assert.equal(result.warnings.find((item) => item.id === 'large-deletion').severity, 'danger');
   assert.equal(result.warnings.find((item) => item.id === 'smaller-than-last').severity, 'danger');
@@ -58,3 +58,30 @@ test('overlay archives never receive snapshot shrink warnings', async () => with
   });
   assert.deepEqual(result.warnings, []);
 }));
+
+
+test('snapshot risk flags a change-focused ZIP that would delete unrelated project files', () => {
+  const warning = evaluatePotentialPatchArchive({
+    created: [{ path: 'src/new.js' }],
+    updated: [{ path: 'src/app.js' }],
+    unchanged: [],
+    deleted: [
+      { path: 'docs/guide.md' }, { path: 'test/app.test.js' }, { path: 'scripts/build.js' },
+      { path: 'src/legacy.js' }, { path: 'package-lock.json' },
+    ],
+  });
+  assert.equal(warning.id, 'possible-patch-archive');
+  assert.equal(warning.recommendation, 'overlay');
+  assert.equal(warning.severity, 'danger');
+  assert.match(warning.detail, /Recheck this run as an overlay archive/);
+});
+
+test('snapshot risk does not call a broad mostly-unchanged snapshot a patch', () => {
+  const warning = evaluatePotentialPatchArchive({
+    created: [],
+    updated: items(2, 'updated'),
+    unchanged: items(80, 'same'),
+    deleted: items(5, 'deleted'),
+  });
+  assert.equal(warning, null);
+});

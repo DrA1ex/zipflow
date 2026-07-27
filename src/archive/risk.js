@@ -4,6 +4,9 @@ const OLD_ARCHIVE_SKEW_MS = 5 * 60 * 1000;
 const MIN_SHRINK_FILES = 10;
 const DELETE_RATIO_WARNING = 0.25;
 const ARCHIVE_RATIO_WARNING = 0.6;
+const MIN_PATCH_SUSPICION_DELETIONS = 3;
+const PATCH_DELETE_RATIO = 0.2;
+const PATCH_UNCHANGED_RATIO = 0.25;
 
 export async function evaluateArchiveRisks({ projectPath, workflow, archiveInfo, extracted, plan }) {
   const warnings = [];
@@ -22,6 +25,8 @@ export async function evaluateArchiveRisks({ projectPath, workflow, archiveInfo,
     }
   }
   if (workflow.archive.mode !== 'snapshot') return { warnings, previousRunId: previous?.id ?? null };
+  const patchSuspicion = evaluatePotentialPatchArchive(plan);
+  if (patchSuspicion) warnings.push(patchSuspicion);
   const localScope = plan.updated.length + plan.unchanged.length + plan.deleted.length;
   const deleteRatio = localScope ? plan.deleted.length / localScope : 0;
   if (plan.deleted.length >= MIN_SHRINK_FILES && deleteRatio >= DELETE_RATIO_WARNING) {
@@ -46,6 +51,55 @@ export async function evaluateArchiveRisks({ projectPath, workflow, archiveInfo,
     }
   }
   return { warnings: deduplicate(warnings), previousRunId: previous?.id ?? null };
+}
+
+export function evaluatePotentialPatchArchive(plan) {
+  const created = plan.created?.length ?? 0;
+  const updated = plan.updated?.length ?? 0;
+  const unchanged = plan.unchanged?.length ?? 0;
+  const deleted = plan.deleted?.length ?? 0;
+  if (deleted < MIN_PATCH_SUSPICION_DELETIONS) return null;
+  const localScope = updated + unchanged + deleted;
+  const incomingManaged = created + updated + unchanged;
+  if (!localScope || !incomingManaged) return null;
+  const deleteRatio = deleted / localScope;
+  const unchangedRatio = unchanged / incomingManaged;
+  const changedIncoming = created + updated;
+  const changeFocused = changedIncoming >= 1 && unchangedRatio <= PATCH_UNCHANGED_RATIO;
+  const stronglyShrunk = deleted >= MIN_SHRINK_FILES && deleted >= incomingManaged;
+  const smallPatchDominated = deleted >= MIN_PATCH_SUSPICION_DELETIONS
+    && deleteRatio >= 0.4
+    && deleted >= Math.max(2, changedIncoming * 2)
+    && unchanged <= 2;
+  if (!(deleteRatio >= PATCH_DELETE_RATIO && changeFocused) && !stronglyShrunk && !smallPatchDominated) return null;
+
+  const missingAreas = missingTopLevelAreas(plan);
+  const evidence = [
+    `${changedIncoming} incoming paths are added or changed, but only ${unchanged} match the current project unchanged`,
+    `${deleted} of ${localScope} managed local paths would be removed (${percent(deleteRatio)})`,
+    missingAreas.length ? `${missingAreas.length} top-level area${missingAreas.length === 1 ? '' : 's'} appear only among removals: ${missingAreas.slice(0, 4).join(', ')}${missingAreas.length > 4 ? ', …' : ''}` : null,
+  ].filter(Boolean);
+  return {
+    id: 'possible-patch-archive',
+    severity: deleteRatio >= 0.5 || unchanged === 0 ? 'danger' : 'warning',
+    title: 'Archive may be a patch rather than a full snapshot',
+    detail: `${evidence.join('. ')}. Recheck this run as an overlay archive before applying if those removals are not intentional.`,
+    recommendation: 'overlay',
+    metrics: { created, updated, unchanged, deleted, localScope, incomingManaged, deleteRatio, unchangedRatio, missingAreas },
+  };
+}
+
+function missingTopLevelAreas(plan) {
+  const incoming = new Set([...plan.created ?? [], ...plan.updated ?? [], ...plan.unchanged ?? []]
+    .map((item) => topLevel(item.path))
+    .filter(Boolean));
+  return [...new Set((plan.deleted ?? []).map((item) => topLevel(item.path)).filter(Boolean))]
+    .filter((area) => !incoming.has(area))
+    .sort();
+}
+
+function topLevel(filePath) {
+  return String(filePath ?? '').replaceAll('\\', '/').split('/').filter(Boolean)[0] ?? '';
 }
 
 async function latestComparableRun(projectPath) {

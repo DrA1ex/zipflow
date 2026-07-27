@@ -135,7 +135,9 @@ test('editing an existing workflow opens Checks on a movable check and never dem
   const selectedId = state.draft.checks[state.selectedIndex].id;
   const originalOrder = state.draft.checks.map((check) => check.id);
 
-  await controller.handleKey(parseInputEvent('\x1b[1;2B'));
+  // Terminal.app-compatible path: Shift+J arrives as printable uppercase J,
+  // while Shift+Down may be indistinguishable from an ordinary arrow.
+  await controller.handleKey(parseInputEvent('J'));
 
   assert.notDeepEqual(state.draft.checks.map((check) => check.id), originalOrder);
   assert.equal(state.draft.checks[state.selectedIndex].id, selectedId);

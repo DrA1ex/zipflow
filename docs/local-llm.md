@@ -14,6 +14,7 @@ The provider, optional bearer token, selected model, and output languages are co
 The **LLM tasks** page contains independent checkboxes. Enable only the outputs you want:
 
 - **Archive suitability review** — ask whether the archive plausibly belongs to the current workspace;
+- **Snapshot deletion intent review** — for snapshot plans that trigger Zipflow's partial-patch heuristic, ask whether the planned removals have affirmative support in the visible changes;
 - **Change summary** — generate a concise human-readable description of the source changes;
 - **Failed-check explanations** — offer an LLM explanation after a configured check fails;
 - **Update commit message** — generate a Git commit-message candidate for the applied archive update;
@@ -22,6 +23,14 @@ The **LLM tasks** page contains independent checkboxes. Enable only the outputs 
 The tasks do not depend on each other. For example, Zipflow can request only an update commit message, only a dirty-tree checkpoint message, or both without generating a summary or archive verdict. Turning every task off keeps the provider and model configuration but prevents ordinary workflow LLM requests. Autopilot model decisions remain a separate capability and compatibility check.
 
 Ordinary summaries and verdicts are advisory. Local LLM failures do not block manual archive application.
+
+### Snapshot deletion intent
+
+The deletion-intent task runs automatically only when it is enabled, the current archive interpretation is a full snapshot, the plan contains removals, and Zipflow's deterministic partial-patch heuristic is suspicious. The same check can be requested manually from the plan or archive-safety menu.
+
+This is separate from the general archive-suitability verdict. Its response is limited to `intentional`, `ambiguous`, or `likely-partial`, with factual reasons and confidence. Zipflow supplies project/archive structure, a complete or explicitly bounded deletion manifest, and representative excerpts from files that are actually added or changed. The prompt forbids treating simple absence from the ZIP as proof that deletion was intended.
+
+A likely-partial or ambiguous result returns the run to safety review. It does not automatically reinterpret the archive; the user can choose **Recheck as patch / overlay**. Cancelling or failing this optional review preserves any existing summary, commit-message proposal, and general archive assessment.
 
 ## Archive review methods
 
@@ -119,7 +128,7 @@ Press `Esc` during review generation to cancel only that local LLM request. Arch
 - a read-only replay of a historical archive update using current settings;
 - a read-only Guarded-versus-Full autopilot simulation reconstructed from historical run state.
 
-Replay and autopilot simulation show the selected historical update and safety scope before opening the generation workspace. Neither changes project files, Git state, backups, source archives, or run history. Terlio 1.1.3 syntax highlighting is applied consistently to fenced code blocks and standalone JSON in live output, saved raw model responses, Activity, and historical replay. Zipflow infers JSON for partial structured streams so the response remains readable before the closing brace arrives.
+Replay and autopilot simulation show the selected historical update and safety scope before opening the generation workspace. Neither changes project files, Git state, backups, source archives, or run history. Terlio 1.2.0 syntax highlighting is applied consistently to fenced code blocks and standalone JSON in live output, saved raw model responses, Activity, and historical replay. Zipflow infers JSON for partial structured streams so the response remains readable before the closing brace arrives.
 
 During generation, raw model output is streamed in Activity. By default that temporary block disappears when Zipflow produces its parsed result. Enable **Raw model responses → Keep raw responses** to retain the completed raw response as a collapsed Activity block immediately before the parsed explanation or review. The setting uses a two-option radio list. Both values are stored as booleans, so switching between **Hide raw responses** and **Keep raw responses** updates the marker immediately and persists across restarts.
 

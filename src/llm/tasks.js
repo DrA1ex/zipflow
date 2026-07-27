@@ -1,5 +1,6 @@
 export const LLM_TASK_SETTING_IDS = Object.freeze([
   'llmUseArchiveReview',
+  'llmUseDeletionIntentReview',
   'llmUseSummary',
   'llmUseFailedChecks',
   'llmUseCommitMessage',
@@ -11,6 +12,7 @@ export function llmTasks(settings = {}) {
     archiveReview: settings.llmUseArchiveReview === undefined
       ? Boolean(settings.llmArchiveReview && settings.llmArchiveReview !== 'disabled')
       : settings.llmUseArchiveReview === true,
+    deletionIntentReview: settings.llmUseDeletionIntentReview === true,
     summary: settings.llmUseSummary !== false,
     failedChecks: settings.llmUseFailedChecks === undefined
       ? Boolean(settings.llmFailureAnalysis && settings.llmFailureAnalysis !== 'disabled')
@@ -22,12 +24,12 @@ export function llmTasks(settings = {}) {
 
 export function hasLlmChangeTasks(settings) {
   const tasks = llmTasks(settings);
-  return tasks.archiveReview || tasks.summary || tasks.commitMessage;
+  return tasks.archiveReview || tasks.deletionIntentReview || tasks.summary || tasks.commitMessage;
 }
 
 export function hasLlmPatchDeliveryTasks(settings) {
   const tasks = llmTasks(settings);
-  return tasks.archiveReview || tasks.summary || tasks.commitMessage || tasks.dirtyTreeCommitMessage;
+  return tasks.archiveReview || tasks.deletionIntentReview || tasks.summary || tasks.commitMessage || tasks.dirtyTreeCommitMessage;
 }
 
 export function isLlmDirtyTreeCommitMessageEnabled(settings) {

@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { createTreeComparison, parseArchiveAssessment, reviewArchiveSample, reviewArchiveStructure } from '../src/llm/archive-review.js';
+import {
+  createTreeComparison, parseArchiveAssessment, parseSnapshotDeletionAssessment,
+  reviewArchiveSample, reviewArchiveStructure, reviewSnapshotDeletionIntent,
+} from '../src/llm/archive-review.js';
 import { tempDir, writeFiles, extractedFixture } from '../test-support/helpers.js';
 
 function jsonResponse(value, status = 200) {
@@ -190,4 +193,76 @@ test('sample guard sends the complete manifest and at most five representative p
   assert.match(chatBody.input, /UPDATE src\/file-9\.js/);
   assert.match(chatBody.input, /REPRESENTATIVE PATCH SAMPLE: 5 of 10/);
   assert.ok((chatBody.input.match(/diff --git/g) ?? []).length <= 5);
+});
+
+
+test('snapshot deletion review distinguishes likely partial archives from intentional removals', async () => {
+  const root = await tempDir('zipflow-deletion-review-project-');
+  await writeFiles(root, {
+    'package.json': '{}\n',
+    'src/app.js': 'old\n',
+    'src/feature.js': 'keep\n',
+    'test/app.test.js': 'test\n',
+    'docs/guide.md': 'guide\n',
+  });
+  const extracted = await extractedFixture(await tempDir('zipflow-deletion-review-archive-'), {
+    'package.json': '{}\n',
+    'src/app.js': 'new\n',
+  });
+  let chatBody;
+  const fetchImpl = async (url, options = {}) => {
+    if (url.endsWith('/api/v1/models')) return jsonResponse(modelCatalog());
+    chatBody = JSON.parse(options.body);
+    return nativeCompletion([
+      'ASSESSMENT: likely-partial',
+      'CONFIDENCE: high',
+      'REASONS:',
+      '- The visible change updates one source file but does not justify removing tests and documentation.',
+      '- Most removed paths are unrelated to the changed implementation.',
+    ].join('\n'));
+  };
+  const plan = {
+    counts: { created: 0, updated: 1, deleted: 3, unchanged: 1 },
+    created: [],
+    updated: [{ path: 'src/app.js' }],
+    unchanged: [{ path: 'package.json' }],
+    deleted: [{ path: 'src/feature.js' }, { path: 'test/app.test.js' }, { path: 'docs/guide.md' }],
+  };
+  const result = await reviewSnapshotDeletionIntent({
+    settings: {
+      llmProvider: 'lmstudio', llmModel: 'gemma-loaded', llmApiToken: '',
+      llmPromptLanguage: 'English', llmSummaryLanguage: 'English', llmCommitLanguage: 'English',
+    },
+    project: { root, name: 'fixture', labels: ['Node.js'], git: false },
+    workflow: { exclude: ['.env', '.env.*', '.venv/**', '.DS_Store'] },
+    extracted,
+    plan,
+    patchContent: [
+      'diff --git a/src/app.js b/src/app.js',
+      '--- a/src/app.js',
+      '+++ b/src/app.js',
+      '@@ -1 +1 @@',
+      '-old',
+      '+new',
+    ].join('\n'),
+  }, { fetchImpl });
+
+  assert.equal(result.assessment, 'likely-partial');
+  assert.equal(result.confidence, 'high');
+  assert.match(chatBody.input, /COMPLETE OR BOUNDED DELETED-PATH MANIFEST/);
+  assert.match(chatBody.input, /test\/app\.test\.js/);
+  assert.match(chatBody.system_prompt, /Absence from a ZIP alone is never evidence/);
+  assert.equal(result.diagnostics.deletedManifest.totalPaths, 3);
+});
+
+test('snapshot deletion assessment parser requires explicit deletion-intent enums', () => {
+  assert.deepEqual(parseSnapshotDeletionAssessment([
+    'ASSESSMENT: intentional',
+    'CONFIDENCE: medium',
+    'REASONS:',
+    '- The updated manifest removes the deleted package.',
+  ].join('\n')), {
+    assessment: 'intentional', confidence: 'medium', reasons: ['The updated manifest removes the deleted package.'],
+  });
+  assert.equal(parseSnapshotDeletionAssessment('ASSESSMENT: suitable\nCONFIDENCE: high\nREASONS:\n- Fine'), null);
 });

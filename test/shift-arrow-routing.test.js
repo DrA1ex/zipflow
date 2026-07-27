@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { createWorkspaceApp, parseInputEvent, Text } from 'terlio.js';
-import { normalizeZipflowKey, shiftArrowDirection } from '../src/app/key-normalization.js';
+import { checkReorderDirection, normalizeZipflowKey, shiftArrowDirection } from '../src/app/key-normalization.js';
 import { createInitialState } from '../src/app/state.js';
 import { ZipflowController } from '../src/app/controller.js';
 import { showChecksStep } from '../src/app/setup-checks.js';
@@ -26,6 +26,16 @@ test('Zipflow recovers Shift+arrow intent from sequence, aliases, and modifier c
   assert.equal(shiftArrowDirection({ name: 'up', modifiers: ['shift'] }), -1);
   assert.equal(shiftArrowDirection({ name: 'down', modifiers: { shift: true } }), 1);
   assert.equal(shiftArrowDirection({ name: 'up', shift: false, sequence: '\x1b[A' }), 0);
+});
+
+
+test('Shift+K/J provide a printable fallback when arrows do not carry Shift', () => {
+  assert.equal(checkReorderDirection(parseInputEvent('K')), -1);
+  assert.equal(checkReorderDirection(parseInputEvent('J')), 1);
+  assert.equal(checkReorderDirection(parseInputEvent('k')), 0);
+  assert.equal(checkReorderDirection(parseInputEvent('j')), 0);
+  assert.equal(checkReorderDirection(parseInputEvent('\x1b[A')), 0);
+  assert.equal(checkReorderDirection(parseInputEvent('\x1b[B')), 0);
 });
 
 
@@ -81,6 +91,44 @@ test('raw TTY Shift+arrow bytes reorder a check through Terlio WorkspaceApp and 
   app.start();
   try {
     input.emit('data', '\x1b[1;2A');
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(state.draft.checks.map((check) => check.id), ['test', 'lint', 'types']);
+    assert.equal(state.menuItems[state.selectedIndex].id, 'check:0');
+    assert.equal(state.status, 'Check moved up');
+  } finally {
+    app.stop();
+  }
+});
+
+
+test('raw printable Shift+K reorders a check through Terlio WorkspaceApp', async () => {
+  const input = new FakeInput();
+  const output = new FakeOutput();
+  const state = createInitialState();
+  state.screen = 'setup-checks';
+  state.draft = {
+    checks: [
+      { id: 'lint', name: 'Lint', selected: true },
+      { id: 'test', name: 'Tests', selected: true },
+      { id: 'types', name: 'Types', selected: true },
+    ],
+  };
+  const controller = new ZipflowController(state);
+  showChecksStep(controller, 1);
+
+  const app = createWorkspaceApp({
+    state,
+    input: createInterruptAwareInput(input),
+    output,
+    processHandlers: 'none',
+    render: () => Text('Printable reorder test'),
+    onKey: ({ key }) => { void controller.handleKey(key); },
+  });
+  controller.attachRuntime(app);
+
+  app.start();
+  try {
+    input.emit('data', 'K');
     await new Promise((resolve) => setImmediate(resolve));
     assert.deepEqual(state.draft.checks.map((check) => check.id), ['test', 'lint', 'types']);
     assert.equal(state.menuItems[state.selectedIndex].id, 'check:0');

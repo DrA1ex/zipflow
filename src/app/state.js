@@ -18,6 +18,7 @@ export function createInitialState() {
     archive: null,
     archiveMetadata: null,
     archiveSafety: null,
+    archiveInterpretation: null,
     plan: null,
     decisions: new Map(),
     messages: [],

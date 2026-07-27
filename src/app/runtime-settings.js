@@ -11,6 +11,7 @@ const RUN_SETTING_KEYS = Object.freeze([
   'llmSelectedInstanceId',
   'llmApiToken',
   'llmUseArchiveReview',
+  'llmUseDeletionIntentReview',
   'llmUseSummary',
   'llmUseFailedChecks',
   'llmUseCommitMessage',
@@ -75,6 +76,7 @@ function compactTaskLabel(settings) {
   const tasks = llmTasks(settings);
   const labels = [
     tasks.archiveReview ? compactReviewLabel(settings.llmArchiveReview) : null,
+    tasks.deletionIntentReview ? 'Deletion intent' : null,
     tasks.summary ? 'Summary' : null,
     tasks.failedChecks ? 'Failed checks' : null,
     tasks.commitMessage ? 'Commit' : null,

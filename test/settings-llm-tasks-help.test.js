@@ -126,7 +126,7 @@ test('Settings help includes the full parameter context, selected option, and st
 
 test('LLM tasks are independent checkboxes and task-specific methods stay disabled until needed', async () => withSettingsHome(async () => {
   const { state, controller } = await settingsController({
-    llmProvider: 'ollama', llmModel: 'qwen', llmUseArchiveReview: false,
+    llmProvider: 'ollama', llmModel: 'qwen', llmUseArchiveReview: false, llmUseDeletionIntentReview: false,
     llmUseSummary: true, llmUseFailedChecks: false, llmUseCommitMessage: true, llmUseDirtyTreeCommitMessage: false,
   });
   await selectCategory(controller, 'localLlm');
@@ -136,8 +136,9 @@ test('LLM tasks are independent checkboxes and task-specific methods stay disabl
 
   view = await openParameter(controller, 'llmTasks');
   assert.equal(state.settingsPanel.subpage, 'llmTasks');
-  assert.deepEqual(view.parameters.slice(0, 5).map((item) => [item.id, item.type, item.selected]), [
+  assert.deepEqual(view.parameters.slice(0, 6).map((item) => [item.id, item.type, item.selected]), [
     ['llmUseArchiveReview', 'toggle', false],
+    ['llmUseDeletionIntentReview', 'toggle', false],
     ['llmUseSummary', 'toggle', true],
     ['llmUseFailedChecks', 'toggle', false],
     ['llmUseCommitMessage', 'toggle', true],
@@ -145,10 +146,11 @@ test('LLM tasks are independent checkboxes and task-specific methods stay disabl
   ]);
 
   await selectParameter(controller, 0);
-  await selectParameter(controller, 1);
   await selectParameter(controller, 2);
-  await selectParameter(controller, 4);
+  await selectParameter(controller, 3);
+  await selectParameter(controller, 5);
   assert.equal(state.settings.llmUseArchiveReview, true);
+  assert.equal(state.settings.llmUseDeletionIntentReview, false);
   assert.equal(state.settings.llmUseSummary, false);
   assert.equal(state.settings.llmUseFailedChecks, true);
   assert.equal(state.settings.llmUseCommitMessage, true);
@@ -167,6 +169,7 @@ test('legacy LLM settings migrate to the equivalent independent task selection',
     llmArchiveReview: 'patch', llmFailureAnalysis: 'same-context',
   });
   assert.equal(enabled.llmUseArchiveReview, true);
+  assert.equal(enabled.llmUseDeletionIntentReview, false);
   assert.equal(enabled.llmUseSummary, true);
   assert.equal(enabled.llmUseFailedChecks, true);
   assert.equal(enabled.llmUseCommitMessage, true);

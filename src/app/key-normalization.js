@@ -46,6 +46,21 @@ export function shiftArrowDirection(key) {
   return normalized.name === 'up' ? -1 : 1;
 }
 
+export function checkReorderDirection(key) {
+  const arrowDirection = shiftArrowDirection(key);
+  if (arrowDirection) return arrowDirection;
+
+  // Some terminal emulators, notably the default macOS Terminal profile, do
+  // not preserve Shift as a distinct modifier for arrow keys. Uppercase K/J
+  // are ordinary printable bytes, so they provide a reliable Shift-based
+  // fallback without changing plain list navigation.
+  const normalized = normalizeZipflowKey(key);
+  if (!normalized.printable) return 0;
+  if (normalized.text === 'K' || normalized.name === 'K') return -1;
+  if (normalized.text === 'J' || normalized.name === 'J') return 1;
+  return 0;
+}
+
 function hasShiftModifier(key) {
   const modifiers = key?.modifiers;
   if (Array.isArray(modifiers)) return modifiers.some((value) => String(value).toLowerCase() === 'shift');

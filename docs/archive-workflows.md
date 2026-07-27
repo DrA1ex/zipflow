@@ -59,6 +59,21 @@ Untracked or unmanaged files absent from the archive remain in place under the s
 
 Managed-file history can be reset from global settings without changing project files.
 
+### Detecting a partial patch selected as a snapshot
+
+A ZIP marked as a full snapshot can still contain only changed files. Treating that archive literally would make every omitted managed path look deleted even though the archive producer may only have omitted unchanged files.
+
+Before application, Zipflow evaluates the shape of every snapshot plan. The warning considers several signals together:
+
+- the number and share of planned removals;
+- how many incoming paths are actually changed compared with how many match the current project unchanged;
+- whether the ZIP is much smaller than the managed local scope;
+- whether entire top-level project areas appear only among removals.
+
+The heuristic never silently changes the archive mode and does not claim that every large deletion is accidental. A suspicious result opens the archive safety screen with its evidence. **Recheck as patch / overlay** rebuilds the current plan without deleting paths that are absent from the ZIP. **Recheck as full snapshot** performs the reverse operation when the omission is known to be intentional. Both actions affect only the current run; the saved workflow remains unchanged.
+
+When a local LLM provider is enabled, **Check deletion intent with Local LLM** can make a separate advisory assessment. The model receives the project/archive trees, a bounded deleted-path manifest, and representative non-deletion patch evidence. It must classify the plan as `intentional`, `ambiguous`, or `likely-partial`, and absence from the ZIP alone is explicitly not accepted as evidence of intentional deletion. Deterministic path, Git, backup, conflict, and check protections remain authoritative.
+
 ## Plan and change review
 
 The compact plan reports counts for:

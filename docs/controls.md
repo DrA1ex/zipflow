@@ -4,7 +4,8 @@
 
 ```text
 ↑ / ↓       move through choices
-Shift+↑/↓   reorder checks during workflow setup
+Shift+K/J   reorder checks during workflow setup (reliable in macOS Terminal)
+Shift+↑/↓   reorder checks when the terminal reports Shift-modified arrows
 Space       toggle or select the current option
 Enter       select, toggle, continue, or submit an editor
             press twice on an empty archive field to scan the last-used folder
