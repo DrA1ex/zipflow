@@ -7,7 +7,8 @@ import { BoundedByteBuffer, ByteChunkCollector } from '../src/utils/byte-buffer.
 
 function completionRequest() {
   return {
-    provider: 'ollama', model: 'fixture', messages: [], responseSchema: null,
+    provider: 'openai', model: 'fixture', messages: [], responseSchema: null,
+    baseUrl: 'http://127.0.0.1:8080/v1', apiMode: 'chat-completions',
   };
 }
 

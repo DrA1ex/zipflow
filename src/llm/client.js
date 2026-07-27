@@ -7,13 +7,15 @@ import {
 const PROVIDERS = {
   ollama: {
     label: 'Ollama',
-    openAiBaseUrl: 'http://127.0.0.1:11434/v1',
     nativeBaseUrl: 'http://127.0.0.1:11434/api',
   },
   lmstudio: {
     label: 'LM Studio',
-    openAiBaseUrl: 'http://127.0.0.1:1234/v1',
     nativeBaseUrl: 'http://127.0.0.1:1234/api/v1',
+  },
+  openai: {
+    label: 'OpenAI-compatible',
+    openAiBaseUrl: 'http://127.0.0.1:8080/v1',
   },
 };
 
@@ -27,19 +29,22 @@ export async function listLocalModelChoices(provider, {
   fetchImpl = fetch,
   timeoutMs = 10_000,
   apiToken = '',
+  baseUrl = '',
   signal = null,
 } = {}) {
   const definition = requireProvider(provider);
-  const native = provider === 'lmstudio';
-  const url = native ? `${definition.nativeBaseUrl}/models` : `${definition.openAiBaseUrl}/models`;
+  const url = provider === 'lmstudio'
+    ? `${definition.nativeBaseUrl}/models`
+    : provider === 'ollama'
+      ? `${definition.nativeBaseUrl}/tags`
+      : `${resolveOpenAiBaseUrl(definition, baseUrl)}/models`;
   const response = await request(fetchImpl, url, {
     method: 'GET', headers: headers(apiToken, false),
   }, { provider, signal, limits: normalizeLlmStreamLimits({}, { timeoutMs }) });
   const payload = await readJsonResponse(response, provider);
-  if (native && Array.isArray(payload.models)) return lmStudioChoices(payload.models);
-  return [...new Set((payload.data ?? []).map((item) => item.id).filter(Boolean))]
-    .sort()
-    .map((id) => ({ id, key: id, label: id, loaded: null, contextLength: null }));
+  if (provider === 'lmstudio' && Array.isArray(payload.models)) return lmStudioChoices(payload.models);
+  if (provider === 'ollama' && Array.isArray(payload.models)) return ollamaChoices(payload.models);
+  return openAiModelChoices(payload.data ?? []);
 }
 
 export async function loadLmStudioModel(model, config = {}, {
@@ -104,6 +109,9 @@ export async function createLocalCompletion({
   responseSchema,
   maxTokens = 1_024,
   apiToken = '',
+  baseUrl = '',
+  apiMode = 'auto',
+  reasoningEffort = 'auto',
   contextLength = null,
   reasoningOffSupported = false,
   loadedModel = false,
@@ -129,8 +137,11 @@ export async function createLocalCompletion({
       model, messages, maxTokens, apiToken, contextLength, reasoningOffSupported, loadedModel,
     }, requestOptions);
   }
-  return createOpenAiCompletion({
-    provider, model, messages, responseSchema, maxTokens, apiToken,
+  if (provider === 'ollama') {
+    return createOllamaCompletion({ model, messages, responseSchema, maxTokens, apiToken }, requestOptions);
+  }
+  return createOpenAiCompatibleCompletion({
+    provider, model, messages, responseSchema, maxTokens, apiToken, baseUrl, apiMode, reasoningEffort,
   }, requestOptions);
 }
 
@@ -161,11 +172,79 @@ async function createLmStudioCompletion({
   return readLmStudioResponse(response, { onEvent, signal, limits });
 }
 
-async function createOpenAiCompletion({
-  provider, model, messages, responseSchema, maxTokens, apiToken,
+async function createOllamaCompletion({
+  model, messages, responseSchema, maxTokens, apiToken,
+}, { fetchImpl, limits, onEvent, signal }) {
+  const definition = requireProvider('ollama');
+  const common = {
+    model,
+    messages,
+    stream: true,
+    options: { temperature: 0, num_predict: maxTokens },
+  };
+  const attempts = responseSchema
+    ? [{ ...common, format: responseSchema }, { ...common, format: 'json' }]
+    : [common];
+  let firstError = null;
+  for (let index = 0; index < attempts.length; index += 1) {
+    onEvent({
+      type: 'request', attempt: index + 1,
+      format: responseSchema ? (index === 0 ? 'json_schema' : 'json') : 'text',
+      transport: 'Ollama native', endpoint: '/api/chat', model,
+    });
+    const response = await request(fetchImpl, `${definition.nativeBaseUrl}/chat`, {
+      method: 'POST', headers: headers(apiToken), body: JSON.stringify(attempts[index]),
+    }, { allowHttpFailure: true, provider: 'ollama', signal, limits });
+    if (!response.ok) {
+      const error = await responseError(response, 'ollama');
+      firstError ??= error;
+      if (index === attempts.length - 1 || error.retryableWithSmallerPrompt) throw error;
+      onEvent({ type: 'retry', reason: error.message });
+      continue;
+    }
+    return readOllamaResponse(response, { onEvent, signal, limits });
+  }
+  throw firstError ?? classifyServerError('Unknown Ollama error.', { provider: 'ollama' });
+}
+
+async function createOpenAiCompatibleCompletion({
+  provider, model, messages, responseSchema, maxTokens, apiToken, baseUrl, apiMode, reasoningEffort,
+}, requestOptions) {
+  const modes = apiMode === 'responses' || apiMode === 'chat-completions'
+    ? [apiMode]
+    : ['responses', 'chat-completions'];
+  let firstError = null;
+  for (let index = 0; index < modes.length; index += 1) {
+    const mode = modes[index];
+    try {
+      if (mode === 'responses') {
+        return await createOpenAiResponsesCompletion({
+          provider, model, messages, responseSchema, maxTokens, apiToken, baseUrl, reasoningEffort,
+        }, requestOptions);
+      }
+      return await createOpenAiChatCompletion({
+        provider, model, messages, responseSchema, maxTokens, apiToken, baseUrl, reasoningEffort,
+      }, requestOptions);
+    } catch (error) {
+      firstError ??= error;
+      if (index === modes.length - 1 || !isMissingEndpointError(error)) throw error;
+      requestOptions.onEvent({
+        type: 'retry', reason: `${mode} endpoint is unavailable; trying ${modes[index + 1]}.`,
+      });
+    }
+  }
+  throw firstError ?? classifyServerError('Unknown OpenAI-compatible LLM error.', { provider });
+}
+
+async function createOpenAiChatCompletion({
+  provider, model, messages, responseSchema, maxTokens, apiToken, baseUrl, reasoningEffort,
 }, { fetchImpl, limits, onEvent, signal }) {
   const definition = requireProvider(provider);
-  const common = { model, messages, stream: true, temperature: 0, max_tokens: maxTokens };
+  const root = resolveOpenAiBaseUrl(definition, baseUrl);
+  const common = compactObject({
+    model, messages, stream: true, temperature: 0, max_tokens: maxTokens,
+    reasoning_effort: normalizedReasoningEffort(reasoningEffort),
+  });
   const attempts = responseSchema ? [
     {
       ...common,
@@ -181,9 +260,10 @@ async function createOpenAiCompletion({
     onEvent({
       type: 'request', attempt: index + 1,
       format: responseSchema ? (index === 0 ? 'json_schema' : 'json_object') : 'text',
-      transport: `${providerDefinition(provider).label} OpenAI-compatible`, endpoint: '/v1/chat/completions', model,
+      transport: `${providerDefinition(provider).label} Chat Completions`, endpoint: '/chat/completions', model,
+      reasoningEffort: normalizedReasoningEffort(reasoningEffort) ?? null,
     });
-    const response = await request(fetchImpl, `${definition.openAiBaseUrl}/chat/completions`, {
+    const response = await request(fetchImpl, `${root}/chat/completions`, {
       method: 'POST', headers: headers(apiToken), body: JSON.stringify(attempts[index]),
     }, { allowHttpFailure: true, provider, signal, limits });
     if (!response.ok) {
@@ -195,7 +275,69 @@ async function createOpenAiCompletion({
     }
     return readOpenAiResponse(response, { onEvent, provider, signal, limits });
   }
-  throw firstError ?? classifyServerError('Unknown local LLM error.', { provider });
+  throw firstError ?? classifyServerError('Unknown OpenAI-compatible chat error.', { provider });
+}
+
+async function createOpenAiResponsesCompletion({
+  provider, model, messages, responseSchema, maxTokens, apiToken, baseUrl, reasoningEffort,
+}, { fetchImpl, limits, onEvent, signal }) {
+  const definition = requireProvider(provider);
+  const root = resolveOpenAiBaseUrl(definition, baseUrl);
+  const common = compactObject({
+    model,
+    input: messages,
+    stream: true,
+    store: false,
+    max_output_tokens: maxTokens,
+    reasoning: normalizedReasoningEffort(reasoningEffort)
+      ? { effort: normalizedReasoningEffort(reasoningEffort) }
+      : undefined,
+  });
+  const attempts = responseSchema ? [
+    {
+      ...common,
+      text: {
+        format: { type: 'json_schema', name: 'zipflow_change_summary', strict: true, schema: responseSchema },
+      },
+    },
+    { ...common, text: { format: { type: 'json_object' } } },
+  ] : [common];
+  let firstError = null;
+  for (let index = 0; index < attempts.length; index += 1) {
+    onEvent({
+      type: 'request', attempt: index + 1,
+      format: responseSchema ? (index === 0 ? 'json_schema' : 'json_object') : 'text',
+      transport: `${providerDefinition(provider).label} Responses API`, endpoint: '/responses', model,
+      reasoningEffort: normalizedReasoningEffort(reasoningEffort) ?? null,
+    });
+    const response = await request(fetchImpl, `${root}/responses`, {
+      method: 'POST', headers: headers(apiToken), body: JSON.stringify(attempts[index]),
+    }, { allowHttpFailure: true, provider, signal, limits });
+    if (!response.ok) {
+      const error = await responseError(response, provider);
+      firstError ??= error;
+      if (index === attempts.length - 1 || error.retryableWithSmallerPrompt) throw error;
+      onEvent({ type: 'retry', reason: error.message });
+      continue;
+    }
+    return readOpenAiResponsesResponse(response, { onEvent, provider, signal, limits });
+  }
+  throw firstError ?? classifyServerError('Unknown OpenAI-compatible Responses API error.', { provider });
+}
+
+function resolveOpenAiBaseUrl(definition, baseUrl) {
+  const value = String(baseUrl ?? '').trim() || definition.openAiBaseUrl;
+  return value.replace(/\/+$/, '');
+}
+
+function normalizedReasoningEffort(value) {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return normalized && normalized !== 'auto' ? normalized : undefined;
+}
+
+function isMissingEndpointError(error) {
+  return [404, 405, 501].includes(Number(error?.status))
+    || ['not_found', 'endpoint_not_found', 'unsupported_endpoint'].includes(error?.code);
 }
 
 function requireProvider(provider) {
@@ -265,6 +407,58 @@ async function readOpenAiResponse(response, { onEvent, provider, signal, limits 
   }
 }
 
+async function readOllamaResponse(response, { onEvent, signal, limits }) {
+  const provider = 'ollama';
+  const context = responseContexts.get(response);
+  try {
+    const contentType = response.headers.get('content-type') ?? '';
+    if (!response.body || contentType.includes('application/json')) {
+      const payload = await readCompletionJsonResponse(response, provider, limits);
+      if (payload.error) throw classifyPayloadError(payload, provider);
+      return completionFromOllamaPayload(payload, onEvent, limits);
+    }
+    const result = emptyCompletion(limits, provider);
+    onEvent({ type: 'stream-open' });
+    const raw = await consumeNdjson(response, (payload) => applyOllamaPayload(payload, result, onEvent), {
+      signal, provider, limits, context,
+    });
+    result.rawResponse = raw.value;
+    result.rawResponseTruncated = raw.truncated;
+    return completeResult(result, onEvent);
+  } catch (error) {
+    throw normalizeAbortError(error, context ?? { provider, signal, limits });
+  } finally {
+    cleanupResponse(response);
+  }
+}
+
+async function readOpenAiResponsesResponse(response, { onEvent, provider, signal, limits }) {
+  const context = responseContexts.get(response);
+  try {
+    const contentType = response.headers.get('content-type') ?? '';
+    if (!response.body || contentType.includes('application/json')) {
+      const payload = await readCompletionJsonResponse(response, provider, limits);
+      if (payload.error) throw classifyPayloadError(payload, provider);
+      return completionFromResponsesPayload(payload, onEvent, limits, provider);
+    }
+    const result = emptyCompletion(limits, provider);
+    onEvent({ type: 'stream-open' });
+    const raw = await consumeSse(response, ({ event, data }) => {
+      if (!data || data === '[DONE]') return;
+      const payload = parseJsonChunk(data, onEvent);
+      if (!payload) return;
+      applyResponsesPayload(event || payload.type, payload, result, onEvent, provider);
+    }, { signal, provider, limits, context });
+    result.rawResponse = raw.value;
+    result.rawResponseTruncated = raw.truncated;
+    return completeResult(result, onEvent);
+  } catch (error) {
+    throw normalizeAbortError(error, context ?? { provider, signal, limits });
+  } finally {
+    cleanupResponse(response);
+  }
+}
+
 async function readLmStudioResponse(response, { onEvent, signal, limits }) {
   const provider = 'lmstudio';
   const context = responseContexts.get(response);
@@ -291,6 +485,49 @@ async function readLmStudioResponse(response, { onEvent, signal, limits }) {
     throw normalizeAbortError(error, context ?? { provider, signal, limits });
   } finally {
     cleanupResponse(response);
+  }
+}
+
+async function consumeNdjson(response, consume, { signal, provider, limits, context }) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const raw = new ByteChunkCollector(limits.maxRawResponseBytes, { label: 'NDJSON response' });
+  let buffer = '';
+  let completed = false;
+  const consumeLine = (line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    const payload = parseJsonChunk(trimmed, () => {});
+    if (payload) consume(payload);
+  };
+  try {
+    while (true) {
+      if (signal?.aborted) throw cancelledError(provider);
+      if (context?.controller?.signal.aborted) throw normalizeAbortError(abortException(), context);
+      const { value, done } = await readStreamChunk(reader, limits.idleTimeoutMs, context?.controller, provider);
+      if (done) break;
+      try {
+        raw.append(value);
+      } catch (error) {
+        if (error.code !== 'byte_limit_exceeded') throw error;
+        throw responseLimitError('NDJSON response', limits.maxRawResponseBytes, error.actualBytes, provider);
+      }
+      buffer += decoder.decode(value, { stream: true });
+      if (Buffer.byteLength(buffer) > limits.maxUnparsedBufferBytes) {
+        throw responseLimitError('NDJSON buffer', limits.maxUnparsedBufferBytes, Buffer.byteLength(buffer), provider);
+      }
+      let newline;
+      while ((newline = buffer.indexOf('\n')) >= 0) {
+        consumeLine(buffer.slice(0, newline));
+        buffer = buffer.slice(newline + 1);
+      }
+    }
+    buffer += decoder.decode();
+    consumeLine(buffer);
+    completed = true;
+    return { value: raw.toString(), truncated: false };
+  } finally {
+    if (!completed) await reader.cancel().catch(() => {});
   }
 }
 
@@ -361,6 +598,64 @@ function applyLmStudioEvent(event, payload, result, onEvent) {
   else if (event === 'reasoning.delta') appendChunk(result, '', textValue(payload.content), onEvent);
   else if (event === 'message.delta') appendChunk(result, textValue(payload.content), '', onEvent);
   else if (event === 'chat.end') applyLmResult(payload.result, result, onEvent);
+}
+
+function completionFromOllamaPayload(payload, onEvent, limits) {
+  const result = emptyCompletion(limits, 'ollama');
+  applyOllamaPayload(payload, result, onEvent);
+  return completeResult(result, onEvent);
+}
+
+function applyOllamaPayload(payload, result, onEvent) {
+  if (payload?.error) throw classifyPayloadError(payload, 'ollama');
+  appendChunk(
+    result,
+    result.contentBytes === 0 || !payload.done ? textValue(payload?.message?.content ?? payload?.response) : '',
+    result.reasoningBytes === 0 || !payload.done ? textValue(payload?.message?.thinking ?? payload?.thinking) : '',
+    onEvent,
+  );
+  if (payload?.done) {
+    result.finishReason = payload.done_reason ?? 'stop';
+    result.usage = {
+      prompt_tokens: payload.prompt_eval_count ?? null,
+      completion_tokens: payload.eval_count ?? null,
+      total_duration: payload.total_duration ?? null,
+      load_duration: payload.load_duration ?? null,
+      prompt_eval_duration: payload.prompt_eval_duration ?? null,
+      eval_duration: payload.eval_duration ?? null,
+    };
+  }
+}
+
+function completionFromResponsesPayload(payload, onEvent, limits, provider) {
+  const result = emptyCompletion(limits, provider);
+  applyResponsesPayload(payload.type, payload, result, onEvent, provider);
+  return completeResult(result, onEvent);
+}
+
+function applyResponsesPayload(event, payload, result, onEvent, provider) {
+  if (event === 'error' || payload?.error || event === 'response.failed') {
+    throw classifyPayloadError(payload?.response?.error ?? payload, provider);
+  }
+  if (event === 'response.output_text.delta') appendChunk(result, textValue(payload.delta), '', onEvent);
+  else if (event === 'response.reasoning_summary_text.delta' || event === 'response.reasoning_text.delta') {
+    appendChunk(result, '', textValue(payload.delta), onEvent);
+  } else if (event === 'response.completed' || event === 'response.incomplete' || payload?.output) {
+    applyResponsesResult(payload.response ?? payload, result, onEvent);
+  }
+}
+
+function applyResponsesResult(payload, result, onEvent) {
+  let content = '';
+  let reasoning = '';
+  for (const item of payload?.output ?? []) {
+    if (item.type === 'message') content += textValue(item.content);
+    if (item.type === 'reasoning') reasoning += textValue(item.summary ?? item.content);
+  }
+  if (result.contentBytes === 0) appendChunk(result, content || textValue(payload?.output_text), '', onEvent);
+  if (result.reasoningBytes === 0) appendChunk(result, '', reasoning, onEvent);
+  result.usage = payload?.usage ?? result.usage;
+  result.finishReason = payload?.status ?? result.finishReason ?? 'stop';
 }
 
 function completionFromOpenAiPayload(payload, onEvent, limits, provider) {
@@ -463,6 +758,31 @@ function nativeRoleLabel(role) {
   if (role === 'assistant') return 'PREVIOUS MODEL CONTEXT';
   if (role === 'user') return 'CURRENT USER REQUEST';
   return String(role ?? 'context').toUpperCase();
+}
+
+function ollamaChoices(models) {
+  return models
+    .map((item) => {
+      const id = item.model || item.name;
+      if (!id) return null;
+      return {
+        id, key: id, label: id,
+        paramsString: item.details?.parameter_size ?? null,
+        quantization: item.details?.quantization_level ?? null,
+        sizeBytes: Number(item.size ?? 0) || null,
+        format: item.details?.format ?? null,
+        loaded: null,
+        contextLength: null,
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => left.label.localeCompare(right.label));
+}
+
+function openAiModelChoices(models) {
+  return [...new Set(models.map((item) => item?.id).filter(Boolean))]
+    .sort()
+    .map((id) => ({ id, key: id, label: id, loaded: null, contextLength: null }));
 }
 
 function lmStudioChoices(models) {

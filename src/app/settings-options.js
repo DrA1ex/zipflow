@@ -158,8 +158,23 @@ export function settingsChoices(state, parameter) {
     option(parameter, 'disabled', 'Disabled', 'Do not contact a local LLM server.'),
     option(parameter, 'ollama', 'Ollama', 'Local server at 127.0.0.1:11434.'),
     option(parameter, 'lmstudio', 'LM Studio', 'Native API at 127.0.0.1:1234/api/v1.'),
+    option(parameter, 'openai', 'OpenAI-compatible', 'Configurable /v1 server using the Responses API or Chat Completions.'),
   ];
   if (parameter.settingId === 'llmModel') return modelChoices(state, parameter);
+  if (parameter.settingId === 'llmOpenAiApiMode') return [
+    option(parameter, 'auto', 'Auto', 'Try the Responses API first, then Chat Completions when the endpoint is unavailable.'),
+    option(parameter, 'responses', 'Responses API', 'Use POST /responses. Required by current Codex API models.'),
+    option(parameter, 'chat-completions', 'Chat Completions', 'Use POST /chat/completions for compatible local servers.'),
+  ];
+  if (parameter.settingId === 'llmReasoningEffort') return [
+    option(parameter, 'auto', 'Provider default', 'Do not send an explicit reasoning effort.'),
+    option(parameter, 'none', 'None', 'Request no reasoning when the selected model supports it.'),
+    option(parameter, 'minimal', 'Minimal', 'Use the smallest supported reasoning budget.'),
+    option(parameter, 'low', 'Low', 'Use a low reasoning budget.'),
+    option(parameter, 'medium', 'Medium', 'Use a medium reasoning budget.'),
+    option(parameter, 'high', 'High', 'Use a high reasoning budget.'),
+    option(parameter, 'xhigh', 'Extra high', 'Use the largest extended reasoning budget when supported.'),
+  ];
   if (['llmPromptLanguage', 'llmSummaryLanguage', 'llmCommitLanguage'].includes(parameter.settingId)) {
     return LLM_LANGUAGES.map((value) => option(parameter, value, value));
   }
@@ -241,6 +256,7 @@ export function settingsFieldDefinition(fieldId) {
 export function settingsEditorValue(state, fieldId) {
   if (fieldId.startsWith('binaryPath:')) return configuredBinaryPath(state.settings, fieldId.slice('binaryPath:'.length));
   if (fieldId === 'llmApiToken') return '';
+  if (fieldId === 'llmBaseUrl') return String(state.settings.llmBaseUrl ?? '');
   if (['archiveMaxBytes', 'backupMaxBytes'].includes(fieldId)) return formatByteSize(state.settings[fieldId]).replace(/\s+/g, '');
   return String(state.settings[fieldId] ?? '');
 }
@@ -254,9 +270,26 @@ function localLlmParameters(state) {
   return [
     choiceParameter('llmProvider', 'Provider', providerLabel(state.settings.llmProvider), 'Choose the local server Zipflow should contact.'),
     {
+      id: 'llmBaseUrl', type: 'input', fieldId: 'llmBaseUrl', label: 'Base URL',
+      value: state.settings.llmBaseUrl,
+      description: 'Root URL ending in /v1 for the OpenAI-compatible provider.',
+      disabled: state.settings.llmProvider !== 'openai',
+      disabledReason: 'This setting is used only by the OpenAI-compatible provider.',
+    },
+    {
+      ...choiceParameter('llmOpenAiApiMode', 'OpenAI API mode', openAiApiModeLabel(state.settings.llmOpenAiApiMode), 'Choose the generation endpoint used by the OpenAI-compatible provider.'),
+      disabled: state.settings.llmProvider !== 'openai',
+      disabledReason: 'This setting is used only by the OpenAI-compatible provider.',
+    },
+    {
+      ...choiceParameter('llmReasoningEffort', 'Reasoning effort', reasoningEffortLabel(state.settings.llmReasoningEffort), 'Send an explicit reasoning effort to the OpenAI-compatible provider.'),
+      disabled: state.settings.llmProvider !== 'openai',
+      disabledReason: 'Reasoning effort is currently sent only through the OpenAI-compatible protocol.',
+    },
+    {
       ...choiceParameter('llmModel', 'Model', selected ? modelDisplayLabel(selected) : (state.settings.llmModel || 'Not selected'), ''),
       disabled,
-      disabledReason: 'Enable Ollama or LM Studio first.',
+      disabledReason: 'Enable an LLM provider first.',
     },
     {
       id: 'llmTasks', type: 'subpage', label: 'LLM tasks',
@@ -642,6 +675,7 @@ function modelChoiceLabel(model) {
 }
 
 function modelChoiceDescription(state, model) {
+  if (state.settings.llmProvider !== 'lmstudio') return 'Select this model for generation.';
   const config = formatLoadedModelConfig(modelConfigSummary(state, model));
   if (model.loaded) return config ? `Loaded configuration: ${config}` : 'This model currently has a loaded LM Studio instance.';
   return config ? `Saved configuration: ${config}` : 'Open to configure and select this model.';
@@ -683,8 +717,24 @@ function interfaceLanguageLabel(state) {
 }
 
 function providerLabel(value) {
-  return value === 'ollama' ? 'Ollama' : value === 'lmstudio' ? 'LM Studio' : 'Disabled';
+  if (value === 'ollama') return 'Ollama';
+  if (value === 'lmstudio') return 'LM Studio';
+  if (value === 'openai') return 'OpenAI-compatible';
+  return 'Disabled';
 }
+
+function openAiApiModeLabel(value) {
+  if (value === 'responses') return 'Responses API';
+  if (value === 'chat-completions') return 'Chat Completions';
+  return 'Auto';
+}
+
+function reasoningEffortLabel(value) {
+  if (value === 'auto') return 'Provider default';
+  if (value === 'xhigh') return 'Extra high';
+  return titleCase(value);
+}
+
 
 function outputLabel(value) {
   return value === 'compact' ? 'Compact' : 'Last output line';
@@ -729,6 +779,13 @@ function titleCase(value) {
 }
 
 const FIELD_DEFINITIONS = Object.freeze({
+  llmBaseUrl: {
+    id: 'llmBaseUrl',
+    label: 'OpenAI-compatible base URL',
+    description: 'Root API URL used for model discovery and generation.',
+    placeholder: 'http://127.0.0.1:8080/v1',
+    instructions: ['Include the API version prefix, usually /v1.', 'Zipflow appends /models, /responses, or /chat/completions.'],
+  },
   llmApiToken: {
     id: 'llmApiToken',
     label: 'LLM API token',

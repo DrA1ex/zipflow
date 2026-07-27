@@ -34,10 +34,10 @@ test('archive inspection persists changes.patch and records the local LLM result
 
     let requestBody = null;
     globalThis.fetch = async (url, options) => {
-      assert.equal(url, 'http://127.0.0.1:11434/v1/chat/completions');
+      assert.equal(url, 'http://127.0.0.1:11434/api/chat');
       requestBody = JSON.parse(options.body);
       return jsonResponse({
-        choices: [{ message: { content: [
+        message: { content: [
           'SUMMARY:',
           '- Обновлена логика значения.',
           '- Добавлен новый модуль.',
@@ -52,7 +52,9 @@ test('archive inspection persists changes.patch and records the local LLM result
           '- Reviewing the trees:',
           '- I need to check whether the project is compatible.',
           '- Структура и маркеры проекта совпадают.',
-        ].join('\n') } }],
+        ].join('\n') },
+        done: true,
+        done_reason: 'stop',
       });
     };
 
@@ -101,7 +103,7 @@ test('archive inspection persists changes.patch and records the local LLM result
     assert.doesNotMatch(suitabilityText, /list in Russian|Reviewing the trees|I need to check/);
     assert.doesNotMatch(suitabilityText, /Reason:/);
     assert.match(requestBody.messages[0].content, /Write summaries and reasons in Russian[\s\S]*Write the commit message in Russian/);
-    assert.equal('response_format' in requestBody, false, 'visible generation must stream readable text instead of JSON');
+    assert.equal('format' in requestBody, false, 'visible generation must stream readable text instead of JSON');
     assert.match(requestBody.messages[1].content, /src\/index\.js/);
 
     const patch = await readFile(state.run.patch.path, 'utf8');

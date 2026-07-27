@@ -21,6 +21,16 @@ function sseResponse(events) {
   }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
 }
 
+function ndjsonResponse(entries) {
+  const encoder = new TextEncoder();
+  return new Response(new ReadableStream({
+    start(controller) {
+      for (const entry of entries) controller.enqueue(encoder.encode(`${JSON.stringify(entry)}\n`));
+      controller.close();
+    },
+  }), { status: 200, headers: { 'Content-Type': 'application/x-ndjson' } });
+}
+
 function lmModels(contextLength = 32_000) {
   return {
     models: [
@@ -55,15 +65,34 @@ test('LM Studio uses its native model catalog and excludes embedding models', as
   assert.equal(requested, 'http://127.0.0.1:1234/api/v1/models');
 });
 
-test('Ollama keeps the OpenAI-compatible model list', async () => {
+test('Ollama uses the native model catalog', async () => {
   let requested;
   const fetchImpl = async (url) => {
     requested = url;
-    return jsonResponse({ data: [{ id: 'qwen-coder' }, { id: 'llama' }] });
+    return jsonResponse({ models: [
+      { name: 'qwen-coder', size: 12, details: { parameter_size: '7B', quantization_level: 'Q4_K_M' } },
+      { model: 'llama', size: 8, details: {} },
+    ] });
   };
 
   assert.deepEqual(await listLocalModels('ollama', { fetchImpl }), ['llama', 'qwen-coder']);
-  assert.equal(requested, 'http://127.0.0.1:11434/v1/models');
+  assert.equal(requested, 'http://127.0.0.1:11434/api/tags');
+});
+
+test('OpenAI-compatible model discovery uses the configured base URL and bearer token', async () => {
+  let requested;
+  let authorization;
+  const fetchImpl = async (url, options) => {
+    requested = url;
+    authorization = new Headers(options.headers).get('authorization');
+    return jsonResponse({ data: [{ id: 'gpt-5.3-codex' }, { id: 'local-code' }] });
+  };
+
+  assert.deepEqual(await listLocalModels('openai', {
+    fetchImpl, baseUrl: 'http://127.0.0.1:7777/v1/', apiToken: 'token',
+  }), ['gpt-5.3-codex', 'local-code']);
+  assert.equal(requested, 'http://127.0.0.1:7777/v1/models');
+  assert.equal(authorization, 'Bearer token');
 });
 
 test('optional LLM API token is sent to native model discovery', async () => {
@@ -199,20 +228,82 @@ test('LM Studio native stream exposes model loading, prompt progress, reasoning,
   assert.ok(events.some((event) => event.type === 'chunk' && event.contentDelta));
 });
 
-test('Ollama completion retries with JSON mode when JSON schema is rejected', async () => {
+test('Ollama native chat retries with JSON mode when JSON schema is rejected', async () => {
   let calls = 0;
-  const fetchImpl = async (_url, options) => {
+  let secondBody;
+  const fetchImpl = async (url, options) => {
     calls += 1;
     const body = JSON.parse(options.body);
-    if (body.response_format.type === 'json_schema') return new Response('unsupported', { status: 400 });
-    return jsonResponse({ choices: [{ message: { content: '{"summary":["ok"],"commitMessage":"Update files"}' } }] });
+    assert.equal(url, 'http://127.0.0.1:11434/api/chat');
+    if (typeof body.format === 'object') return new Response('unsupported', { status: 400 });
+    secondBody = body;
+    return ndjsonResponse([
+      { message: { content: '{"summary":["ok"],' }, done: false },
+      { message: { content: '"commitMessage":"Update files"}' }, done: false },
+      { message: { content: '' }, done: true, done_reason: 'stop', prompt_eval_count: 10, eval_count: 8 },
+    ]);
   };
   const completion = await createLocalCompletion({
-    provider: 'ollama', model: 'fixture', messages: [], responseSchema: { type: 'object' },
+    provider: 'ollama', model: 'fixture', messages: [{ role: 'user', content: 'test' }], responseSchema: { type: 'object' },
   }, { fetchImpl });
 
   assert.equal(calls, 2);
+  assert.equal(secondBody.format, 'json');
+  assert.equal(secondBody.options.num_predict, 1_024);
   assert.equal(parseResponse(completion.content).commitMessage, 'Update files');
+  assert.equal(completion.usage.completion_tokens, 8);
+});
+
+test('OpenAI-compatible Responses API sends reasoning effort and parses streamed output', async () => {
+  let requested;
+  let body;
+  const events = [];
+  const fetchImpl = async (url, options) => {
+    requested = url;
+    body = JSON.parse(options.body);
+    return sseResponse([
+      { event: 'response.reasoning_summary_text.delta', data: { type: 'response.reasoning_summary_text.delta', delta: 'Checking. ' } },
+      { event: 'response.output_text.delta', data: { type: 'response.output_text.delta', delta: 'SUMMARY:\n- Works\n' } },
+      { event: 'response.output_text.delta', data: { type: 'response.output_text.delta', delta: 'COMMIT MESSAGE:\nUse Responses API' } },
+      { event: 'response.completed', data: { type: 'response.completed', response: { status: 'completed', output: [], usage: { input_tokens: 4, output_tokens: 5 } } } },
+    ]);
+  };
+
+  const completion = await createLocalCompletion({
+    provider: 'openai', model: 'gpt-5.3-codex', messages: [{ role: 'user', content: 'test' }],
+    baseUrl: 'http://127.0.0.1:7777/v1', apiMode: 'responses', reasoningEffort: 'high',
+  }, { fetchImpl, onEvent: (event) => events.push(event) });
+
+  assert.equal(requested, 'http://127.0.0.1:7777/v1/responses');
+  assert.deepEqual(body.reasoning, { effort: 'high' });
+  assert.equal(body.max_output_tokens, 1_024);
+  assert.equal(body.store, false);
+  assert.equal(completion.reasoning, 'Checking. ');
+  assert.equal(parseResponse(completion.content).commitMessage, 'Use Responses API');
+  assert.ok(events.some((event) => event.type === 'request' && event.endpoint === '/responses'));
+});
+
+test('OpenAI-compatible auto mode falls back to Chat Completions when /responses is unavailable', async () => {
+  const urls = [];
+  let chatBody;
+  const fetchImpl = async (url, options) => {
+    urls.push(url);
+    if (url.endsWith('/responses')) return jsonResponse({ error: { message: 'not found' } }, 404);
+    chatBody = JSON.parse(options.body);
+    return jsonResponse({ choices: [{ message: { content: 'SUMMARY:\n- Works\nCOMMIT MESSAGE:\nUse chat fallback' } }] });
+  };
+
+  const completion = await createLocalCompletion({
+    provider: 'openai', model: 'local-code', messages: [{ role: 'user', content: 'test' }],
+    baseUrl: 'http://127.0.0.1:7777/v1', apiMode: 'auto', reasoningEffort: 'low',
+  }, { fetchImpl });
+
+  assert.deepEqual(urls, [
+    'http://127.0.0.1:7777/v1/responses',
+    'http://127.0.0.1:7777/v1/chat/completions',
+  ]);
+  assert.equal(chatBody.reasoning_effort, 'low');
+  assert.equal(parseResponse(completion.content).commitMessage, 'Use chat fallback');
 });
 
 test('reasoning-only LM Studio response is repaired instead of reported as empty', async () => {

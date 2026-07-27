@@ -54,6 +54,9 @@ export async function reviewArchiveStructure({ settings, project, workflow, extr
     responseSchema: null,
     maxTokens: 512,
     apiToken: session.apiToken,
+    baseUrl: settings.llmBaseUrl,
+    apiMode: settings.llmOpenAiApiMode,
+    reasoningEffort: settings.llmReasoningEffort,
     contextLength: Math.min(profile.contextLength, 16_384),
     reasoningOffSupported: profile.reasoningOffSupported,
   }, {
@@ -124,6 +127,9 @@ export async function reviewArchiveSample({ settings, project, workflow, extract
     responseSchema: null,
     maxTokens: 512,
     apiToken: session.apiToken,
+    baseUrl: settings.llmBaseUrl,
+    apiMode: settings.llmOpenAiApiMode,
+    reasoningEffort: settings.llmReasoningEffort,
     contextLength: Math.min(profile.contextLength, 16_384),
     reasoningOffSupported: profile.reasoningOffSupported,
   }, {
@@ -193,6 +199,9 @@ export async function reviewSnapshotDeletionIntent({ settings, project, workflow
     responseSchema: null,
     maxTokens: 512,
     apiToken: session.apiToken,
+    baseUrl: settings.llmBaseUrl,
+    apiMode: settings.llmOpenAiApiMode,
+    reasoningEffort: settings.llmReasoningEffort,
     contextLength: Math.min(profile.contextLength, 16_384),
     reasoningOffSupported: profile.reasoningOffSupported,
   }, {

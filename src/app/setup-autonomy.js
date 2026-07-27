@@ -90,7 +90,7 @@ export function autonomyConfigurationAvailable(state) {
   const compatibility = settings.llmDecisionCompatibility;
   const configuredModel = canonicalModelId(settings.llmProvider, settings.llmModel);
   const testedModel = canonicalModelId(compatibility?.provider, compatibility?.model);
-  return ['ollama', 'lmstudio'].includes(settings.llmProvider)
+  return ['ollama', 'lmstudio', 'openai'].includes(settings.llmProvider)
     && Boolean(configuredModel)
     && compatibility?.supported === true
     && compatibility.provider === settings.llmProvider

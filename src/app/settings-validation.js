@@ -23,5 +23,15 @@ export async function validateSettingValue(field, entered) {
     return value;
   }
   if (field.id === 'llmApiToken') return entered;
+  if (field.id === 'llmBaseUrl') {
+    if (!entered) throw new Error('Enter an OpenAI-compatible base URL.');
+    let parsed;
+    try { parsed = new URL(entered); } catch { throw new Error('Enter a valid absolute URL.'); }
+    if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('The base URL must use HTTP or HTTPS.');
+    if (parsed.username || parsed.password) throw new Error('Put credentials in the API token field, not in the base URL.');
+    parsed.hash = '';
+    parsed.search = '';
+    return parsed.toString().replace(/\/+$/, '');
+  }
   throw new Error(`Unsupported setting: ${field.id}`);
 }

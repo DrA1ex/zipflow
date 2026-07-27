@@ -11,7 +11,7 @@ Settings include:
 - compact or live running-check output;
 - validated absolute paths for Git, npm, Node.js, the system opener, Python, and gofmt;
 - sanitized or fully inherited environments for project checks and deployment commands;
-- local LLM provider, authentication, model, load configuration, and languages;
+- local LLM provider, authentication, OpenAI-compatible base URL/API mode/reasoning effort, model, load configuration, and languages;
 - independent LLM tasks for archive review, summaries, failed-check explanations, update commit messages, and dirty-tree checkpoint messages;
 - archive-review methods and change-delivery behavior;
 - source ZIP disposition;

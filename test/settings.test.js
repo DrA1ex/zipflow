@@ -13,6 +13,7 @@ import {
 } from '../src/app/settings-panel.js';
 import { exists } from '../src/utils/fs.js';
 import { localizeUiItem } from '../src/i18n/index.js';
+import { validateSettingValue } from '../src/app/settings-validation.js';
 
 async function withSettingsHome(run) {
   const previous = process.env.ZIPFLOW_HOME;
@@ -468,3 +469,60 @@ test('raw response radio choices preserve boolean values and can be selected bot
   await chooseValue(controller, 'llmVerboseOutput:false');
   assert.equal(state.settings.llmVerboseOutput, false);
 }));
+
+test('OpenAI-compatible settings preserve base URL, API mode, and reasoning effort', () => {
+  const settings = normalizeSettings({
+    version: 25,
+    llmProvider: 'openai',
+    llmModel: 'gpt-5-codex',
+    llmBaseUrl: 'http://127.0.0.1:7777/v1/',
+    llmOpenAiApiMode: 'responses',
+    llmReasoningEffort: 'high',
+  });
+  assert.equal(settings.llmProvider, 'openai');
+  assert.equal(settings.llmBaseUrl, 'http://127.0.0.1:7777/v1');
+  assert.equal(settings.llmOpenAiApiMode, 'responses');
+  assert.equal(settings.llmReasoningEffort, 'high');
+
+  const repaired = normalizeSettings({
+    version: 25,
+    llmProvider: 'openai',
+    llmOpenAiApiMode: 'unsupported',
+    llmReasoningEffort: 'extreme',
+  });
+  assert.equal(repaired.llmOpenAiApiMode, 'auto');
+  assert.equal(repaired.llmReasoningEffort, 'auto');
+});
+
+test('Local LLM settings expose OpenAI-compatible connection and effort controls', async () => withSettingsHome(async () => {
+  const { state, controller } = await settingsController({
+    llmProvider: 'openai',
+    llmModel: 'gpt-5-codex',
+    llmBaseUrl: 'http://127.0.0.1:7777/v1',
+    llmOpenAiApiMode: 'responses',
+    llmReasoningEffort: 'medium',
+  });
+  let view = await selectCategory(controller, 'localLlm');
+  const byId = Object.fromEntries(view.parameters.map((item) => [item.id, item]));
+  assert.equal(byId.llmBaseUrl.disabled, false);
+  assert.equal(byId.llmOpenAiApiMode.value, 'Responses API');
+  assert.equal(byId.llmReasoningEffort.value, 'Medium');
+  assert.equal(byId.llmModel.value, 'gpt-5-codex');
+
+  view = await openParameter(controller, 'llmProvider');
+  assert.ok(view.choices.some((item) => item.id === 'llmProvider:openai'));
+
+  state.settingsPanel.focus = 'parameters';
+  state.settingsPanel.activeParameterId = null;
+  view = settingsViewModel(state);
+  const baseUrl = view.parameters.find((item) => item.id === 'llmBaseUrl');
+  assert.equal(baseUrl.disabled, false);
+}));
+
+
+test('OpenAI-compatible base URL validation rejects embedded credentials', async () => {
+  const field = { id: 'llmBaseUrl' };
+  assert.equal(await validateSettingValue(field, 'http://localhost:8080/v1/?ignored=true#part'), 'http://localhost:8080/v1');
+  await assert.rejects(validateSettingValue(field, 'http://user:secret@localhost:8080/v1'), /API token field/);
+  await assert.rejects(validateSettingValue(field, 'file:///tmp/api'), /HTTP or HTTPS/);
+});

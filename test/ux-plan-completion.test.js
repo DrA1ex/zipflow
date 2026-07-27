@@ -95,8 +95,9 @@ test('historical model replay uses the stored patch and never changes project fi
       if (url.endsWith('/api/show')) return jsonResponse({
         parameters: 'num_ctx 8192', model_info: { 'fixture.context_length': 8192 },
       });
-      if (url.endsWith('/v1/chat/completions')) return jsonResponse({
-        choices: [{ message: { content: 'SUMMARY:\n- Historical patch reviewed.\nCOMMIT MESSAGE:\nReview historical patch' } }],
+      if (url.endsWith('/api/chat')) return jsonResponse({
+        message: { content: 'SUMMARY:\n- Historical patch reviewed.\nCOMMIT MESSAGE:\nReview historical patch' },
+        done: true,
       });
       throw new Error(`Unexpected URL: ${url}`);
     };

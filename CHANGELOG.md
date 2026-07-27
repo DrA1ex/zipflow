@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.5.0 — Native Ollama and OpenAI-compatible providers
+
+- Replace Ollama's partially compatible `/v1` usage with the native `/api/tags`, `/api/ps`, `/api/show`, and `/api/chat` contracts for model discovery, context inspection, generation, structured output, streaming, and compatibility tests.
+- Parse native Ollama NDJSON streams, preserve answer and thinking deltas, report token/duration statistics, and retry unsupported JSON Schema requests with Ollama JSON mode.
+- Add a separate **OpenAI-compatible** provider with a configurable `/v1` base URL, optional bearer token, model discovery through `/models`, and selectable Responses API, Chat Completions, or automatic endpoint fallback.
+- Add model-selectable reasoning effort values from provider default through `xhigh`, forwarding them as `reasoning.effort` for Responses API or `reasoning_effort` for Chat Completions.
+- Reject credentials embedded in the configured base URL, keep tokens in the existing secure credential store, and clear cached model choices after URL or token changes.
+- Add end-to-end compatibility coverage for the actual Ollama test button, OpenAI model discovery and both generation transports, endpoint fallback, streaming limits, settings migration, URL validation, and translated interface controls.
+
 ## 1.4.0 — Archive interpretation safeguards
 
 - Detect snapshot plans that look like change-focused patch archives by combining deletion volume, deletion ratio, unchanged-file coverage, and missing top-level areas instead of relying on one raw threshold.

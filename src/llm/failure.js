@@ -30,6 +30,9 @@ export async function explainCheckFailure({ settings, project, run, failedCheck 
     responseSchema: null,
     maxTokens: 1_024,
     apiToken: settings.llmApiToken,
+    baseUrl: settings.llmBaseUrl,
+    apiMode: settings.llmOpenAiApiMode,
+    reasoningEffort: settings.llmReasoningEffort,
     contextLength: Math.min(profile.contextLength || 16_384, 16_384),
     reasoningOffSupported: profile.reasoningOffSupported,
   }, {

@@ -28,6 +28,9 @@ export async function requestAutonomyDecision({
     responseSchema: schema,
     maxTokens: 700,
     apiToken: session.apiToken,
+    baseUrl: settings.llmBaseUrl,
+    apiMode: settings.llmOpenAiApiMode,
+    reasoningEffort: settings.llmReasoningEffort,
     contextLength: Math.min(session.profile.contextLength || 16_384, 32_768),
     reasoningOffSupported: session.profile.reasoningOffSupported,
   }, { signal, onEvent, fetchImpl });
@@ -47,6 +50,9 @@ export async function requestAutonomyDecision({
       responseSchema: schema,
       maxTokens: 500,
       apiToken: session.apiToken,
+      baseUrl: settings.llmBaseUrl,
+      apiMode: settings.llmOpenAiApiMode,
+      reasoningEffort: settings.llmReasoningEffort,
       contextLength: Math.min(session.profile.contextLength || 8_192, 8_192),
       reasoningOffSupported: session.profile.reasoningOffSupported,
     }, { signal, onEvent, fetchImpl });

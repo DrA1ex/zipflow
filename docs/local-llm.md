@@ -1,13 +1,14 @@
 # Local LLM integration
 
-Zipflow supports local models through:
+Zipflow supports three provider modes:
 
 ```text
-Ollama:    http://127.0.0.1:11434
-LM Studio: http://127.0.0.1:1234
+Ollama:            http://127.0.0.1:11434
+LM Studio:         http://127.0.0.1:1234
+OpenAI-compatible: configurable base URL, normally ending in /v1
 ```
 
-The provider, optional bearer token, selected model, and output languages are configured in global settings. Bearer tokens are stored in macOS Keychain or the Linux system keyring rather than `~/.zipflow` JSON files. On Linux, persistence requires `secret-tool` and an active Secret Service provider; when secure storage is unavailable, Zipflow refuses to save a new token instead of falling back to plaintext.
+The provider, optional bearer token, selected model, and output languages are configured in global settings. The OpenAI-compatible provider also exposes an API mode and reasoning-effort setting. Bearer tokens are stored in macOS Keychain or the Linux system keyring rather than `~/.zipflow` JSON files. On Linux, persistence requires `secret-tool` and an active Secret Service provider; when secure storage is unavailable, Zipflow refuses to save a new token instead of falling back to plaintext.
 
 ## Choose the LLM tasks
 
@@ -89,9 +90,9 @@ Context-overflow and out-of-memory responses trigger a smaller-patch retry and a
 
 ## Streaming resource limits
 
-Generation has independent deadlines for opening the connection, completing the entire request, and receiving the next stream chunk. A server that opens an SSE response and then stalls is cancelled rather than waiting indefinitely.
+Generation has independent deadlines for opening the connection, completing the entire request, and receiving the next stream chunk. A server that opens an SSE or NDJSON response and then stalls is cancelled rather than waiting indefinitely.
 
-Zipflow also enforces byte-based limits for one SSE event, the unparsed line buffer, model reasoning, answer text, and retained raw diagnostics. Exceeding a limit produces a typed, readable Local LLM error. Live Activity and replay workspaces consume response deltas and retain bounded preview windows instead of copying the complete accumulated response for every chunk.
+Zipflow also enforces byte-based limits for one SSE event or NDJSON record, the unparsed line buffer, model reasoning, answer text, and retained raw diagnostics. Exceeding a limit produces a typed, readable Local LLM error. Live Activity and replay workspaces consume response deltas and retain bounded preview windows instead of copying the complete accumulated response for every chunk.
 
 ## LM Studio behavior
 
@@ -103,7 +104,18 @@ Configurable values can include context length, evaluation batch size, Flash Att
 
 ## Ollama behavior
 
-Ollama uses native metadata endpoints to discover model and context information, then uses its OpenAI-compatible streaming completion endpoint for generation.
+Ollama uses its native API throughout. Model selection reads `GET /api/tags`; compatibility and context inspection use `GET /api/ps` and `POST /api/show`; generation uses `POST /api/chat` and parses its NDJSON stream. When a structured response is requested, Zipflow first sends the JSON Schema through Ollama's native `format` field and retries with native JSON mode if that server/model rejects the schema.
+
+
+## OpenAI-compatible behavior
+
+Set **Base URL** to the API root, including the version prefix expected by the server, normally `/v1`. Zipflow appends `/models`, `/responses`, or `/chat/completions`; credentials belong in **Authentication**, not in the URL.
+
+**OpenAI API mode** can force the Responses API, force Chat Completions, or use **Auto**. Auto tries `POST /responses` first and falls back to `POST /chat/completions` only when the Responses endpoint is absent or unsupported. This keeps Responses-only coding models usable without breaking local servers that implement only Chat Completions.
+
+**Reasoning effort** is optional. **Provider default** omits the field. Explicit values are sent as `reasoning.effort` to the Responses API and `reasoning_effort` to Chat Completions. Availability still depends on the selected server and model; a provider error is shown by **Test selected model** rather than silently changing the requested effort.
+
+Model discovery uses `GET /models`. The selected model ID is sent unchanged, so aliases and server-specific model names remain usable.
 
 ## Output parsing and diagnostics
 

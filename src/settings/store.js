@@ -14,9 +14,11 @@ import {
   deleteLlmApiToken, readLlmApiToken, SecureCredentialStoreError, writeLlmApiToken,
 } from '../security/credential-store.js';
 
-export const SETTINGS_VERSION = 24;
+export const SETTINGS_VERSION = 25;
 export const THEME_NAMES = Object.keys(themes);
-export const LLM_PROVIDERS = ['disabled', 'ollama', 'lmstudio'];
+export const LLM_PROVIDERS = ['disabled', 'ollama', 'lmstudio', 'openai'];
+export const OPENAI_API_MODES = ['auto', 'responses', 'chat-completions'];
+export const LLM_REASONING_EFFORTS = ['auto', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh'];
 export const LLM_LANGUAGES = ['English', 'Russian', 'German', 'French', 'Spanish', 'Chinese', 'Japanese'];
 export const ARCHIVE_POLICIES = ['keep', 'move', 'delete'];
 export const LLM_ARCHIVE_REVIEW_MODES = ['structure', 'sample', 'patch'];
@@ -39,6 +41,9 @@ export const DEFAULT_SETTINGS = Object.freeze({
   deployCommandEnvironment: 'inherit',
   projectEnvironmentNoticeVersion: 0,
   llmProvider: 'disabled',
+  llmBaseUrl: 'http://127.0.0.1:8080/v1',
+  llmOpenAiApiMode: 'auto',
+  llmReasoningEffort: 'auto',
   llmModel: '',
   llmLanguage: 'English',
   llmPromptLanguage: 'English',
@@ -294,6 +299,10 @@ export function normalizeSettings(settings) {
   delete value.projectCommandEnvironment;
   value.projectEnvironmentNoticeVersion = normalizeInteger(value.projectEnvironmentNoticeVersion, 0, 0, Number.MAX_SAFE_INTEGER);
   if (!LLM_PROVIDERS.includes(value.llmProvider)) value.llmProvider = DEFAULT_SETTINGS.llmProvider;
+  if (typeof value.llmBaseUrl !== 'string' || !value.llmBaseUrl.trim()) value.llmBaseUrl = DEFAULT_SETTINGS.llmBaseUrl;
+  value.llmBaseUrl = normalizeBaseUrl(value.llmBaseUrl);
+  if (!OPENAI_API_MODES.includes(value.llmOpenAiApiMode)) value.llmOpenAiApiMode = DEFAULT_SETTINGS.llmOpenAiApiMode;
+  if (!LLM_REASONING_EFFORTS.includes(value.llmReasoningEffort)) value.llmReasoningEffort = DEFAULT_SETTINGS.llmReasoningEffort;
   if (typeof value.llmModel !== 'string') value.llmModel = '';
   value.llmModel = canonicalModelId(value.llmProvider, value.llmModel);
   const legacyLanguage = normalizeLanguage(value.llmLanguage, DEFAULT_SETTINGS.llmLanguage);
@@ -374,6 +383,9 @@ function migrateLegacySettingAliases(source) {
     llmApiToken: ['apiToken', 'localLlmApiToken', 'llmToken'],
     llmProvider: ['localLlmProvider'],
     llmModel: ['localLlmModel', 'selectedModel'],
+    llmBaseUrl: ['localLlmBaseUrl', 'openAiBaseUrl'],
+    llmOpenAiApiMode: ['openAiApiMode'],
+    llmReasoningEffort: ['reasoningEffort'],
     archivePolicy: ['sourceArchivePolicy', 'archiveDispositionPolicy'],
     archiveDirectory: ['sourceArchiveDirectory'],
     archiveRetentionDays: ['sourceArchiveRetentionDays'],
@@ -479,6 +491,13 @@ async function readSettingsFile(target) {
   } catch {
     return null;
   }
+}
+
+
+function normalizeBaseUrl(value) {
+  const trimmed = String(value ?? '').trim();
+  if (!trimmed) return DEFAULT_SETTINGS.llmBaseUrl;
+  return trimmed.replace(/\/+$/, '');
 }
 
 function normalizeInteger(value, fallback, min, max) {

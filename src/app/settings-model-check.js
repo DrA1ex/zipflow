@@ -49,6 +49,9 @@ export async function testSelectedModel(controller) {
       ],
       maxTokens: protocolTasks.archiveReview ? 160 : 96,
       apiToken: session.apiToken,
+      baseUrl: settings.llmBaseUrl,
+      apiMode: settings.llmOpenAiApiMode,
+      reasoningEffort: settings.llmReasoningEffort,
       contextLength: Math.min(session.profile.contextLength || 16_384, 16_384),
       reasoningOffSupported: session.profile.reasoningOffSupported,
     }, {

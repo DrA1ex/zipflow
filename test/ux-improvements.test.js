@@ -312,3 +312,112 @@ async function waitFor(predicate, timeoutMs = 1000) {
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
 }
+
+test('Ollama model compatibility test uses native metadata and chat endpoints', async () => {
+  const originalFetch = globalThis.fetch;
+  const previousHome = process.env.ZIPFLOW_HOME;
+  process.env.ZIPFLOW_HOME = await tempDir('zipflow-ollama-model-test-home-');
+  const urls = [];
+  const chatBodies = [];
+  try {
+    let chatCalls = 0;
+    globalThis.fetch = async (url, options = {}) => {
+      urls.push(url);
+      if (url.endsWith('/api/ps')) return jsonResponse({ models: [{ model: 'qwen', context_length: 8_192 }] });
+      if (url.endsWith('/api/show')) return jsonResponse({
+        parameters: 'num_ctx 8192', model_info: { 'qwen.context_length': 32_768 },
+      });
+      if (url.endsWith('/api/chat')) {
+        chatCalls += 1;
+        chatBodies.push(JSON.parse(options.body));
+        if (chatCalls === 1) return jsonResponse({
+          message: { content: 'SUMMARY:\n- Model connection works.\nCOMMIT MESSAGE:\nTest local model compatibility' },
+          done: true,
+        });
+        return jsonResponse({
+          message: { content: JSON.stringify({
+            schemaVersion: 1, gate: 'compatibility-decision', action: 'continue', targetId: null,
+            confidence: 1, summary: 'Autonomous decision protocol works.', evidence: [], risks: [], conditions: [],
+          }) },
+          done: true,
+        });
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    };
+    const state = createInitialState();
+    state.settings = {
+      ...DEFAULT_SETTINGS,
+      llmProvider: 'ollama', llmModel: 'qwen', llmArchiveReview: 'disabled',
+    };
+    state.settingsPanel = {};
+    const controller = new ZipflowController(state);
+    controller.invalidate = () => {};
+
+    const ok = await testSelectedModel(controller);
+
+    assert.equal(ok, true);
+    assert.equal(state.settingsPanel.modelTest.status, 'passed');
+    assert.equal(state.settingsPanel.modelTest.contextLength, 8_192);
+    assert.equal(chatBodies.length, 2);
+    assert.equal(chatBodies[0].stream, true);
+    assert.equal(chatBodies[0].options.num_predict, 96);
+    assert.equal(typeof chatBodies[1].format, 'object');
+    assert.ok(urls.every((url) => url.startsWith('http://127.0.0.1:11434/api/')));
+    assert.equal(urls.some((url) => url.includes('/v1/')), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previousHome === undefined) delete process.env.ZIPFLOW_HOME;
+    else process.env.ZIPFLOW_HOME = previousHome;
+  }
+});
+
+test('OpenAI-compatible model test uses configured Responses endpoint and reasoning effort', async () => {
+  const originalFetch = globalThis.fetch;
+  const previousHome = process.env.ZIPFLOW_HOME;
+  process.env.ZIPFLOW_HOME = await tempDir('zipflow-openai-model-test-home-');
+  const requests = [];
+  try {
+    let calls = 0;
+    globalThis.fetch = async (url, options = {}) => {
+      calls += 1;
+      const body = JSON.parse(options.body);
+      requests.push({ url, body, authorization: new Headers(options.headers).get('authorization') });
+      const content = calls === 1
+        ? 'SUMMARY:\n- Model connection works.\nCOMMIT MESSAGE:\nTest local model compatibility'
+        : JSON.stringify({
+          schemaVersion: 1, gate: 'compatibility-decision', action: 'continue', targetId: null,
+          confidence: 1, summary: 'Autonomous decision protocol works.', evidence: [], risks: [], conditions: [],
+        });
+      return jsonResponse({
+        status: 'completed',
+        output: [{ type: 'message', content: [{ type: 'output_text', text: content }] }],
+        usage: { input_tokens: 4, output_tokens: 8 },
+      });
+    };
+    const state = createInitialState();
+    state.settings = {
+      ...DEFAULT_SETTINGS,
+      llmProvider: 'openai', llmModel: 'codex-local', llmArchiveReview: 'disabled',
+      llmBaseUrl: 'http://127.0.0.1:7777/v1', llmOpenAiApiMode: 'responses',
+      llmReasoningEffort: 'high', llmApiToken: 'secret-token',
+    };
+    state.settingsPanel = {};
+    const controller = new ZipflowController(state);
+    controller.invalidate = () => {};
+
+    const ok = await testSelectedModel(controller);
+
+    assert.equal(ok, true);
+    assert.equal(state.settingsPanel.modelTest.status, 'passed');
+    assert.equal(requests.length, 2);
+    assert.ok(requests.every((request) => request.url === 'http://127.0.0.1:7777/v1/responses'));
+    assert.ok(requests.every((request) => request.authorization === 'Bearer secret-token'));
+    assert.ok(requests.every((request) => request.body.reasoning.effort === 'high'));
+    assert.equal(requests[0].body.text, undefined);
+    assert.equal(requests[1].body.text.format.type, 'json_schema');
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previousHome === undefined) delete process.env.ZIPFLOW_HOME;
+    else process.env.ZIPFLOW_HOME = previousHome;
+  }
+});
