@@ -1500,7 +1500,17 @@
     "Model test prompt": "Промпт проверки модели",
     "Token usage": "Использование токенов",
     "↑/↓ scroll · PgUp/PgDn · End latest · P prompts · Esc cancel": "↑/↓ — прокрутка · PgUp/PgDn · End — к последнему · P — промпты · Esc — отмена",
-    "↑/↓ scroll · PgUp/PgDn · P prompts · C copy · D diagnostics · Esc close": "↑/↓ — прокрутка · PgUp/PgDn · P — промпты · C — копировать · D — диагностика · Esc — закрыть"
+    "↑/↓ scroll · PgUp/PgDn · P prompts · C copy · D diagnostics · Esc close": "↑/↓ — прокрутка · PgUp/PgDn · P — промпты · C — копировать · D — диагностика · Esc — закрыть",
+    "Recheck as patch / overlay · recommended by LLM": "Перепроверить как патч / наложение · рекомендация LLM",
+    "Review changed files · recommended by LLM": "Просмотреть изменённые файлы · рекомендация LLM",
+    "Continue · recommended by LLM": "Продолжить · рекомендация LLM",
+    "Continue despite project mismatch": "Продолжить, несмотря на несовпадение проекта",
+    "Apply only after manually confirming that the unrelated-project warning is wrong": "Применяйте только после ручной проверки, что предупреждение о другом проекте ошибочно",
+    "Cancel update and choose another archive · recommended by LLM": "Отменить обновление и выбрать другой архив · рекомендация LLM",
+    "The archive appears to belong to a different project": "Похоже, архив относится к другому проекту",
+    "Apply update despite project mismatch": "Применить обновление, несмотря на несовпадение проекта",
+    "Review changes · recommended by LLM": "Просмотреть изменения · рекомендация LLM",
+    "Cancel update · recommended by LLM": "Отменить обновление · рекомендация LLM"
   },
   "patterns": [
     {

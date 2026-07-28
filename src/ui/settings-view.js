@@ -10,7 +10,6 @@ import {
   WorkspacePane,
   color,
   renderNode,
-  wrapText,
 } from 'terlio.js';
 import { bindScreenAction, captureScreenActionContext } from '../app/ui-action-context.js';
 import { settingsViewModel } from '../app/settings-panel.js';
@@ -22,6 +21,7 @@ import { ContextDock } from './context-dock.js';
 import { selectRowIndex, selectRows } from './select-rows.js';
 import { localizeUiItem, translateForState as t } from '../i18n/index.js';
 import { wheelScrollDelta } from './wheel.js';
+import { createPromptDocumentSource, scrollPromptDocument } from './prompt-document.js';
 import { BINARY_TOOL_IDS } from '../security/binaries.js';
 
 const SETTINGS_CONTEXT_ROWS = 2;
@@ -281,7 +281,7 @@ function renderModelPromptView({ content, state, width, height, theme }) {
   const overlayHeight = Math.max(12, Math.min(height - 4, 28));
   const innerWidth = Math.max(28, overlayWidth - 6);
   const bodyHeight = Math.max(5, overlayHeight - 6);
-  const lines = promptLines(prompt, innerWidth, theme);
+  const lines = promptDocumentSource(view, prompt, innerWidth, theme);
   view.maxScroll = Math.max(0, lines.length - bodyHeight);
   view.scroll = Math.max(0, Math.min(view.scroll ?? 0, view.maxScroll));
   const buildModal = () => Modal({
@@ -301,7 +301,9 @@ function renderModelPromptView({ content, state, width, height, theme }) {
         pointerId: 'zipflow:model-test-prompt',
         onWheel: (event) => {
           const delta = wheelScrollDelta(event);
-          if (delta) state.dispatch?.({ type: 'settings-wheel', delta, wrap: false });
+          if (delta) {
+            if (scrollPromptDocument(view, delta)) state.dispatch?.({ type: 'model-prompt-redraw' });
+          }
           event.preventDefault();
           event.stopPropagation?.();
         },
@@ -316,31 +318,12 @@ function renderModelPromptView({ content, state, width, height, theme }) {
   return OverlayHost({ content, manager, theme, width, height, dim: true, toastBottomMargin: 0 });
 }
 
-function promptLines(prompt, width, theme) {
-  if (prompt.requests?.length) {
-    const lines = [];
-    for (const [index, request] of prompt.requests.entries()) {
-      lines.push(color(theme, 'accent', `REQUEST ${index + 1} · ${request.label || 'LLM prompt'}`));
-      lines.push(color(theme, 'textMuted', `${request.provider || 'LLM'} · ${request.model || '(unknown model)'} · ${request.structured ? 'structured output' : 'text output'} · max ${request.maxTokens ?? '?'} tokens`));
-      lines.push('');
-      appendPromptMessages(lines, request.messages, width, theme);
-      if (index < prompt.requests.length - 1) lines.push('');
-    }
-    return lines;
-  }
-  const lines = [];
-  appendPromptMessages(lines, prompt.messages, width, theme);
-  return lines.length ? lines : [color(theme, 'textMuted', 'No prompt messages were captured.')];
-}
-
-function appendPromptMessages(lines, messages, width, theme) {
-  for (const message of messages ?? []) {
-    lines.push(color(theme, 'accent', String(message.role || 'user').toUpperCase()));
-    for (const sourceLine of String(message.content ?? '').split(/\r?\n/)) {
-      lines.push(...wrapText(sourceLine, width).map((line) => `  ${line}`));
-    }
-    lines.push('');
-  }
+function promptDocumentSource(view, prompt, width, theme) {
+  const cached = view.documentCache;
+  if (cached && cached.prompt === prompt && cached.width === width && cached.theme === theme) return cached.source;
+  const source = createPromptDocumentSource(prompt, { width, theme });
+  view.documentCache = { prompt, width, theme, source };
+  return source;
 }
 
 function renderSettingsModal({ content, modal, state, width, height, theme }) {

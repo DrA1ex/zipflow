@@ -131,6 +131,9 @@ function parseSectionHeading(line) {
     ['assessment', /^(?:archive )?assessment\s*:\s*(.*)$/i],
     ['confidence', /^confidence\s*:\s*(.*)$/i],
     ['reasons', /^reasons\s*:\s*(.*)$/i],
+    ['recommendation', /^(?:recommended action|recommendation|action)\s*:\s*(.*)$/i],
+    ['projectRelation', /^(?:project relation|project match)\s*:\s*(.*)$/i],
+    ['archiveShape', /^(?:archive shape|archive type)\s*:\s*(.*)$/i],
   ];
   for (const [section, pattern] of patterns) {
     const match = line.match(pattern);
@@ -141,13 +144,16 @@ function parseSectionHeading(line) {
   if (/^(archive )?assessment\s*$/i.test(line)) return { section: 'assessment', value: '' };
   if (/^confidence\s*$/i.test(line)) return { section: 'confidence', value: '' };
   if (/^reasons\s*$/i.test(line)) return { section: 'reasons', value: '' };
+  if (/^(?:recommended action|recommendation|action)\s*$/i.test(line)) return { section: 'recommendation', value: '' };
+  if (/^(?:project relation|project match)\s*$/i.test(line)) return { section: 'projectRelation', value: '' };
+  if (/^(?:archive shape|archive type)\s*$/i.test(line)) return { section: 'archiveShape', value: '' };
   return null;
 }
 
 function appendSectionValue(result, section, value) {
   const line = String(value ?? '').trimEnd();
   if (!line.trim()) return;
-  if (section === 'assessment' || section === 'confidence') result[section] = line.trim();
+  if (['assessment', 'confidence', 'recommendation', 'projectRelation', 'archiveShape'].includes(section)) result[section] = line.trim();
   else result[section].push(line);
 }
 
@@ -156,11 +162,39 @@ function normalizeAssessment(parsed) {
   const confidence = stringValue(parsed.confidence).toLowerCase();
   const reasons = normalizeSummary(parsed.reasons);
   if (!['suitable', 'suspicious', 'unsuitable'].includes(assessment) || !reasons.length) return null;
+  const projectRelation = normalizeEnum(parsed.projectRelation ?? parsed.project_relation ?? parsed.projectMatch ?? parsed.project_match, {
+    same: 'same-project', 'same-project': 'same-project', matching: 'same-project',
+    uncertain: 'uncertain', unknown: 'uncertain',
+    different: 'different-project', 'different-project': 'different-project', unrelated: 'different-project', mismatch: 'different-project',
+  });
+  const archiveShape = normalizeEnum(parsed.archiveShape ?? parsed.archive_shape ?? parsed.archiveType ?? parsed.archive_type, {
+    snapshot: 'full-snapshot', full: 'full-snapshot', 'full-snapshot': 'full-snapshot',
+    patch: 'patch-like', overlay: 'patch-like', 'patch-like': 'patch-like', partial: 'patch-like',
+    unknown: 'unknown', uncertain: 'unknown',
+  });
+  const explicitRecommendation = normalizeEnum(parsed.recommendation ?? parsed.recommendedAction ?? parsed.recommended_action ?? parsed.action, {
+    continue: 'continue', apply: 'continue',
+    review: 'manual-review', 'manual-review': 'manual-review', 'review-manually': 'manual-review',
+    overlay: 'reinterpret-as-overlay', patch: 'reinterpret-as-overlay', 'reinterpret-as-overlay': 'reinterpret-as-overlay', 'recheck-as-overlay': 'reinterpret-as-overlay',
+    cancel: 'cancel-update', abort: 'cancel-update', 'cancel-update': 'cancel-update', 'choose-another-archive': 'cancel-update',
+  });
+  const recommendation = explicitRecommendation
+    ?? (projectRelation === 'different-project' || assessment === 'unsuitable' ? 'cancel-update'
+      : archiveShape === 'patch-like' ? 'reinterpret-as-overlay'
+        : assessment === 'suitable' ? 'continue' : 'manual-review');
   return {
     assessment,
     confidence: ['low', 'medium', 'high'].includes(confidence) ? confidence : 'low',
     reasons: reasons.slice(0, 5),
+    recommendation,
+    ...(projectRelation ? { projectRelation } : {}),
+    ...(archiveShape ? { archiveShape } : {}),
   };
+}
+
+function normalizeEnum(value, aliases) {
+  const normalized = stringValue(value).toLowerCase().trim().replace(/[ _]+/g, '-');
+  return aliases[normalized] ?? null;
 }
 
 function normalizeSummary(value) {

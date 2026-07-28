@@ -26,6 +26,10 @@ export async function handleReplayDispatch(controller, action) {
     controller.invalidate();
     return true;
   }
+  if (action.type === 'model-prompt-redraw') {
+    controller.invalidate();
+    return true;
+  }
   return false;
 }
 

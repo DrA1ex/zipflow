@@ -28,9 +28,25 @@ function modelCatalog() {
 test('archive assessment parser accepts fenced JSON and verdict aliases', () => {
   const parsed = parseArchiveAssessment('```json\n{"verdict":"suspicious","confidence":"medium","reasons":["Different root layout"]}\n```');
   assert.deepEqual(parsed, {
-    assessment: 'suspicious', confidence: 'medium', reasons: ['Different root layout'],
+    assessment: 'suspicious', confidence: 'medium', reasons: ['Different root layout'], recommendation: 'manual-review',
   });
   assert.equal(parseArchiveAssessment('{"assessment":"suitable","reasons":[]}'), null);
+});
+
+test('archive assessment identifies another project and recommends cancelling rather than changing archive mode', () => {
+  const parsed = parseArchiveAssessment(JSON.stringify({
+    assessment: 'unsuitable',
+    confidence: 'high',
+    reasons: ['The archive contains unrelated project markers and a different source layout.'],
+    projectRelation: 'different-project',
+    archiveShape: 'unknown',
+    recommendation: 'cancel-update',
+  }));
+  assert.deepEqual(parsed, {
+    assessment: 'unsuitable', confidence: 'high',
+    reasons: ['The archive contains unrelated project markers and a different source layout.'],
+    recommendation: 'cancel-update', projectRelation: 'different-project', archiveShape: 'unknown',
+  });
 });
 
 test('tree comparison keeps ordinary dot-directories but excludes protected and configured sensitive paths', async () => {
@@ -67,6 +83,7 @@ test('structure guard sends project/archive trees and parses a conservative verd
     chatBody = JSON.parse(options.body);
     return nativeCompletion(JSON.stringify({
       assessment: 'suitable', confidence: 'high', reasons: ['Project markers and source layout match.'],
+      projectRelation: 'same-project', archiveShape: 'full-snapshot', recommendation: 'continue',
     }));
   };
   const result = await reviewArchiveStructure({
@@ -81,6 +98,9 @@ test('structure guard sends project/archive trees and parses a conservative verd
 
   assert.equal(result.assessment, 'suitable');
   assert.equal(result.confidence, 'high');
+  assert.equal(result.projectRelation, 'same-project');
+  assert.equal(result.archiveShape, 'full-snapshot');
+  assert.equal(result.recommendation, 'continue');
   assert.match(chatBody.input, /CURRENT PROJECT/);
   assert.match(chatBody.input, /ARCHIVE/);
   assert.match(chatBody.system_prompt, /Write reasons in Russian/);
@@ -144,6 +164,7 @@ test('archive assessment parser accepts inline headings returned by LM Studio', 
       'Структура проекта соответствует ожиданиям (Swift Package).',
       'Присутствуют Sources, Tests и Package.swift.',
     ],
+    recommendation: 'continue',
   });
 });
 

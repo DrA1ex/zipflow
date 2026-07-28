@@ -19,7 +19,7 @@ Nothing is written to the project during these steps. Zipflow revalidates the op
 
 ### LLM review while the plan is open
 
-Local LLM review may continue in parallel while the deterministic plan and diffs are available for inspection. During that time:
+Local LLM review may continue in parallel while the deterministic plan and diffs are available for inspection. The archive guard returns explicit project-relation, archive-shape, and recommended-action fields. If the model identifies a different project, Zipflow puts **Cancel update and choose another archive** first and does not suggest switching between snapshot and overlay as a fix. During that time:
 
 - **Apply update** is disabled on every plan-review surface;
 - **Cancel LLM review** stops only the model request and preserves the plan;

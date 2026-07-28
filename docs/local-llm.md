@@ -24,7 +24,7 @@ The **LLM tasks** page contains independent checkboxes. Enable only the outputs 
 
 The tasks do not depend on each other. For example, Zipflow can request only an update commit message, only a dirty-tree checkpoint message, or both without generating a summary or archive verdict. Turning every task off keeps the provider and model configuration but prevents ordinary workflow LLM requests. Autopilot model decisions remain a separate capability and compatibility check.
 
-Ordinary summaries and verdicts are advisory. Local LLM failures do not block manual archive application.
+Ordinary summaries and verdicts are advisory. Archive suitability additionally reports whether the ZIP appears to belong to the same project, whether it looks like a full snapshot or patch, and one explicit recommendation: continue, review manually, reinterpret as an overlay, or cancel. A different-project result makes cancellation and choosing another archive the primary action; switching snapshot mode is not presented as a remedy. Local LLM failures do not block manual archive application.
 
 ## Token usage statistics
 
@@ -142,7 +142,7 @@ A request succeeds only after a matching `turn/completed` notification reports `
 
 ## Output parsing and diagnostics
 
-**Test selected model** is deliberately independent from the enabled workflow tasks. Its first request checks a fixed transport marker; its second request validates the autonomous-decision schema. After the check, both exact system/user prompt pairs appear as collapsed rows and can be opened in a scrollable read-only viewer. Primary workflow generation still uses a readable section protocol containing only the outputs selected in **LLM tasks**. A commit-only request, for example, asks for and validates only `COMMIT MESSAGE`.
+**Test selected model** is deliberately independent from the enabled workflow tasks. Its first request checks a fixed transport marker; its second request validates the autonomous-decision schema. After the check, both exact system/user prompt pairs appear as collapsed rows and can be opened in a scrollable read-only viewer. The viewer uses a cached virtual line source for large prompts, keeps wheel input local to the document, highlights fenced source code, and colors embedded diff additions, removals, headers, and hunks. The viewer uses a cached virtual line source for large prompts, keeps wheel input local to the document, highlights fenced source code, and colors embedded diff additions, removals, headers, and hunks. Primary workflow generation still uses a readable section protocol containing only the outputs selected in **LLM tasks**. A commit-only request, for example, asks for and validates only `COMMIT MESSAGE`.
 
 When a model ignores the requested format or spends its output budget on reasoning, Zipflow can perform a hidden compact repair request. If only a useful summary can be recovered, the summary is kept and another commit-message source is used.
 

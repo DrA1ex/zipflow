@@ -291,7 +291,17 @@
     "Model test prompt": "Prompt de la prueba del modelo",
     "Token usage": "Uso de tokens",
     "↑/↓ scroll · PgUp/PgDn · End latest · P prompts · Esc cancel": "↑/↓ desplazar · PgUp/PgDn · Fin último · P prompts · Esc cancelar",
-    "↑/↓ scroll · PgUp/PgDn · P prompts · C copy · D diagnostics · Esc close": "↑/↓ desplazar · PgUp/PgDn · P prompts · C copiar · D diagnóstico · Esc cerrar"
+    "↑/↓ scroll · PgUp/PgDn · P prompts · C copy · D diagnostics · Esc close": "↑/↓ desplazar · PgUp/PgDn · P prompts · C copiar · D diagnóstico · Esc cerrar",
+    "Recheck as patch / overlay · recommended by LLM": "Volver a comprobar como parche / superposición · recomendación LLM",
+    "Review changed files · recommended by LLM": "Revisar archivos modificados · recomendación LLM",
+    "Continue · recommended by LLM": "Continuar · recomendación LLM",
+    "Continue despite project mismatch": "Continuar pese a que el proyecto no coincide",
+    "Apply only after manually confirming that the unrelated-project warning is wrong": "Aplicar solo después de confirmar manualmente que la advertencia de otro proyecto es incorrecta",
+    "Cancel update and choose another archive · recommended by LLM": "Cancelar la actualización y elegir otro archivo · recomendación LLM",
+    "The archive appears to belong to a different project": "El archivo parece pertenecer a otro proyecto",
+    "Apply update despite project mismatch": "Aplicar pese a que el proyecto no coincide",
+    "Review changes · recommended by LLM": "Revisar cambios · recomendación LLM",
+    "Cancel update · recommended by LLM": "Cancelar actualización · recomendación LLM"
   },
   "patterns": [
     {

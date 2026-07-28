@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.8.0 — Virtual prompt documents and actionable archive mismatch reviews
+
+- Render model-test and historical replay prompts through a cached Terlio virtual line source so large prompts are not rewrapped on every frame.
+- Keep prompt-wheel input inside the prompt viewer, update scroll synchronously, and avoid queued Settings navigation after a trackpad gesture ends.
+- Highlight fenced source code with Terlio syntax colors and distinguish added, removed, hunk, and file-header lines in embedded diffs.
+- Extend archive-suitability review with explicit project relation, archive shape, and recommended action fields, using structured output when supported.
+- Treat a different-project verdict as a cancellation recommendation: make choosing another archive the primary action and stop suggesting snapshot/overlay reinterpretation as a remedy.
+- Add regression coverage for large prompt caching, prompt scroll clamping, syntax and diff highlighting, structured archive verdicts, and different-project action mapping.
+
 ## 1.7.2 — Replay prompt visibility, per-run usage, and safe model-test cancellation
 
 - Capture the exact system and user messages sent by historical model replay and historical autopilot simulation, summarize them in the replay stream, and open the complete request log with `P`.

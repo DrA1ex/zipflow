@@ -291,7 +291,17 @@
     "Model test prompt": "Prompt du test du modèle",
     "Token usage": "Utilisation des jetons",
     "↑/↓ scroll · PgUp/PgDn · End latest · P prompts · Esc cancel": "↑/↓ défiler · PgUp/PgDn · Fin dernier · P prompts · Échap annuler",
-    "↑/↓ scroll · PgUp/PgDn · P prompts · C copy · D diagnostics · Esc close": "↑/↓ défiler · PgUp/PgDn · P prompts · C copier · D diagnostic · Échap fermer"
+    "↑/↓ scroll · PgUp/PgDn · P prompts · C copy · D diagnostics · Esc close": "↑/↓ défiler · PgUp/PgDn · P prompts · C copier · D diagnostic · Échap fermer",
+    "Recheck as patch / overlay · recommended by LLM": "Revérifier comme correctif / superposition · recommandation LLM",
+    "Review changed files · recommended by LLM": "Examiner les fichiers modifiés · recommandation LLM",
+    "Continue · recommended by LLM": "Continuer · recommandation LLM",
+    "Continue despite project mismatch": "Continuer malgré la non-correspondance du projet",
+    "Apply only after manually confirming that the unrelated-project warning is wrong": "Appliquer uniquement après avoir confirmé manuellement que l’avertissement de projet différent est erroné",
+    "Cancel update and choose another archive · recommended by LLM": "Annuler la mise à jour et choisir une autre archive · recommandation LLM",
+    "The archive appears to belong to a different project": "L’archive semble appartenir à un autre projet",
+    "Apply update despite project mismatch": "Appliquer malgré la non-correspondance du projet",
+    "Review changes · recommended by LLM": "Examiner les modifications · recommandation LLM",
+    "Cancel update · recommended by LLM": "Annuler la mise à jour · recommandation LLM"
   },
   "patterns": [
     {

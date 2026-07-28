@@ -199,7 +199,7 @@ test('task-specific response instructions omit outputs that were not selected', 
   ].join('\n'), {
     requireAssessment: true, requireSummary: false, requireCommitMessage: false,
   }), {
-    summary: [], commitMessage: '', assessment: 'suitable', confidence: 'high', reasons: ['Paths match the project.'],
+    summary: [], commitMessage: '', assessment: 'suitable', confidence: 'high', reasons: ['Paths match the project.'], recommendation: 'continue',
   });
 });
 

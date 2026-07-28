@@ -1500,7 +1500,17 @@
     "Model test prompt": "Model test prompt",
     "Token usage": "Token usage",
     "↑/↓ scroll · PgUp/PgDn · End latest · P prompts · Esc cancel": "↑/↓ scroll · PgUp/PgDn · End latest · P prompts · Esc cancel",
-    "↑/↓ scroll · PgUp/PgDn · P prompts · C copy · D diagnostics · Esc close": "↑/↓ scroll · PgUp/PgDn · P prompts · C copy · D diagnostics · Esc close"
+    "↑/↓ scroll · PgUp/PgDn · P prompts · C copy · D diagnostics · Esc close": "↑/↓ scroll · PgUp/PgDn · P prompts · C copy · D diagnostics · Esc close",
+    "Recheck as patch / overlay · recommended by LLM": "Recheck as patch / overlay · recommended by LLM",
+    "Review changed files · recommended by LLM": "Review changed files · recommended by LLM",
+    "Continue · recommended by LLM": "Continue · recommended by LLM",
+    "Continue despite project mismatch": "Continue despite project mismatch",
+    "Apply only after manually confirming that the unrelated-project warning is wrong": "Apply only after manually confirming that the unrelated-project warning is wrong",
+    "Cancel update and choose another archive · recommended by LLM": "Cancel update and choose another archive · recommended by LLM",
+    "The archive appears to belong to a different project": "The archive appears to belong to a different project",
+    "Apply update despite project mismatch": "Apply update despite project mismatch",
+    "Review changes · recommended by LLM": "Review changes · recommended by LLM",
+    "Cancel update · recommended by LLM": "Cancel update · recommended by LLM"
   },
   "patterns": [
     {

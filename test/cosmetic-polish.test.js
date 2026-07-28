@@ -337,3 +337,29 @@ test('historical replay prompt viewer renders the exact captured system and user
   assert.match(output, /Exact historical system prompt/);
   assert.match(output, /Exact historical user prompt with patch context/);
 });
+
+test('large historical prompts reuse the same virtual document across redraws', async () => {
+  const state = settingsState();
+  state.settingsPanel.modelTest = null;
+  state.settingsPanel.modelTestWorkspace = {
+    mode: 'progress', kind: 'model', runId: 'run-large-prompts', archiveName: 'large.zip',
+    running: false, status: 'Replay completed', elapsedMs: 100, blocks: [],
+    scroll: 0, maxScroll: 0, follow: true, unread: 0, unreadBlockIds: new Set(),
+    prompts: [{
+      label: 'Large historical request', provider: 'codex', model: 'gpt-test', structured: false, maxTokens: 4096,
+      messages: [{
+        role: 'user',
+        content: Array.from({ length: 4_000 }, (_, index) => `${index % 2 ? '+' : '-'}line ${index}`).join('\n'),
+      }],
+    }],
+  };
+  const controller = new ZipflowController(state);
+  controller.invalidate = () => {};
+
+  await handleModelReplayWorkspaceKey(controller, { name: 'p', text: 'p', printable: true });
+  renderToString(renderZipflow({ state, width: 120, height: 32 }), { width: 120, height: 32 });
+  const source = state.settingsPanel.modelPromptView.documentCache?.source;
+  assert.ok(source?.length > 4_000);
+  renderToString(renderZipflow({ state, width: 120, height: 32 }), { width: 120, height: 32 });
+  assert.equal(state.settingsPanel.modelPromptView.documentCache?.source, source);
+});

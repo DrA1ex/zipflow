@@ -119,7 +119,9 @@ async function finishLlmReview(controller, llm, generation) {
     ...(state.archiveSafety ?? { warnings: [], acknowledged: false }),
     ...(llm.assessment !== undefined ? { llm: llm.assessment ?? null } : {}),
     ...(llm.deletionIntent !== undefined ? { deletionIntent: llm.deletionIntent ?? null } : {}),
-    ...(['ambiguous', 'likely-partial'].includes(llm.deletionIntent?.assessment) ? { acknowledged: false } : {}),
+    ...(['ambiguous', 'likely-partial'].includes(llm.deletionIntent?.assessment)
+      || ['manual-review', 'reinterpret-as-overlay', 'cancel-update'].includes(llm.assessment?.recommendation)
+      ? { acknowledged: false } : {}),
   };
   state.run.archiveSafety = state.archiveSafety;
   state.run = await saveRunRecord(state.run);
@@ -307,6 +309,9 @@ function emitLlmResult(controller, llm, settings) {
         `Assessment: ${titleCase(assessment.assessment)}`,
         `Confidence: ${titleCase(assessment.confidence)}`,
         `Review: ${reviewModeLabel(assessment.mode)}`,
+        ...(assessment.projectRelation ? [`Project relation: ${titleCase(assessment.projectRelation.replaceAll('-', ' '))}`] : []),
+        ...(assessment.archiveShape ? [`Archive shape: ${titleCase(assessment.archiveShape.replaceAll('-', ' '))}`] : []),
+        ...(assessment.recommendation ? [`Recommended action: ${recommendationLabel(assessment.recommendation)}`] : []),
         ...(reasons.length ? ['Reasons:', ...reasons.map((reason) => `• ${reason}`)] : []),
       ], assessment.assessment === 'suitable' ? 'success' : 'warning', {
         collapsedSummary: `Local LLM · ${assessment.assessment} · ${assessment.confidence} confidence`,
@@ -362,6 +367,13 @@ function titleCase(value) {
   return text ? `${text[0].toUpperCase()}${text.slice(1)}` : 'Unknown';
 }
 
+function recommendationLabel(value) {
+  if (value === 'cancel-update') return 'Cancel update';
+  if (value === 'reinterpret-as-overlay') return 'Recheck as patch / overlay';
+  if (value === 'continue') return 'Continue';
+  return 'Review manually';
+}
+
 function reviewModeLabel(value) {
   if (value === 'structure') return 'Structure guard';
   if (value === 'sample') return 'Sample guard';
@@ -408,6 +420,9 @@ function assessmentRecord(value, mode) {
     assessment: value.assessment,
     confidence: value.confidence ?? 'low',
     reasons: cleanAssessmentReasons(value.reasons ?? value.summary ?? []),
+    recommendation: value.recommendation ?? (value.assessment === 'unsuitable' ? 'cancel-update' : value.assessment === 'suitable' ? 'continue' : 'manual-review'),
+    ...(value.projectRelation ? { projectRelation: value.projectRelation } : {}),
+    ...(value.archiveShape ? { archiveShape: value.archiveShape } : {}),
   };
 }
 

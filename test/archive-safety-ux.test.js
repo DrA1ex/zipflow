@@ -35,3 +35,19 @@ test('archive safety review explains deterministic and advisory warnings before 
   assert.match(state.panelIntro.join('\n'), /LLM · suspicious · high confidence/);
   assert.match(state.panelIntro.join('\n'), /advisory/);
 });
+
+test('different-project LLM verdict makes cancellation the primary action and hides archive-mode reinterpretation', () => {
+  const { state, controller } = controllerWithSafety('unsuitable');
+  state.archiveSafety.llm = {
+    mode: 'structure', assessment: 'unsuitable', confidence: 'high',
+    projectRelation: 'different-project', archiveShape: 'unknown', recommendation: 'cancel-update',
+    reasons: ['The archive contains markers from another application.'],
+  };
+  showArchiveSafetyReview(controller);
+
+  assert.equal(state.menuItems[0].id, 'safety-retry');
+  assert.match(state.menuItems[0].label, /recommended by LLM/);
+  assert.equal(state.menuItems.some((item) => item.id === 'recheck-as-overlay' || item.id === 'recheck-as-snapshot'), false);
+  assert.match(state.panelIntro.join('\n'), /Project relation: different-project/);
+  assert.match(state.panelIntro.join('\n'), /Recommended action: cancel-update/);
+});

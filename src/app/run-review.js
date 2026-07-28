@@ -192,9 +192,13 @@ function llmReviewMenuItems(state) {
 }
 
 function archiveModeAction(state, active) {
+  const recommendation = archiveRecommendation(state);
+  if (recommendation === 'cancel-update') return null;
   if (activeArchiveMode(state) === 'snapshot') return {
     id: 'recheck-as-overlay',
-    label: 'Recheck as patch / overlay',
+    label: recommendation === 'reinterpret-as-overlay'
+      ? 'Recheck as patch / overlay · recommended by LLM'
+      : 'Recheck as patch / overlay',
     description: 'Rebuild this run without deleting local files that are absent from the ZIP',
     disabled: active,
   };
@@ -204,6 +208,16 @@ function archiveModeAction(state, active) {
     description: 'Rebuild this run and include eligible missing local files as removals',
     disabled: active,
   };
+}
+
+function archiveRecommendation(state) {
+  const llm = state.archiveSafety?.llm;
+  if (!llm) return null;
+  if (llm.projectRelation === 'different-project') return 'cancel-update';
+  if (llm.recommendation) return llm.recommendation;
+  if (llm.assessment === 'unsuitable') return 'cancel-update';
+  if (llm.assessment === 'suitable') return 'continue';
+  return 'manual-review';
 }
 
 function deletionIntentAction(state, active) {
@@ -232,37 +246,55 @@ function planItemFromId(state, itemId) {
 export function showArchiveSafetyReview(controller) {
   const { state } = controller;
   const safety = state.archiveSafety ?? { warnings: [] };
+  const recommendation = archiveRecommendation(state);
   const dangerous = safety.warnings.some((item) => item.severity === 'danger')
     || safety.llm?.assessment === 'unsuitable'
+    || recommendation === 'cancel-update'
     || safety.deletionIntent?.assessment === 'likely-partial';
   const active = llmReviewActive(state);
   const lines = safetyLines(safety);
   if (active) lines.push(state.llmReviewCancelling
     ? 'LLM review cancellation is finishing before another operation can start.'
     : 'LLM review is still running. You can inspect the plan or cancel the review.');
-  controller.showMenu('archive-safety', [
-    { id: 'safety-review-plan', label: 'Review changed files', description: 'Inspect groups and diffs before deciding whether to apply', allowDuringOperation: active },
-    archiveModeAction(state, active),
-    ...compactOptional([deletionIntentAction(state, active)]),
-    { id: 'safety-continue', label: active ? 'Continue · waiting for LLM review' : 'Continue despite warnings', description: active ? 'Wait for the active review or cancel it first' : dangerous ? 'The archive remains subject to backup, conflict handling, and checks' : 'Acknowledge the advisory warnings and continue normally', disabled: active },
-    ...llmReviewMenuItems(state),
-    { id: 'safety-retry', label: 'Choose another archive', description: active ? 'Cancel the LLM review before leaving this run' : 'Cancel this run without changing the project', disabled: active },
-  ], dangerous ? 'Archive needs careful review' : 'Archive safety warning', 0, lines);
+  const review = { id: 'safety-review-plan', label: recommendation === 'manual-review' ? 'Review changed files · recommended by LLM' : 'Review changed files', description: 'Inspect groups and diffs before deciding whether to apply', allowDuringOperation: active };
+  const mode = archiveModeAction(state, active);
+  const deletion = deletionIntentAction(state, active);
+  const proceed = {
+    id: 'safety-continue',
+    label: active ? 'Continue · waiting for LLM review' : recommendation === 'continue' ? 'Continue · recommended by LLM' : recommendation === 'cancel-update' ? 'Continue despite project mismatch' : 'Continue despite warnings',
+    description: active ? 'Wait for the active review or cancel it first' : recommendation === 'cancel-update' ? 'Apply only after manually confirming that the unrelated-project warning is wrong' : dangerous ? 'The archive remains subject to backup, conflict handling, and checks' : 'Acknowledge the advisory warnings and continue normally',
+    disabled: active,
+  };
+  const retry = {
+    id: 'safety-retry',
+    label: recommendation === 'cancel-update' ? 'Cancel update and choose another archive · recommended by LLM' : 'Choose another archive',
+    description: active ? 'Cancel the LLM review before leaving this run' : recommendation === 'cancel-update' ? 'The archive appears to belong to a different project' : 'Cancel this run without changing the project',
+    disabled: active,
+  };
+  let items;
+  if (recommendation === 'cancel-update') items = [retry, review, proceed, ...compactOptional([deletion]), ...llmReviewMenuItems(state)];
+  else if (recommendation === 'reinterpret-as-overlay') items = [...compactOptional([mode]), review, ...compactOptional([deletion]), proceed, ...llmReviewMenuItems(state), retry];
+  else if (recommendation === 'continue') items = [proceed, review, ...compactOptional([mode, deletion]), ...llmReviewMenuItems(state), retry];
+  else items = [review, ...compactOptional([mode, deletion]), proceed, ...llmReviewMenuItems(state), retry];
+  controller.showMenu('archive-safety', items, dangerous ? 'Archive needs careful review' : 'Archive safety warning', 0, lines);
 }
 
 export function showPlanReview(controller) {
   const { state } = controller;
   const { plan } = state;
   const active = llmReviewActive(state);
-  const items = [
-    { id: 'apply-plan', label: active ? 'Apply update · waiting for LLM review' : 'Apply update', description: active ? 'Wait for the active review or cancel it first' : plan.conflicts.length ? 'Uses the conflict decisions shown above' : 'Backup is created before any local file changes', disabled: active },
-    { id: 'view-plan', label: 'Review changes', description: 'Open file groups and inspect unified or side-by-side diffs', allowDuringOperation: active },
-    archiveModeAction(state, active),
-    ...compactOptional([deletionIntentAction(state, active)]),
-    ...llmReviewMenuItems(state),
-  ];
+  const recommendation = archiveRecommendation(state);
+  const apply = { id: 'apply-plan', label: active ? 'Apply update · waiting for LLM review' : recommendation === 'cancel-update' ? 'Apply update despite project mismatch' : 'Apply update', description: active ? 'Wait for the active review or cancel it first' : plan.conflicts.length ? 'Uses the conflict decisions shown above' : 'Backup is created before any local file changes', disabled: active };
+  const review = { id: 'view-plan', label: recommendation === 'manual-review' ? 'Review changes · recommended by LLM' : 'Review changes', description: 'Open file groups and inspect unified or side-by-side diffs', allowDuringOperation: active };
+  const mode = archiveModeAction(state, active);
+  const deletion = deletionIntentAction(state, active);
+  const cancel = { id: 'cancel-run', label: recommendation === 'cancel-update' ? 'Cancel update · recommended by LLM' : 'Cancel update', description: active ? 'Cancel the LLM review before leaving this run' : recommendation === 'cancel-update' ? 'The archive appears to belong to a different project' : 'Return without changing the project', disabled: active };
+  let items;
+  if (recommendation === 'cancel-update') items = [cancel, review, apply, ...compactOptional([deletion]), ...llmReviewMenuItems(state)];
+  else if (recommendation === 'reinterpret-as-overlay') items = [...compactOptional([mode]), review, apply, ...compactOptional([deletion]), ...llmReviewMenuItems(state)];
+  else items = [apply, review, ...compactOptional([mode, deletion]), ...llmReviewMenuItems(state)];
   if (autopilotPaused(state)) items.push({ id: 'resume-autopilot', label: 'Resume autopilot', description: 'Ask the local model to decide this plan checkpoint again.' });
-  items.push({ id: 'cancel-run', label: 'Cancel update', description: active ? 'Cancel the LLM review before leaving this run' : 'Return without changing the project', disabled: active });
+  if (recommendation !== 'cancel-update') items.push(cancel);
   const selection = planSelectionSummary(plan, state.decisions);
   const intro = [`Interpretation: ${archiveInterpretationLabel(state)}${state.archiveInterpretation?.source === 'manual' ? ' · current run only' : ''}`, compactPlanLine(plan), compactPlanMeta(plan), ...(selection.excluded ? [`Selection: ${selection.selected} apply · ${selection.excluded} keep local`] : []), ...planWarnings(plan, state.archiveSafety)];
   if (active) intro.push(state.llmReviewCancelling
@@ -562,6 +594,9 @@ function planWarnings(plan, safety = null) {
   for (const warning of safety?.warnings ?? []) lines.push(`${warning.title}: ${warning.detail}`);
   if (safety?.llm && safety.llm.assessment !== 'suitable') {
     lines.push(`LLM archive assessment: ${safety.llm.assessment} · ${safety.llm.confidence} confidence`);
+    if (safety.llm.projectRelation) lines.push(`LLM project relation: ${safety.llm.projectRelation}`);
+    if (safety.llm.archiveShape) lines.push(`LLM archive shape: ${safety.llm.archiveShape}`);
+    if (safety.llm.recommendation) lines.push(`LLM recommendation: ${safety.llm.recommendation}`);
   }
   if (safety?.deletionIntent) lines.push(`LLM deletion intent: ${safety.deletionIntent.assessment} · ${safety.deletionIntent.confidence} confidence`);
   if (plan.ignoredIncoming.length) lines.push(`${plan.ignoredIncoming.length} incoming paths are ignored by .gitignore`);
@@ -575,6 +610,9 @@ function safetyLines(safety) {
   for (const warning of safety.warnings ?? []) lines.push(`${warning.severity === 'danger' ? 'HIGH' : 'WARN'} · ${warning.title}`, `  ${warning.detail}`);
   if (safety.llm) {
     lines.push(`LLM · ${safety.llm.assessment} · ${safety.llm.confidence} confidence`);
+    if (safety.llm.projectRelation) lines.push(`  Project relation: ${safety.llm.projectRelation}`);
+    if (safety.llm.archiveShape) lines.push(`  Archive shape: ${safety.llm.archiveShape}`);
+    if (safety.llm.recommendation) lines.push(`  Recommended action: ${safety.llm.recommendation}`);
     for (const reason of safety.llm.reasons ?? []) lines.push(`  ${reason}`);
   }
   if (safety.deletionIntent) {
