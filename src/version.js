@@ -1,1 +1,1 @@
-export const ZIPFLOW_VERSION = '1.6.8';
+export const ZIPFLOW_VERSION = '1.6.9';

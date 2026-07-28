@@ -11,9 +11,8 @@ import {
   SelectList,
   Text,
   WorkspacePane,
-  WorkspaceShell,
   color,
-  resolveWorkspaceShellLayout,
+  measureNodeHeight,
   scrollBy,
   themes,
   truncateVisible,
@@ -45,39 +44,18 @@ import { copyZipflowText } from './clipboard.js';
 
 export function renderZipflow({ state, width, height, animationFrame = 0 }) {
   const theme = themes[state.settings?.theme] ?? themes.ocean;
-  const title = state.project?.name ? `Zipflow ${ZIPFLOW_VERSION} · ${state.project.name}` : `Zipflow ${ZIPFLOW_VERSION}`;
-  const subtitle = state.project ? displayPath(state.project.root) : t(state, 'Safe source archive updates');
   state.statusDetail = state.screen === 'settings' ? runSettingsStatus(state) : '';
   const footerRight = (state.statusDetail ? [state.statusDetail] : [state.status]).filter(Boolean).map((value) => t(state, value));
   const footer = renderGlobalFooter({ left: footerHints(state).map((value) => t(state, value)), right: footerRight, width, theme });
-  const { mainHeight } = resolveWorkspaceShellLayout({
-    width,
-    height,
-    title,
-    subtitle,
-    stats: headerStats(state),
-    right: [],
-    focus: state.screen,
-    main: Text(''),
-    footer,
-    theme,
-    minMainHeight: 3,
-  });
+  const header = renderZipflowHeader({ state, width, theme });
+  const fixedRows = measureNodeHeight(header, width) + measureNodeHeight(footer, width);
+  const mainHeight = Math.max(1, Number(height) - fixedRows);
   const main = state.screen === 'settings'
     ? renderSettings(state, width, mainHeight, theme, animationFrame)
     : state.screen === 'diff-view'
       ? renderDiffView(state, width, mainHeight, theme)
       : renderWorkflow(state, width, mainHeight, theme, animationFrame);
-  const shell = WorkspaceShell({
-    title,
-    subtitle,
-    stats: headerStats(state),
-    focus: state.screen,
-    main,
-    footer,
-    height,
-    theme,
-  });
+  const shell = Column({ height }, header, main, footer);
   const responsive = RequireViewport({
     width,
     height,
@@ -99,6 +77,26 @@ export function renderZipflow({ state, width, height, animationFrame = 0 }) {
   });
   return renderZipflowToasts({ content: hosted, manager: state.overlays, theme, width, height, bottom: 2 });
 }
+
+function renderZipflowHeader({ state, width = 80, theme = null } = {}) {
+  const path = state.project?.root ? displayPath(state.project.root) : '';
+  const title = truncateVisible(
+    [`Zipflow ${ZIPFLOW_VERSION}`, path].filter(Boolean).join(' · '),
+    Math.max(12, Number(width) - 6),
+    '…',
+  );
+  const meta = [
+    ...headerStats(state).map((item) => `${item.label}: ${item.value}`),
+    state.screen ? `Focus ${state.screen}` : '',
+  ].filter(Boolean).join('   │   ');
+  return Box({
+    border: true,
+    borderColor: theme?.border,
+    padding: { left: 1, right: 1 },
+    title: ` ${title} `,
+  }, Text(theme ? color(theme, 'muted', meta) : meta, { wrap: false }));
+}
+
 function renderGlobalFooter({ left = [], right = [], width = 80, theme = null } = {}) {
   const separator = '  │  ';
   const innerWidth = Math.max(1, Number(width) - 4);

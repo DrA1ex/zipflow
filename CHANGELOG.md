@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.9 — Compact project header
+
+- Moved the active project path into the top Zipflow frame title.
+- Removed the duplicated version, project name, and path row from the header body.
+- Reclaimed one terminal row for the active workspace.
+- Added a regression test that verifies the project path appears in the header exactly once.
+
 ## 1.6.8 — Locale-independent tests and graceful Codex WebSocket shutdown
 
 - Make `npm test` force an English test locale through an explicit test-only locale override, so visual assertions remain deterministic on Russian, German, French, Italian, Spanish, and other developer machines while production still defaults to the actual system language.

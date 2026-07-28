@@ -8,6 +8,21 @@ import { ZipflowController } from '../src/app/controller.js';
 import { ZIPFLOW_VERSION } from '../src/version.js';
 import { projectSummary } from '../src/ui/format.js';
 
+test('header shows the project path once in the top border without repeating project metadata', () => {
+  const state = createInitialState();
+  state.project = { name: 'fixture', root: '/tmp/fixture', labels: ['Node.js'], git: true };
+  state.workflow = { policy: { label: 'Practical' } };
+  setScreen(state, 'home', { items: [{ id: 'exit', label: 'Exit' }], status: 'Ready' });
+
+  const output = stripAnsi(renderToString(renderZipflow({ state, width: 100, height: 30 }), { width: 100, height: 30 }));
+  const [titleRow, statusRow] = output.split('\n');
+
+  assert.match(titleRow, new RegExp(`^┌  Zipflow ${escapeRegExp(ZIPFLOW_VERSION)} · /tmp/fixture`));
+  assert.doesNotMatch(statusRow, /Zipflow|fixture|\/tmp\/fixture/);
+  assert.match(statusRow, /State: Ready/);
+  assert.equal(output.match(/\/tmp\/fixture/g)?.length, 1);
+});
+
 test('renders the interactive project home without layout errors', () => {
   const state = createInitialState();
   state.project = { name: 'fixture', root: '/tmp/fixture', labels: ['Node.js'], git: true };
