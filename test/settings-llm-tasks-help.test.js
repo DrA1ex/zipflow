@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createOverlayManager, renderToString } from 'terlio.js';
+import { createOverlayManager, renderToString, themes } from 'terlio.js';
 import { tempDir } from '../test-support/helpers.js';
 import { DEFAULT_SETTINGS, loadSettings, normalizeSettings, saveSettings, updateSettings } from '../src/settings/store.js';
 import { createInitialState } from '../src/app/state.js';
@@ -8,6 +8,8 @@ import { ZipflowController } from '../src/app/controller.js';
 import {
   handleSettingsKey, openSettings, selectParameter, selectSetting, settingsViewModel,
 } from '../src/app/settings-panel.js';
+import { renderSettings } from '../src/ui/settings-view.js';
+import { configureI18n } from '../src/i18n/index.js';
 
 async function withSettingsHome(run) {
   const previous = process.env.ZIPFLOW_HOME;
@@ -81,6 +83,26 @@ test('Settings help includes the full parameter context, selected option, and st
   assert.match(output, /Compare the project and archive trees/);
   state.overlays.handleKey({ name: 'escape' });
 
+  await selectCategory(controller, 'localLlm');
+  await openParameter(controller, 'llmChangeDelivery');
+  await handleSettingsKey(controller, { printable: true, text: '?' });
+  overlay = state.overlays.top();
+  output = renderToString(overlay.render({ width: 76, height: 18 }), { width: 76, height: 18 });
+  assert.match(output, /Choose how source changes are represented/);
+  assert.doesNotMatch(output, /Enable at least one change-analysis task first/);
+  state.overlays.handleKey({ name: 'escape' });
+
+  await handleSettingsKey(controller, { name: 'escape' });
+  const modelTestIndex = settingsViewModel(state).parameters.findIndex((item) => item.id === 'llmModelTests');
+  assert.notEqual(modelTestIndex, -1);
+  state.settingsPanel.parameterIndices.localLlm = modelTestIndex;
+  await handleSettingsKey(controller, { printable: true, text: '?' });
+  overlay = state.overlays.top();
+  output = renderToString(overlay.render({ width: 76, height: 18 }), { width: 76, height: 18 });
+  assert.match(output, /Test selected model/);
+  assert.doesNotMatch(output, /Choose a model first/);
+  state.overlays.handleKey({ name: 'escape' });
+
   await selectCategory(controller, 'backups');
   state.settingsPanel.storageStats = {
     archives: { count: 0, totalBytes: 0, oldestAt: null },
@@ -122,6 +144,36 @@ test('Settings help includes the full parameter context, selected option, and st
   assert.match(output, /Managed-file statistics/);
   assert.match(output, /Recorded paths: 3/);
   assert.match(output, /Last updated:/);
+}));
+
+test('localized Adaptive remains selected and Space keeps radio choices open', async () => withSettingsHome(async () => {
+  const { state, controller } = await settingsController({
+    interfaceLanguage: 'ru', llmProvider: 'ollama', llmModel: 'qwen',
+    llmUseSummary: true, llmChangeDelivery: 'adaptive',
+  });
+  try {
+    state.i18n = await configureI18n('ru');
+    await selectCategory(controller, 'localLlm');
+    await openParameter(controller, 'llmChangeDelivery');
+
+    let output = stripAnsi(renderToString(renderSettings(state, 100, 28, themes.ocean), { width: 100, height: 28 }));
+    assert.match(output, /●\s+Адаптивно/);
+
+    state.settings.llmChangeDelivery = 'patch';
+    const view = settingsViewModel(state);
+    const adaptiveIndex = view.choices.findIndex((item) => item.value === 'adaptive');
+    assert.notEqual(adaptiveIndex, -1);
+    state.settingsPanel.choiceIndices.llmChangeDelivery = adaptiveIndex;
+    await handleSettingsKey(controller, { name: 'space' });
+
+    assert.equal(state.settings.llmChangeDelivery, 'adaptive');
+    assert.equal(state.settingsPanel.focus, 'choices');
+    assert.equal(state.settingsPanel.activeParameterId, 'llmChangeDelivery');
+    output = stripAnsi(renderToString(renderSettings(state, 100, 28, themes.ocean), { width: 100, height: 28 }));
+    assert.match(output, /●\s+Адаптивно/);
+  } finally {
+    await configureI18n('en');
+  }
 }));
 
 test('LLM tasks are independent checkboxes and task-specific methods stay disabled until needed', async () => withSettingsHome(async () => {
@@ -186,3 +238,7 @@ test('legacy LLM settings migrate to the equivalent independent task selection',
   assert.equal(disabled.llmArchiveReview, 'structure');
   assert.equal(disabled.llmFailureAnalysis, 'new-context');
 });
+
+function stripAnsi(value) {
+  return String(value).replace(/\u001b\[[0-9;]*m/g, '');
+}

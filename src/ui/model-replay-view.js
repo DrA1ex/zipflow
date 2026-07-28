@@ -96,7 +96,8 @@ function renderReplayPreview(state, workspace, width, height, theme) {
 
 function renderReplayProgress(state, workspace, width, height, theme, animationFrame) {
   const innerWidth = Math.max(20, width - 4);
-  const bodyHeight = Math.max(4, height - 7);
+  const hasOutputDisclosure = Boolean(workspace.result && workspace.blocks.some(hasCompletedReplayOutput));
+  const bodyHeight = Math.max(4, height - 7 - (hasOutputDisclosure ? 1 : 0));
   const lines = replayLineSource(workspace, theme, innerWidth);
   workspace.maxScroll = Math.max(0, lines.length - bodyHeight);
   workspace.scroll = clamp(workspace.scroll ?? 0, 0, workspace.maxScroll);
@@ -120,7 +121,7 @@ function renderReplayProgress(state, workspace, width, height, theme, animationF
   });
   const footer = workspace.running
     ? `↑/↓ scroll · PgUp/PgDn · End latest${workspace.prompts?.length ? ' · P prompts' : ''} · Esc cancel`
-    : `↑/↓ scroll · PgUp/PgDn${workspace.prompts?.length ? ' · P prompts' : ''} · C copy · D diagnostics · Esc close`;
+    : `↑/↓ scroll · PgUp/PgDn${workspace.prompts?.length ? ' · P prompts' : ''}${hasOutputDisclosure ? ' · E output' : ''} · C copy · D diagnostics · Esc close`;
   return replayFrame({
     width,
     height,
@@ -130,11 +131,32 @@ function renderReplayProgress(state, workspace, width, height, theme, animationF
       replayStatus(workspace, theme, animationFrame),
       Text(''),
       pane,
+      replayOutputDisclosure(state, workspace, theme),
       replayUnreadIndicator(state, workspace, theme),
     ],
     footer: footerWithPosition(t(state, footer), workspace, innerWidth, theme),
     title: t(state, workspace.kind === 'autopilot' ? 'HISTORICAL AUTOPILOT SIMULATION' : 'HISTORICAL MODEL REPLAY'),
   });
+}
+
+function replayOutputDisclosure(state, workspace, theme) {
+  if (!workspace.result || !workspace.blocks.some(hasCompletedReplayOutput)) return Text('');
+  const expanded = Boolean(workspace.outputExpanded);
+  return PointerRegion({
+    pointerId: 'zipflow:model-replay-output-disclosure',
+    pointerWidth: 'fill',
+    onClick: (event) => {
+      state.dispatch?.({ type: 'model-replay-toggle-output' });
+      event.preventDefault();
+      event.stopPropagation?.();
+    },
+  }, Text(color(theme, expanded ? 'accent' : 'textMuted', expanded
+    ? '▾ Model output shown · click or press E to collapse'
+    : '▸ Model output hidden · click or press E to expand'), { wrap: false }));
+}
+
+function hasCompletedReplayOutput(block) {
+  return block?.status === 'done' && Boolean(block.reasoning || block.content);
 }
 
 function replayFrame({ height, theme, children, footer, title = 'HISTORICAL MODEL REPLAY' }) {
@@ -205,9 +227,9 @@ function blockLines(block, workspace, theme, width) {
   return [
     color(theme, token, `${marker} ${String(block.title ?? '').toUpperCase()}`),
     ...block.lines.flatMap((line) => wrapReplayDetailLine(line, width, theme)),
-    ...(compactCompletedOutput
-      ? [`  ${color(theme, 'textMuted', 'Model output parsed successfully · press D for full diagnostics')}`]
-      : blockOutputLines(block, theme, width)),
+    ...(compactCompletedOutput && !workspace.outputExpanded
+      ? [`  ${color(theme, 'textMuted', 'Model output parsed successfully.')}`]
+      : blockOutputLines(block, theme, width, { full: compactCompletedOutput && workspace.outputExpanded })),
     '',
   ];
 }
@@ -235,9 +257,9 @@ function replaySemanticKeyToken(label) {
   return 'accent';
 }
 
-function blockOutputLines(block, theme, width) {
-  const reasoning = replayOutputPreview(block.reasoning);
-  const content = replayOutputPreview(block.content);
+function blockOutputLines(block, theme, width, { full = false } = {}) {
+  const reasoning = replayOutputPreview(block.reasoning, full ? Number.POSITIVE_INFINITY : undefined);
+  const content = replayOutputPreview(block.content, full ? Number.POSITIVE_INFINITY : undefined);
   return [
     ...(reasoning.text
       ? [color(theme, 'textMuted', '  Analysis'), ...(reasoning.truncated ? [color(theme, 'warning', '    … earlier analysis hidden from the live viewport; press D for full diagnostics')] : []), ...reasoning.text.split('\n').flatMap((line) => wrapColoredLine(line, width, 4, theme, 'textMuted'))]

@@ -108,7 +108,9 @@ function renderSettingsPage(state, view, width, height, theme, animationFrame) {
   const actionContext = captureScreenActionContext(state);
   const showingChoices = view.direct || view.focus === 'choices';
   const rawItems = showingChoices ? view.choices : view.parameters;
-  const items = rawItems.map((item) => localizeUiItem(state, item));
+  const items = rawItems.map((item) => localizeUiItem(state, showingChoices
+    ? { ...item, selected: choiceSelected(state, item) }
+    : item));
   const nestedChoice = showingChoices && !view.direct;
   const activeParameter = localizeUiItem(state, view.activeParameter);
   const selectedSetting = localizeUiItem(state, view.selectedSetting);
@@ -173,7 +175,9 @@ function renderSettingsPage(state, view, width, height, theme, animationFrame) {
 function renderModelConfigPage(state, view, width, height, theme, animationFrame) {
   const actionContext = captureScreenActionContext(state);
   const choices = view.focus === 'choices';
-  const items = (choices ? view.choices : view.parameters).map((item) => localizeUiItem(state, item));
+  const items = (choices ? view.choices : view.parameters).map((item) => localizeUiItem(state, choices
+    ? { ...item, selected: Boolean(item.selected || item.value === view.values[view.activeParameter.id]) }
+    : item));
   const model = view.model;
   const info = [
     model.paramsString ? t(state, '{count} parameters', { count: model.paramsString }) : null,
@@ -193,7 +197,7 @@ function renderModelConfigPage(state, view, width, height, theme, animationFrame
   const rows = selectRows(items, (item) => oneLineLabel((() => {
     if (!choices && item.id === 'use-model' && view.loading) return spinnerLabel(animationFrame, item.label);
     return choices
-      ? `${item.value === view.values[view.activeParameter.id] ? '●' : '○'} ${item.label}`
+      ? `${item.selected ? '●' : '○'} ${item.label}`
       : `${item.label}${item.value ? `: ${item.value}` : ''}`;
   })()));
   return WorkspacePane({
@@ -269,8 +273,11 @@ function choiceLabel(state, item, theme, animationFrame) {
     return `${selected ? '●' : '○'} ${item.label} ${color(theme, 'textMuted', `· ${status}`)} ›`;
   }
   if (!item.settingId) return item.label;
-  const selected = item.selected || state.settings[item.settingId] === item.value;
-  return `${selected ? '●' : '○'} ${item.label}`;
+  return `${item.selected ? '●' : '○'} ${item.label}`;
+}
+
+function choiceSelected(state, item) {
+  return Boolean(item.selected || (item.settingId && state.settings[item.settingId] === item.value));
 }
 
 

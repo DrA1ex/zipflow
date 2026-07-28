@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.8.2 — Reliable LLM settings and replay navigation
+
+- Keep localized radio options selected by comparing their internal values before translating labels and display values.
+- Show Settings disabled reasons only when the corresponding parameter or option is actually unavailable.
+- Make Space select a radio option without leaving its choice list; Enter and Right retain the existing select-and-return behavior.
+- Route idle Ctrl+C from Settings and model-test workspaces back to the main screen, while preserving active-operation cancellation and allowing Ctrl+C to exit only from a main screen.
+- Add an in-place completed-output disclosure to historical model replay, with mouse and E-key expand/collapse controls while D continues to copy full diagnostics.
+- Add regression coverage for Russian Adaptive selection, accurate help, radio-key behavior, Ctrl+C routing, and replay-output disclosure.
+
 ## 1.8.1 — Semantic LLM results and lazy prompt rendering
 
 - Color structured LLM labels semantically while keeping their values in the normal text color: decisions and confidence use the accent, evidence/reasons use a neutral title color, risks use danger, and conditions use warning.

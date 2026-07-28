@@ -196,7 +196,7 @@ export async function handleSettingsKey(controller, key) {
   if (isPlainEnter(key) || key.name === 'space' || key.name === 'right') {
     if (panel.focus === 'categories') return enterCategory(controller);
     if (panel.focus === 'parameters') return activateParameter(controller);
-    return activateChoice(controller);
+    return activateChoice(controller, { stayInChoices: key.name === 'space' });
   }
   return true;
 }
@@ -249,27 +249,31 @@ function showSettingsHelp(controller) {
     const parameter = panelParameter(state) ?? definition;
     title = parameter.label ?? definition.label;
     addSection(parameter.description, parameter.help);
-    if (parameter.disabledReason) addSection(parameter.disabledReason);
+    if (settingsItemUnavailable(parameter) && parameter.disabledReason) addSection(parameter.disabledReason);
   } else if (panel.focus === 'choices') {
     const parameter = panelParameter(state);
     const choices = currentChoices(state);
     const choice = choices[currentChoiceIndex(state, choices, parameter)] ?? null;
     title = parameter?.label ?? definition.label;
     addSection(parameter?.description, parameter?.help);
-    if (parameter?.disabledReason) addSection(parameter.disabledReason);
+    if (settingsItemUnavailable(parameter) && parameter.disabledReason) addSection(parameter.disabledReason);
     addSection(choice?.description, choice?.help);
-    if (choice?.disabledReason) addSection(choice.disabledReason);
+    if (settingsItemUnavailable(choice) && choice.disabledReason) addSection(choice.disabledReason);
   } else if (panel.focus?.startsWith('model-config')) {
     const item = settingsModelView(state)?.activeParameter ?? definition;
     title = item.label ?? definition.label;
     addSection(item.description, item.help);
-    if (item.disabledReason) addSection(item.disabledReason);
+    if (settingsItemUnavailable(item) && item.disabledReason) addSection(item.disabledReason);
   }
   addSection(settingsPageHelp(state, definition));
   const lines = sections.length
     ? sections.flatMap((section, index) => [...(index ? [''] : []), ...section])
     : ['No additional help is available.'];
   return openHelpOverlay(controller, { title: `Help · ${title}`, lines });
+}
+
+function settingsItemUnavailable(item) {
+  return Boolean(item?.disabled || item?.blocked || item?.loading);
 }
 
 export async function selectSetting(controller, index) {
@@ -518,7 +522,7 @@ async function activateParameter(controller) {
   controller.invalidate();
   return true;
 }
-async function activateChoice(controller) {
+async function activateChoice(controller, { stayInChoices = false } = {}) {
   const { state } = controller;
   const parameter = panelParameter(state);
   const choices = currentChoices(state);
@@ -582,13 +586,13 @@ async function activateChoice(controller) {
       resetModelCache(state.settingsPanel);
       if (option.value !== 'disabled') await refreshModels(controller, { quiet: true });
     }
-    return returnAfterChoice(controller, parameter.id, `${option.label} selected`);
+    return returnAfterChoice(controller, parameter.id, `${option.label} selected`, { stayInChoices });
   }
   return true;
 }
-function returnAfterChoice(controller, parameterId, status) {
+function returnAfterChoice(controller, parameterId, status, { stayInChoices = false } = {}) {
   const { state } = controller;
-  if (isDirectDefinition(currentDefinition(state))) {
+  if (stayInChoices || isDirectDefinition(currentDefinition(state))) {
     state.settingsPanel.focus = 'choices';
     state.settingsPanel.activeParameterId = parameterId;
     const parameter = panelParameter(state);

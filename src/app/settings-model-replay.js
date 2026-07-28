@@ -26,6 +26,10 @@ export async function handleReplayDispatch(controller, action) {
     controller.invalidate();
     return true;
   }
+  if (action.type === 'model-replay-toggle-output') {
+    if (toggleReplayOutput(controller.state.settingsPanel?.modelTestWorkspace)) controller.invalidate();
+    return true;
+  }
   if (action.type === 'model-prompt-redraw') {
     controller.invalidate();
     return true;
@@ -170,12 +174,27 @@ export async function handleModelReplayWorkspaceKey(controller, key) {
     controller.toast(copied ? 'Replay result copied' : 'Clipboard transfer unavailable', copied ? 'success' : 'warning');
     return true;
   }
+  if (key.printable && key.text?.toLowerCase() === 'e') {
+    if (toggleReplayOutput(workspace)) controller.invalidate();
+    return true;
+  }
   if (key.printable && key.text?.toLowerCase() === 'd') {
     const copied = await copyZipflowText(replayDiagnosticsText(workspace), { output: controller.runtime?.output });
     controller.toast(copied ? 'Replay diagnostics copied' : 'Clipboard transfer unavailable', copied ? 'success' : 'warning');
     return true;
   }
   return true;
+}
+
+export function toggleReplayOutput(workspace) {
+  if (!workspace?.result || !workspace.blocks?.some(hasCompletedReplayOutput)) return false;
+  workspace.outputExpanded = !workspace.outputExpanded;
+  touchReplay(workspace);
+  return true;
+}
+
+function hasCompletedReplayOutput(block) {
+  return block?.status === 'done' && Boolean(replayStreamText(block, 'reasoning') || replayStreamText(block, 'content'));
 }
 
 async function handlePreviewKey(controller, workspace, key) {

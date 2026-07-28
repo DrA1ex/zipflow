@@ -29,6 +29,7 @@ test('Ctrl+C semantics cancel the active operation before an idle interrupt exit
 
 test('an idle controller Ctrl+C exits, while an active operation keeps the app open', async () => {
   const state = createInitialState();
+  state.screen = 'home';
   const exits = [];
   const controller = new ZipflowController(state);
   controller.attachRuntime({ invalidate() {}, exit: (code) => exits.push(code) });
@@ -37,6 +38,28 @@ test('an idle controller Ctrl+C exits, while an active operation keeps the app o
   assert.deepEqual(exits, []);
   assert.equal(operation.signal.aborted, true);
   operation.finish();
+  await controller.handleKey({ name: 'c', ctrl: true });
+  assert.deepEqual(exits, [0]);
+});
+
+test('idle Ctrl+C returns model testing to the main screen before a second Ctrl+C exits', async () => {
+  const state = createInitialState();
+  state.screen = 'settings';
+  state.settingsPanel = {
+    previous: { screen: 'home', menuItems: [{ id: 'exit', label: 'Exit' }], selectedIndex: 0, status: 'Ready' },
+    modelTestWorkspace: {
+      mode: 'progress', running: false, status: 'Replay completed', result: {}, blocks: [],
+    },
+  };
+  const exits = [];
+  const controller = new ZipflowController(state);
+  controller.attachRuntime({ invalidate() {}, exit: (code) => exits.push(code) });
+
+  await controller.handleKey({ name: 'c', ctrl: true });
+  assert.deepEqual(exits, []);
+  assert.equal(state.screen, 'home');
+  assert.equal(state.settingsPanel, null);
+
   await controller.handleKey({ name: 'c', ctrl: true });
   assert.deepEqual(exits, [0]);
 });

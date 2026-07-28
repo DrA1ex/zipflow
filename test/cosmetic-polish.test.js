@@ -149,6 +149,42 @@ test('historical replay preserves manual scrolling and exposes a latest-output i
   assert.match(output, /new replay block/);
 });
 
+test('completed replay output expands from its disclosure row and with E', async () => {
+  const state = settingsState();
+  const result = { summary: ['Done'], commitMessage: 'fix: replay output' };
+  state.settingsPanel.modelTestWorkspace = {
+    mode: 'progress', runId: 'run-output', archiveName: 'update.zip', running: false,
+    status: 'Replay completed', elapsedMs: 800, result,
+    blocks: [
+      { id: 'response', title: 'Response', lines: [], reasoning: 'Internal analysis', content: 'Raw response', status: 'done', streaming: false },
+      { id: 'parsed-result', title: 'Parsed result', lines: [], result, status: 'done', streaming: false },
+    ],
+    scroll: 0, maxScroll: 0, follow: true, unread: 0, unreadBlockIds: new Set(),
+  };
+  const controller = new ZipflowController(state);
+  controller.invalidate = () => {};
+
+  let tree = renderModelReplayWorkspace({ content: Text('BACKGROUND'), state, width: 100, height: 28, theme: themes.ocean });
+  let output = stripAnsi(renderToString(tree, { width: 100, height: 28 }));
+  assert.match(output, /Model output hidden · click or press E to expand/);
+  assert.doesNotMatch(output, /Raw response/);
+
+  const disclosure = findNode(tree.props.manager.top().node, (node) => node.props?.pointerId === 'zipflow:model-replay-output-disclosure');
+  assert.equal(typeof disclosure?.props?.onClick, 'function');
+  disclosure.props.onClick({ preventDefault() {}, stopPropagation() {} });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(state.settingsPanel.modelTestWorkspace.outputExpanded, true);
+
+  tree = renderModelReplayWorkspace({ content: Text('BACKGROUND'), state, width: 100, height: 28, theme: themes.ocean });
+  output = stripAnsi(renderToString(tree, { width: 100, height: 28 }));
+  assert.match(output, /Model output shown · click or press E to collapse/);
+  assert.match(output, /Internal analysis/);
+  assert.match(output, /Raw response/);
+
+  await handleModelReplayWorkspaceKey(controller, { printable: true, text: 'e', name: 'e' });
+  assert.equal(state.settingsPanel.modelTestWorkspace.outputExpanded, false);
+});
+
 
 test('workflow check toggles keep focus on the same checkbox', () => {
   const state = createInitialState();

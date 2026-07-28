@@ -282,7 +282,11 @@ export class ZipflowController {
   async handleInterrupt() {
     const result = await this.operations.interrupt();
     if (!result.handled) {
-      this.exit(0);
+      if (this.state.screen === 'home' || this.state.screen === 'new-project') this.exit(0);
+      else if (isSettingsScreen(this.state.screen)) {
+        closeSettings(this);
+        if (this.state.screen !== 'home' && this.state.screen !== 'new-project') this.showHome();
+      } else this.showHome();
       return;
     }
     const operation = result.operation;
