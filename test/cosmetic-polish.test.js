@@ -149,42 +149,75 @@ test('historical replay preserves manual scrolling and exposes a latest-output i
   assert.match(output, /new replay block/);
 });
 
-test('completed replay output expands from its disclosure row and with E', async () => {
+test('completed replay output expands per focused block by click and E', async () => {
   const state = settingsState();
   const result = { summary: ['Done'], commitMessage: 'fix: replay output' };
+  const response = { id: 'response', title: 'Response', lines: [], reasoning: 'Response analysis', content: 'First raw response', status: 'done', streaming: false };
+  const repair = { id: 'repair', title: 'Repair', lines: ['Repair attempt 1'], reasoning: 'Repair analysis', content: 'Second raw response', status: 'done', streaming: false };
   state.settingsPanel.modelTestWorkspace = {
     mode: 'progress', runId: 'run-output', archiveName: 'update.zip', running: false,
     status: 'Replay completed', elapsedMs: 800, result,
     blocks: [
-      { id: 'response', title: 'Response', lines: [], reasoning: 'Internal analysis', content: 'Raw response', status: 'done', streaming: false },
+      response,
+      repair,
       { id: 'parsed-result', title: 'Parsed result', lines: [], result, status: 'done', streaming: false },
     ],
-    scroll: 0, maxScroll: 0, follow: true, unread: 0, unreadBlockIds: new Set(),
+    scroll: 0, maxScroll: 0, follow: false, unread: 0, unreadBlockIds: new Set(),
+    focusedBlockId: null, renderRevision: 0,
   };
   const controller = new ZipflowController(state);
   controller.invalidate = () => {};
+  const workspace = state.settingsPanel.modelTestWorkspace;
+
+  await handleModelReplayWorkspaceKey(controller, { printable: true, text: 'e', name: 'e' });
+  assert.equal(response.outputExpanded, undefined, 'E must do nothing until an output block is focused');
+  assert.equal(repair.outputExpanded, undefined);
 
   let tree = renderModelReplayWorkspace({ content: Text('BACKGROUND'), state, width: 100, height: 28, theme: themes.ocean });
   let output = stripAnsi(renderToString(tree, { width: 100, height: 28 }));
-  assert.match(output, /Model output hidden · click or press E to expand/);
-  assert.doesNotMatch(output, /Raw response/);
+  assert.match(output, /▸ ✓ RESPONSE/);
+  assert.match(output, /▸ ✓ REPAIR/);
+  assert.match(output, /Model output hidden · click block to focus and expand/);
+  assert.doesNotMatch(output, /First raw response|Second raw response/);
 
-  const disclosure = findNode(tree.props.manager.top().node, (node) => node.props?.pointerId === 'zipflow:model-replay-output-disclosure');
-  assert.equal(typeof disclosure?.props?.onClick, 'function');
-  disclosure.props.onClick({ preventDefault() {}, stopPropagation() {} });
+  let pane = findNode(tree.props.manager.top().node, (node) => node.props?.pointerId === 'zipflow:model-replay-workspace');
+  assert.equal(typeof pane?.props?.onClick, 'function');
+  let responseRow = workspace.replayLineCache.blockRanges.find((item) => item.id === 'response').start;
+  pane.props.onClick({ localY: responseRow - workspace.scroll, preventDefault() {}, stopPropagation() {} });
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(state.settingsPanel.modelTestWorkspace.outputExpanded, true);
+  assert.equal(workspace.focusedBlockId, 'response');
+  assert.equal(response.outputExpanded, true);
+  assert.equal(repair.outputExpanded, undefined);
 
   tree = renderModelReplayWorkspace({ content: Text('BACKGROUND'), state, width: 100, height: 28, theme: themes.ocean });
   output = stripAnsi(renderToString(tree, { width: 100, height: 28 }));
-  assert.match(output, /Model output shown · click or press E to collapse/);
-  assert.match(output, /Internal analysis/);
-  assert.match(output, /Raw response/);
+  assert.match(output, /▾ ✓ RESPONSE/);
+  assert.match(output, /Model output shown · focused · click block or press E to collapse/);
+  assert.match(output, /Response analysis/);
+  assert.match(output, /First raw response/);
+  assert.doesNotMatch(output, /Second raw response/);
+
+  pane = findNode(tree.props.manager.top().node, (node) => node.props?.pointerId === 'zipflow:model-replay-workspace');
+  const repairRow = workspace.replayLineCache.blockRanges.find((item) => item.id === 'repair').start + 1;
+  pane.props.onClick({ localY: repairRow - workspace.scroll, preventDefault() {}, stopPropagation() {} });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(workspace.focusedBlockId, 'repair');
+  assert.equal(response.outputExpanded, true, 'opening another block must not collapse the first one');
+  assert.equal(repair.outputExpanded, true);
 
   await handleModelReplayWorkspaceKey(controller, { printable: true, text: 'e', name: 'e' });
-  assert.equal(state.settingsPanel.modelTestWorkspace.outputExpanded, false);
-});
+  assert.equal(response.outputExpanded, true);
+  assert.equal(repair.outputExpanded, false, 'E must toggle only the focused output block');
 
+  tree = renderModelReplayWorkspace({ content: Text('BACKGROUND'), state, width: 100, height: 28, theme: themes.ocean });
+  pane = findNode(tree.props.manager.top().node, (node) => node.props?.pointerId === 'zipflow:model-replay-workspace');
+  responseRow = workspace.replayLineCache.blockRanges.find((item) => item.id === 'response').start + 3;
+  pane.props.onClick({ localY: responseRow - workspace.scroll, preventDefault() {}, stopPropagation() {} });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(workspace.focusedBlockId, 'response');
+  assert.equal(response.outputExpanded, false, 'clicking response content should collapse that same block');
+  assert.equal(repair.outputExpanded, false);
+});
 
 test('workflow check toggles keep focus on the same checkbox', () => {
   const state = createInitialState();

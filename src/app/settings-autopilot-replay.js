@@ -32,8 +32,8 @@ export function startHistoricalAutopilotSimulation(controller, runId) {
     archiveName: path.basename(String(run.archivePath || 'archive update')),
     previewIndex: 0, running: false, status: 'Ready to simulate',
     startedAt: null, elapsedMs: 0, blocks: [], scroll: 0, maxScroll: 0,
-    follow: true, unread: 0, unreadBlockIds: new Set(),
-    result: null, error: null, abortController: null,
+    follow: true, unread: 0, unreadBlockIds: new Set(), renderRevision: 0,
+    focusedBlockId: null, result: null, error: null, abortController: null,
     prompts: [], tokenUsage: emptyLlmUsageCounters(),
   };
   controller.invalidate();
@@ -49,7 +49,8 @@ export async function beginHistoricalAutopilotSimulation(controller, { requestDe
   Object.assign(workspace, {
     mode: 'progress', running: true, status: 'Preparing autopilot simulation',
     startedAt: Date.now(), elapsedMs: 0, blocks: [], scroll: 0, maxScroll: 0,
-    follow: true, unread: 0, unreadBlockIds: new Set(), result: null, error: null,
+    follow: true, unread: 0, unreadBlockIds: new Set(), renderRevision: 0,
+    focusedBlockId: null, result: null, error: null,
     abortController: { abort: () => operation.abort() },
     prompts: [], tokenUsage: emptyLlmUsageCounters(),
   });
@@ -371,6 +372,7 @@ function pushBlock(workspace, block) {
   const index = workspace.blocks.findIndex((item) => item.id === block.id);
   if (index >= 0) workspace.blocks[index] = { ...workspace.blocks[index], ...block };
   else workspace.blocks.push({ lines: [], reasoning: '', content: '', streaming: false, status: 'pending', ...block });
+  workspace.renderRevision = (workspace.renderRevision ?? 0) + 1;
   if (workspace.follow === false) {
     workspace.unreadBlockIds ??= new Set();
     workspace.unreadBlockIds.add(block.id);
@@ -438,7 +440,10 @@ function updateSimulationEvent(controller, event) {
   } else if (event.type === 'complete') {
     const id = `stream:${event.simulationMode}:${event.simulationGate}`;
     const block = workspace.blocks.find((item) => item.id === id);
-    if (block) Object.assign(block, { status: 'done', streaming: false });
+    if (block) {
+      Object.assign(block, { status: 'done', streaming: false });
+      workspace.renderRevision = (workspace.renderRevision ?? 0) + 1;
+    }
   } else if (event.type === 'request') {
     workspace.status = `${event.simulationMode} · ${event.simulationGate} · contacting model`;
   } else if (event.type === 'token-usage') {

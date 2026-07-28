@@ -198,8 +198,9 @@ test('Decision mode becomes available immediately for a compatible selected inst
   assert.equal(autonomyConfigurationAvailable(state), true);
 });
 
-test('process SIGINT cancels an active operation and exits only when idle', async () => {
-  const { controller } = fixtureController();
+test('process SIGINT cancels an active operation, returns home when idle, and exits from home', async () => {
+  const { state, controller } = fixtureController();
+  state.screen = 'run-history';
   const processEvents = new EventEmitter();
   const exits = [];
   controller.runtime = { exit: (code) => exits.push(code), invalidate: () => {} };
@@ -209,7 +210,12 @@ test('process SIGINT cancels an active operation and exits only when idle', asyn
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(operation.signal.aborted, true);
   assert.deepEqual(exits, []);
+  assert.equal(state.screen, 'run-history');
   operation.finish();
+  processEvents.emit('SIGINT');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(state.screen, 'home');
+  assert.deepEqual(exits, []);
   processEvents.emit('SIGINT');
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(exits, [0]);

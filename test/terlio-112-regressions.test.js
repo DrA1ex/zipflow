@@ -108,7 +108,7 @@ test('completed replay groups parsed fields without a nested output frame', () =
   assert.match(output, /COMMIT MESSAGE/);
   assert.match(output, /fix: simplify replay modal/);
   assert.match(output, /ASSESSMENT/);
-  assert.match(output, /Model output hidden · click or press E to expand/);
+  assert.match(output, /Model output hidden · click block to focus and expand/);
   assert.doesNotMatch(output, /Summary:/);
   assert.doesNotMatch(output, /REPLAY OUTPUT/);
   assert.doesNotMatch(output, /Raw response/);

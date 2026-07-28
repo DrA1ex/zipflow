@@ -96,23 +96,34 @@ function renderReplayPreview(state, workspace, width, height, theme) {
 
 function renderReplayProgress(state, workspace, width, height, theme, animationFrame) {
   const innerWidth = Math.max(20, width - 4);
-  const hasOutputDisclosure = Boolean(workspace.result && workspace.blocks.some(hasCompletedReplayOutput));
-  const bodyHeight = Math.max(4, height - 7 - (hasOutputDisclosure ? 1 : 0));
-  const lines = replayLineSource(workspace, theme, innerWidth);
-  workspace.maxScroll = Math.max(0, lines.length - bodyHeight);
+  const hasExpandableOutput = Boolean(workspace.result && workspace.blocks.some(hasCompletedReplayOutput));
+  const hasUnreadIndicator = Boolean(workspace.unread && workspace.follow === false);
+  const bodyHeight = Math.max(4, height - 6 - (hasUnreadIndicator ? 1 : 0));
+  const document = replayLineDocument(workspace, theme, innerWidth);
+  workspace.maxScroll = Math.max(0, document.source.length - bodyHeight);
   workspace.scroll = clamp(workspace.scroll ?? 0, 0, workspace.maxScroll);
   if (workspace.follow !== false) {
     workspace.scroll = workspace.maxScroll;
     clearReplayUnread(workspace);
   }
   const pane = ScrollPane({
-    lines,
+    lines: document.source,
     width: innerWidth,
     height: bodyHeight,
     scroll: workspace.scroll,
     border: false,
     footer: false,
     pointerId: 'zipflow:model-replay-workspace',
+    onClick: (event) => {
+      const localRow = Math.max(0, Math.trunc(Number(event.localY) || 0));
+      const absoluteRow = (workspace.scroll ?? 0) + localRow;
+      const range = document.blockRanges.find((item) => absoluteRow >= item.start && absoluteRow < item.end);
+      const block = workspace.blocks.find((item) => item.id === range?.id);
+      if (!workspace.result || !hasCompletedReplayOutput(block)) return;
+      state.dispatch?.({ type: 'model-replay-toggle-output', blockId: range.id });
+      event.preventDefault();
+      event.stopPropagation?.();
+    },
     onWheel: (event) => {
       state.dispatch?.({ type: 'model-replay-scroll', delta: wheelScrollDelta(event) });
       event.preventDefault();
@@ -121,7 +132,7 @@ function renderReplayProgress(state, workspace, width, height, theme, animationF
   });
   const footer = workspace.running
     ? `↑/↓ scroll · PgUp/PgDn · End latest${workspace.prompts?.length ? ' · P prompts' : ''} · Esc cancel`
-    : `↑/↓ scroll · PgUp/PgDn${workspace.prompts?.length ? ' · P prompts' : ''}${hasOutputDisclosure ? ' · E output' : ''} · C copy · D diagnostics · Esc close`;
+    : `↑/↓ scroll · PgUp/PgDn${workspace.prompts?.length ? ' · P prompts' : ''}${hasExpandableOutput ? ' · E focused output' : ''} · C copy · D diagnostics · Esc close`;
   return replayFrame({
     width,
     height,
@@ -131,28 +142,11 @@ function renderReplayProgress(state, workspace, width, height, theme, animationF
       replayStatus(workspace, theme, animationFrame),
       Text(''),
       pane,
-      replayOutputDisclosure(state, workspace, theme),
-      replayUnreadIndicator(state, workspace, theme),
+      ...(hasUnreadIndicator ? [replayUnreadIndicator(state, workspace, theme)] : []),
     ],
     footer: footerWithPosition(t(state, footer), workspace, innerWidth, theme),
     title: t(state, workspace.kind === 'autopilot' ? 'HISTORICAL AUTOPILOT SIMULATION' : 'HISTORICAL MODEL REPLAY'),
   });
-}
-
-function replayOutputDisclosure(state, workspace, theme) {
-  if (!workspace.result || !workspace.blocks.some(hasCompletedReplayOutput)) return Text('');
-  const expanded = Boolean(workspace.outputExpanded);
-  return PointerRegion({
-    pointerId: 'zipflow:model-replay-output-disclosure',
-    pointerWidth: 'fill',
-    onClick: (event) => {
-      state.dispatch?.({ type: 'model-replay-toggle-output' });
-      event.preventDefault();
-      event.stopPropagation?.();
-    },
-  }, Text(color(theme, expanded ? 'accent' : 'textMuted', expanded
-    ? '▾ Model output shown · click or press E to collapse'
-    : '▸ Model output hidden · click or press E to expand'), { wrap: false }));
 }
 
 function hasCompletedReplayOutput(block) {
@@ -187,7 +181,7 @@ function replayStatus(workspace, theme, animationFrame) {
 }
 
 function replayUnreadIndicator(state, workspace, theme) {
-  if (!workspace.unread || workspace.follow !== false) return Text('');
+  if (!workspace.unread || workspace.follow !== false) return null;
   return PointerRegion({
     pointerId: 'zipflow:model-replay-unread',
     pointerWidth: 'fill',
@@ -207,13 +201,20 @@ function footerWithPosition(hints, workspace, width, theme) {
   return `${color(theme, 'textMuted', left)}${spacing}${color(theme, 'textMuted', position)}`;
 }
 
-function replayLineSource(workspace, theme, width) {
+function replayLineDocument(workspace, theme, width) {
   const revision = workspace.renderRevision ?? 0;
   const cached = workspace.replayLineCache;
-  if (cached && cached.revision === revision && cached.width === width && cached.theme === theme) return cached.source;
-  const source = createTextLineSource(workspace.blocks.flatMap((block) => blockLines(block, workspace, theme, width)));
-  workspace.replayLineCache = { revision, width, theme, source };
-  return source;
+  if (cached && cached.revision === revision && cached.width === width && cached.theme === theme) return cached;
+  const lines = [];
+  const blockRanges = [];
+  for (const block of workspace.blocks) {
+    const start = lines.length;
+    lines.push(...blockLines(block, workspace, theme, width));
+    blockRanges.push({ id: block.id, start, end: lines.length });
+  }
+  const document = { revision, width, theme, source: createTextLineSource(lines), blockRanges };
+  workspace.replayLineCache = document;
+  return document;
 }
 
 function blockLines(block, workspace, theme, width) {
@@ -223,13 +224,22 @@ function blockLines(block, workspace, theme, width) {
     : block.status === 'active' || block.streaming ? 'accent'
       : block.status === 'done' ? 'success' : 'textMuted';
   const marker = block.status === 'error' ? '×' : block.status === 'done' ? '✓' : block.streaming || block.status === 'active' ? '●' : '○';
-  const compactCompletedOutput = Boolean(workspace.result && block.status === 'done' && (block.reasoning || block.content));
+  const expandableOutput = Boolean(workspace.result && hasCompletedReplayOutput(block));
+  const expanded = expandableOutput && Boolean(block.outputExpanded);
+  const focused = expandableOutput && workspace.focusedBlockId === block.id;
+  const disclosure = expandableOutput ? `${expanded ? '▾' : '▸'} ` : '';
+  const interactionHint = focused
+    ? `focused · click block or press E to ${expanded ? 'collapse' : 'expand'}`
+    : `click block to focus and ${expanded ? 'collapse' : 'expand'}`;
   return [
-    color(theme, token, `${marker} ${String(block.title ?? '').toUpperCase()}`),
+    color(theme, focused ? 'accent' : token, `${disclosure}${marker} ${String(block.title ?? '').toUpperCase()}`),
     ...block.lines.flatMap((line) => wrapReplayDetailLine(line, width, theme)),
-    ...(compactCompletedOutput && !workspace.outputExpanded
-      ? [`  ${color(theme, 'textMuted', 'Model output parsed successfully.')}`]
-      : blockOutputLines(block, theme, width, { full: compactCompletedOutput && workspace.outputExpanded })),
+    ...(expandableOutput
+      ? [
+        `  ${color(theme, expanded ? 'accent' : 'textMuted', `Model output ${expanded ? 'shown' : 'hidden'} · ${interactionHint}`)}`,
+        ...(expanded ? blockOutputLines(block, theme, width, { full: true }) : []),
+      ]
+      : blockOutputLines(block, theme, width)),
     '',
   ];
 }

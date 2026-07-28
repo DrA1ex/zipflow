@@ -27,7 +27,7 @@ export async function handleReplayDispatch(controller, action) {
     return true;
   }
   if (action.type === 'model-replay-toggle-output') {
-    if (toggleReplayOutput(controller.state.settingsPanel?.modelTestWorkspace)) controller.invalidate();
+    if (toggleReplayOutput(controller.state.settingsPanel?.modelTestWorkspace, action.blockId)) controller.invalidate();
     return true;
   }
   if (action.type === 'model-prompt-redraw') {
@@ -63,7 +63,7 @@ export function startHistoricalModelReplay(controller, runId) {
     previewIndex: 0, running: false, status: 'Ready to replay',
     startedAt: null, elapsedMs: 0, blocks: [], scroll: 0, maxScroll: 0,
     follow: true, unread: 0, unreadBlockIds: new Set(), renderRevision: 0,
-    result: null, error: null, errorCode: null, abortController: null,
+    focusedBlockId: null, result: null, error: null, errorCode: null, abortController: null,
     requestedTasks: llmTasks(state.settings), prompts: [], tokenUsage: emptyLlmUsageCounters(),
   };
   controller.invalidate();
@@ -85,7 +85,7 @@ export async function beginHistoricalModelReplay(controller) {
     mode: 'progress', running: true, status: 'Preparing historical replay',
     startedAt: Date.now(), elapsedMs: 0, blocks: [], scroll: 0, maxScroll: 0,
     follow: true, unread: 0, unreadBlockIds: new Set(), renderRevision: 0,
-    result: null, error: null, errorCode: null, abortController: { abort: () => operation.abort() },
+    focusedBlockId: null, result: null, error: null, errorCode: null, abortController: { abort: () => operation.abort() },
     prompts: [], tokenUsage: emptyLlmUsageCounters(),
   });
   state.settingsTestAbortController = { abort: () => operation.abort() };
@@ -186,9 +186,12 @@ export async function handleModelReplayWorkspaceKey(controller, key) {
   return true;
 }
 
-export function toggleReplayOutput(workspace) {
-  if (!workspace?.result || !workspace.blocks?.some(hasCompletedReplayOutput)) return false;
-  workspace.outputExpanded = !workspace.outputExpanded;
+export function toggleReplayOutput(workspace, blockId = workspace?.focusedBlockId) {
+  if (!workspace?.result || !blockId) return false;
+  const block = workspace.blocks?.find((item) => item.id === blockId);
+  if (!hasCompletedReplayOutput(block)) return false;
+  workspace.focusedBlockId = block.id;
+  block.outputExpanded = !block.outputExpanded;
   touchReplay(workspace);
   return true;
 }

@@ -59,8 +59,9 @@ test('raw Ctrl+C input is consumed and routed before Terlio hard-coded exit hand
   assert.equal(received, '');
 });
 
-test('raw Ctrl+C cancels manual checks and exits only after the operation is idle', async () => {
-  const { controller } = controllerFixture();
+test('raw Ctrl+C cancels manual checks, returns home when idle, and exits from home', async () => {
+  const { state, controller } = controllerFixture();
+  state.screen = 'run-history';
   const exits = [];
   controller.runtime = { exit: (code) => exits.push(code), invalidate: () => {} };
   const input = new EventEmitter();
@@ -73,7 +74,12 @@ test('raw Ctrl+C cancels manual checks and exits only after the operation is idl
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(operation.signal.aborted, true);
   assert.deepEqual(exits, []);
+  assert.equal(state.screen, 'run-history');
   operation.finish();
+  input.emit('data', '\x03');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(state.screen, 'home');
+  assert.deepEqual(exits, []);
   input.emit('data', '\x03');
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(exits, [0]);

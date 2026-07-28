@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.8.3 — Focused replay output and interrupt regressions
+
+- Expand and collapse each completed model-response block independently instead of using one global replay-output disclosure.
+- Make every row of a completed model-output block clickable, keep the clicked block focused, and show a per-block arrow and interaction hint.
+- Limit the E shortcut to the currently focused model-output block; pressing E without a focused output block has no effect.
+- Restore the historical replay footer inside the modal so active runs always keep the Esc cancel hint visible.
+- Align SIGINT and raw Ctrl+C regression coverage with the cancel → main screen → exit sequence while preserving active-operation cancellation priority.
+- Keep historical autopilot replay line caches current while streamed blocks are added or completed.
+
 ## 1.8.2 — Reliable LLM settings and replay navigation
 
 - Keep localized radio options selected by comparing their internal values before translating labels and display values.
