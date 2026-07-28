@@ -78,7 +78,58 @@ function installAndReadVersions(tarball, directory, expectedDependencies) {
   }
   const versionOutput = run(process.execPath, [path.join(installedRoot, 'bin', 'zipflow.js'), '--version'], { cwd: directory }).trim();
   assert.equal(versionOutput, packageJson.version);
+  verifyInstalledClient(directory);
   return versions;
+}
+
+function verifyInstalledClient(directory) {
+  const smokePath = path.join(directory, 'client-smoke.mjs');
+  writeFileSync(smokePath, String.raw`
+import assert from 'node:assert/strict';
+import { once } from 'node:events';
+import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
+import { mkdtemp, rm } from 'node:fs/promises';
+const before = {
+  sigint: process.listenerCount('SIGINT'),
+  sigterm: process.listenerCount('SIGTERM'),
+};
+const { createZipflowClient } = await import('zipflow/client');
+const { getConformanceFixture } = await import('zipflow/protocol');
+const temporary = await mkdtemp(path.join(os.tmpdir(), 'zipflow-packed-client-'));
+const socketPath = path.join(temporary, 'api.sock');
+const token = 'packed-client-authentication-token';
+const server = http.createServer((request, response) => {
+  assert.equal(request.url, '/v1/hello');
+  if (request.headers.authorization !== 'Bearer ' + token) {
+    response.writeHead(401, { 'content-type': 'application/problem+json' });
+    response.end();
+    return;
+  }
+  response.writeHead(200, { 'content-type': 'application/json' });
+  response.end(JSON.stringify(getConformanceFixture('hello')));
+});
+
+try {
+  server.listen(socketPath);
+  await once(server, 'listening');
+  const client = createZipflowClient({ socketPath, token });
+  const hello = await client.hello();
+  assert.equal(hello.apiVersion, '1.0');
+  assert.equal(hello.server.name, 'zipflow');
+  assert.deepEqual({
+    sigint: process.listenerCount('SIGINT'),
+    sigterm: process.listenerCount('SIGTERM'),
+  }, before);
+} finally {
+  const closed = once(server, 'close');
+  server.close();
+  await closed;
+  await rm(temporary, { recursive: true, force: true });
+}
+`);
+  run(process.execPath, [smokePath], { cwd: directory });
 }
 
 

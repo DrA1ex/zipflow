@@ -7,7 +7,7 @@ import { assertSafeProjectPath } from '../security/project-path.js';
 import { throwIfCancelled } from '../operations/manager.js';
 import { copyRegularFileNoFollow } from '../security/safe-file.js';
 import { shortToken } from '../utils/hash.js';
-import { selectedPlanItems } from '../app/plan-selection.js';
+import { keptPlanConflictItems, selectedPlanItems } from '../plan/selection.js';
 import { assertApplySpace } from '../storage/disk-space.js';
 import { getZipflowHome } from '../workflow/store.js';
 
@@ -70,7 +70,7 @@ export async function applyUpdatePlan({ runId, projectPath, plan, decisions = ne
   return {
     backup,
     applied: items,
-    skippedConflicts: plan.conflicts.filter((item) => decisions.get(item.path) === 'keep'),
+    skippedConflicts: keptPlanConflictItems(plan, decisions),
   };
 }
 

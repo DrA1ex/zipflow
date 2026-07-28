@@ -6,6 +6,11 @@
   "bin": {
     "zipflow": "./bin/zipflow.js"
   },
+  "exports": {
+    ".": "./src/index.js",
+    "./client": "./src/client/index.js",
+    "./protocol": "./src/protocol/index.js"
+  },
   "scripts": {
     "start": "node ./bin/zipflow.js",
     "check": "node ./scripts/check-source.js && node ./scripts/check-i18n.js",

@@ -2,7 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { hashText } from '../utils/hash.js';
 import { chmod, mkdir } from 'node:fs/promises';
-import { readJson, writeJsonAtomic } from '../utils/fs.js';
+import { readJson, writeJsonDurableAtomic } from '../utils/fs.js';
 import { canonicalPath } from '../utils/paths.js';
 import { normalizeWorkflow, WORKFLOW_VERSION } from './defaults.js';
 
@@ -52,7 +52,7 @@ export async function saveWorkflow(workflow) {
   await ensureZipflowHome();
   const target = await workflowPathForProject(workflow.projectPath);
   const value = normalizeWorkflow({ ...workflow, updatedAt: new Date().toISOString() });
-  await writeJsonAtomic(target, value);
+  await writeJsonDurableAtomic(target, value);
   return value;
 }
 
