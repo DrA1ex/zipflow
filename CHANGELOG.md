@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.7.1 — Model-test prompt visibility and live token totals
+
+- Refresh the Local LLM token-statistics snapshot as soon as a compatibility test finishes, so returning from **Test selected model** immediately shows the new input/output totals.
+- Capture the exact system and user messages used by the transport and autonomous-decision checks, expose them as collapsed rows, and open either prompt in a scrollable read-only viewer.
+- Clarify historical replay output when the **Change summary** task is disabled: an empty summary is now reported as intentionally disabled rather than as a missing model response.
+- Add regression coverage for live statistics refresh, Codex prompt capture, collapsed prompt disclosure, and summary-disabled replay rendering.
+
 ## 1.7.0 — LLM token statistics and Codex context discovery
 
 - Add optional persistent LLM token accounting for Ollama, LM Studio, OpenAI-compatible servers, and Codex app-server.

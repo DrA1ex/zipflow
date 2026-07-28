@@ -1490,7 +1490,14 @@
     "Reset statistics": "Reset statistics",
     "Permanently clear all accumulated LLM token statistics.": "Permanently clear all accumulated LLM token statistics.",
     "LLM token statistics reset": "LLM token statistics reset",
-    "Could not reset LLM token statistics": "Could not reset LLM token statistics"
+    "Could not reset LLM token statistics": "Could not reset LLM token statistics",
+    "Transport compatibility prompt": "Transport compatibility prompt",
+    "Autonomy protocol prompt": "Autonomy protocol prompt",
+    "Open the exact system and user messages sent by this compatibility test. Prompts stay collapsed until opened.": "Open the exact system and user messages sent by this compatibility test. Prompts stay collapsed until opened.",
+    "No prompt messages were captured.": "No prompt messages were captured.",
+    "↑/↓ scroll · PgUp/PgDn · Home/End · Esc close": "↑/↓ scroll · PgUp/PgDn · Home/End · Esc close",
+    "Summary generation is disabled.": "Summary generation is disabled.",
+    "Model test prompt": "Model test prompt"
   },
   "patterns": [
     {

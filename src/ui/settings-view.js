@@ -10,6 +10,7 @@ import {
   WorkspacePane,
   color,
   renderNode,
+  wrapText,
 } from 'terlio.js';
 import { bindScreenAction, captureScreenActionContext } from '../app/ui-action-context.js';
 import { settingsViewModel } from '../app/settings-panel.js';
@@ -73,6 +74,9 @@ export function renderSettings(state, width, height, theme, animationFrame = 0) 
   });
   if (state.settingsPanel?.modelTestWorkspace) {
     return renderModelReplayWorkspace({ content, state, width, height, theme, animationFrame });
+  }
+  if (state.settingsPanel?.modelPromptView) {
+    return renderModelPromptView({ content, state, width, height, theme });
   }
   if (!view.modal && !view.choiceSearch?.active) return content;
   if (!view.modal && view.choiceSearch?.active) return renderChoiceSearch({ content, state, width, height, theme });
@@ -264,6 +268,59 @@ function choiceLabel(state, item, theme, animationFrame) {
   if (!item.settingId) return item.label;
   const selected = item.selected || state.settings[item.settingId] === item.value;
   return `${selected ? '●' : '○'} ${item.label}`;
+}
+
+
+function renderModelPromptView({ content, state, width, height, theme }) {
+  const view = state.settingsPanel.modelPromptView;
+  const prompt = view.prompt ?? {};
+  const overlayWidth = Math.max(44, Math.min(96, width - 8));
+  const overlayHeight = Math.max(12, Math.min(height - 4, 28));
+  const innerWidth = Math.max(28, overlayWidth - 6);
+  const bodyHeight = Math.max(5, overlayHeight - 6);
+  const lines = promptLines(prompt, innerWidth, theme);
+  view.maxScroll = Math.max(0, lines.length - bodyHeight);
+  view.scroll = Math.max(0, Math.min(view.scroll ?? 0, view.maxScroll));
+  const buildModal = () => Modal({
+    title: ` ${t(state, prompt.label || 'MODEL TEST PROMPT').toUpperCase()} `,
+    children: [
+      Text(color(theme, 'textMuted', `${prompt.provider || 'LLM'} · ${prompt.model || '(unknown model)'} · ${prompt.structured ? 'structured output' : 'text output'} · max ${prompt.maxTokens ?? '?'} tokens`), { wrap: false }),
+      Text(''),
+      ScrollPane({
+        lines,
+        width: innerWidth,
+        height: bodyHeight,
+        scroll: view.scroll,
+        border: false,
+        footer: false,
+        pointerId: 'zipflow:model-test-prompt',
+        onWheel: (event) => {
+          const delta = wheelScrollDelta(event);
+          if (delta) state.dispatch?.({ type: 'settings-wheel', delta, wrap: false });
+          event.preventDefault();
+          event.stopPropagation?.();
+        },
+      }),
+    ],
+    footer: t(state, '↑/↓ scroll · PgUp/PgDn · Home/End · Esc close'),
+  });
+  const manager = {
+    toasts: [],
+    top: () => ({ type: 'modal', width: overlayWidth, opaqueRows: true, shadow: true, render: buildModal }),
+  };
+  return OverlayHost({ content, manager, theme, width, height, dim: true, toastBottomMargin: 0 });
+}
+
+function promptLines(prompt, width, theme) {
+  const lines = [];
+  for (const message of prompt.messages ?? []) {
+    lines.push(color(theme, 'accent', String(message.role || 'user').toUpperCase()));
+    for (const sourceLine of String(message.content ?? '').split(/\r?\n/)) {
+      lines.push(...wrapText(sourceLine, width).map((line) => `  ${line}`));
+    }
+    lines.push('');
+  }
+  return lines.length ? lines : [color(theme, 'textMuted', 'No prompt messages were captured.')];
 }
 
 function renderSettingsModal({ content, modal, state, width, height, theme }) {

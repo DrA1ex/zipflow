@@ -6,6 +6,7 @@ import { listProjectRuns } from '../runs/store.js';
 import { exists } from '../utils/fs.js';
 import { beginHistoricalAutopilotSimulation } from './settings-autopilot-replay.js';
 import { BoundedByteBuffer } from '../utils/byte-buffer.js';
+import { llmTasks } from '../llm/tasks.js';
 import { isPlainEnter } from './editor-enter.js';
 
 
@@ -54,6 +55,7 @@ export function startHistoricalModelReplay(controller, runId) {
     startedAt: null, elapsedMs: 0, blocks: [], scroll: 0, maxScroll: 0,
     follow: true, unread: 0, unreadBlockIds: new Set(), renderRevision: 0,
     result: null, error: null, errorCode: null, abortController: null,
+    requestedTasks: llmTasks(state.settings),
   };
   controller.invalidate();
   return true;

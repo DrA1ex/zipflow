@@ -9,6 +9,9 @@ import {
 } from '../src/llm/token-stats.js';
 import { DEFAULT_SETTINGS, normalizeSettings } from '../src/settings/store.js';
 import { settingsDefinitions, settingsParameters } from '../src/app/settings-options.js';
+import { createInitialState } from '../src/app/state.js';
+import { ZipflowController } from '../src/app/controller.js';
+import { testSelectedModel } from '../src/app/settings-model-check.js';
 
 test('token usage normalization reads Codex last-turn usage and estimates missing metadata', () => {
   assert.deepEqual(normalizeCompletionUsage({
@@ -134,6 +137,49 @@ test('Local LLM settings show token statistics only when tracking is enabled', (
   parameters = settingsParameters(state, definition);
   assert.equal(parameters.some((item) => item.id === 'llmTokenStats'), false);
 });
+
+
+test('model compatibility test refreshes the visible token-statistics summary before returning', async () => withTokenStatsHome(async () => {
+  let chatCalls = 0;
+  const fetchImpl = async (url) => {
+    if (url.endsWith('/api/ps')) return jsonResponse({ models: [{ model: 'qwen', context_length: 8192 }] });
+    if (url.endsWith('/api/show')) return jsonResponse({ parameters: 'num_ctx 8192', model_info: { 'qwen.context_length': 8192 } });
+    if (url.endsWith('/api/chat')) {
+      chatCalls += 1;
+      return jsonResponse({
+        message: { content: chatCalls === 1 ? 'ZIPFLOW_COMPATIBILITY_OK' : JSON.stringify({
+          schemaVersion: 1, gate: 'compatibility-decision', action: 'continue', targetId: null,
+          confidence: 1, summary: 'Protocol works.', evidence: [], risks: [], conditions: [],
+        }) },
+        done: true,
+        prompt_eval_count: chatCalls === 1 ? 7 : 13,
+        eval_count: chatCalls === 1 ? 2 : 5,
+      });
+    }
+    throw new Error(`Unexpected URL: ${url}`);
+  };
+  const state = createInitialState();
+  state.settings = { ...DEFAULT_SETTINGS, llmProvider: 'ollama', llmModel: 'qwen', llmTrackTokenUsage: true };
+  state.settingsPanel = { tokenStats: emptyLlmTokenStats(), tokenStatsError: null };
+  const controller = new ZipflowController(state);
+  controller.invalidate = () => {};
+
+  assert.equal(await testSelectedModel(controller, { fetchImpl }), true);
+  assert.deepEqual(state.settingsPanel.tokenStats.totals, {
+    requests: 2, inputTokens: 20, outputTokens: 7, exactRequests: 2, estimatedRequests: 0,
+  });
+  const definition = settingsDefinitions(state).find((item) => item.id === 'localLlm');
+  const row = settingsParameters(state, definition).find((item) => item.id === 'llmTokenStats');
+  assert.equal(row.value, '20 in · 7 out');
+  state.settingsPanel.subpage = 'llmModelTests';
+  const promptRows = settingsParameters(state, definition).filter((item) => item.action === 'model-test-prompt-view');
+  assert.deepEqual(promptRows.map((item) => item.label), ['Transport compatibility prompt', 'Autonomy protocol prompt']);
+  assert.ok(promptRows.every((item) => /2 messages/.test(item.value)));
+}));
+
+function jsonResponse(value, status = 200) {
+  return new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
+}
 
 async function withTokenStatsHome(callback) {
   const previous = process.env.ZIPFLOW_HOME;

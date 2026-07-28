@@ -1490,7 +1490,14 @@
     "Reset statistics": "Сбросить статистику",
     "Permanently clear all accumulated LLM token statistics.": "Безвозвратно удалить всю накопленную статистику токенов LLM.",
     "LLM token statistics reset": "Статистика токенов LLM сброшена",
-    "Could not reset LLM token statistics": "Не удалось сбросить статистику токенов LLM"
+    "Could not reset LLM token statistics": "Не удалось сбросить статистику токенов LLM",
+    "Transport compatibility prompt": "Промпт проверки транспорта",
+    "Autonomy protocol prompt": "Промпт протокола автономности",
+    "Open the exact system and user messages sent by this compatibility test. Prompts stay collapsed until opened.": "Открыть точные системные и пользовательские сообщения, отправленные этой проверкой. Промпты по умолчанию свернуты.",
+    "No prompt messages were captured.": "Сообщения промпта не были сохранены.",
+    "↑/↓ scroll · PgUp/PgDn · Home/End · Esc close": "↑/↓ — прокрутка · PgUp/PgDn · Home/End · Esc — закрыть",
+    "Summary generation is disabled.": "Создание сводки отключено.",
+    "Model test prompt": "Промпт проверки модели"
   },
   "patterns": [
     {

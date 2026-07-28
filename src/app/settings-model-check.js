@@ -4,6 +4,7 @@ import { resolveLocalLlmSession } from '../llm/session.js';
 import { requestAutonomyDecision } from '../autonomy/decision-engine.js';
 import { updateSettings } from '../settings/store.js';
 import { canonicalModelId, modelIdentityKey } from '../llm/model-identity.js';
+import { loadLlmTokenStats } from '../llm/token-stats.js';
 
 export async function testSelectedModel(controller, { fetchImpl = fetch, completionOptions = {} } = {}) {
   const { state } = controller;
@@ -17,7 +18,22 @@ export async function testSelectedModel(controller, { fetchImpl = fetch, complet
   }
   const operation = controller.beginOperation({ kind: 'model-compatibility-test', label: 'Testing selected model' });
   const startedAt = Date.now();
-  panel.modelTest = { status: 'running', running: true, startedAt };
+  panel.modelTest = { status: 'running', running: true, startedAt, prompts: [] };
+  const prompts = [];
+  const capturePrompt = (label) => (prompt) => {
+    prompts.push({
+      id: `${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${prompts.length + 1}`,
+      label,
+      provider: prompt.provider,
+      model: prompt.model,
+      structured: prompt.structured,
+      maxTokens: prompt.maxTokens,
+      reasoningEffort: prompt.reasoningEffort,
+      messages: prompt.messages,
+    });
+    panel.modelTest.prompts = prompts;
+    controller.invalidate();
+  };
   state.settingsTestAbortController = { abort: () => operation.abort() };
   state.status = `Testing ${settings.llmModel}`;
   controller.invalidate();
@@ -52,6 +68,7 @@ export async function testSelectedModel(controller, { fetchImpl = fetch, complet
       settings,
       fetchImpl,
       onEvent: (event) => { if (event.type === 'stream-open' || event.type === 'chunk') streamSupported = true; },
+      onPrompt: capturePrompt('Transport compatibility prompt'),
     });
     const compatibilityText = String(completion.content || completion.reasoning || '').trim();
     if (!compatibilityText.includes(compatibilityMarker)) {
@@ -72,7 +89,10 @@ export async function testSelectedModel(controller, { fetchImpl = fetch, complet
       signal: operation.signal,
       onEvent: (event) => { if (event.type === 'stream-open' || event.type === 'chunk') streamSupported = true; },
       fetchImpl,
-      completionOptions,
+      completionOptions: {
+        ...completionOptions,
+        onPrompt: capturePrompt('Autonomy protocol prompt'),
+      },
     });
     if (autonomousDecision.action !== 'continue') throw new Error('Autonomous decision protocol returned an unexpected action.');
     const canonicalModel = canonicalModelId(settings.llmProvider, settings.llmModel);
@@ -99,7 +119,7 @@ export async function testSelectedModel(controller, { fetchImpl = fetch, complet
       contextLength: session.profile.contextLength,
       maxContextLength: session.profile.maxContextLength,
       contextSource: session.profile.source,
-      transportProtocol: true, autonomousDecisionProtocol: true,
+      transportProtocol: true, autonomousDecisionProtocol: true, prompts,
     };
     state.status = `Model test passed · ${formatDuration(durationMs)}`;
     controller.toast('Model test passed', 'success', 3, `${streamSupported ? 'Streaming supported' : 'Response received'} · ${formatContext(session.profile.contextLength)}`);
@@ -108,7 +128,7 @@ export async function testSelectedModel(controller, { fetchImpl = fetch, complet
     const cancelled = operation.signal.aborted || error?.name === 'AbortError' || ['ABORT_ERR', 'cancelled'].includes(error?.code);
     panel.modelTest = {
       status: cancelled ? 'cancelled' : 'failed', running: false, durationMs: Date.now() - startedAt,
-      error: cancelled ? 'Compatibility test cancelled.' : error.message, code: error.code ?? null,
+      error: cancelled ? 'Compatibility test cancelled.' : error.message, code: error.code ?? null, prompts,
     };
     if (!cancelled) {
       const canonicalModel = canonicalModelId(settings.llmProvider, settings.llmModel);
@@ -135,6 +155,14 @@ export async function testSelectedModel(controller, { fetchImpl = fetch, complet
   } finally {
     state.settingsTestAbortController = null;
     operation.finish();
+    if (state.settings.llmTrackTokenUsage === true) {
+      try {
+        panel.tokenStats = await loadLlmTokenStats();
+        panel.tokenStatsError = null;
+      } catch (error) {
+        panel.tokenStatsError = error?.message ?? String(error);
+      }
+    }
     controller.invalidate();
   }
 }

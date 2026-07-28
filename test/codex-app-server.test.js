@@ -245,6 +245,11 @@ test('Codex app-server passes the complete settings model compatibility check wi
     assert.equal(state.settingsPanel.modelTest.transportProtocol, true);
     assert.equal(state.settingsPanel.modelTest.autonomousDecisionProtocol, true);
     assert.equal(state.settingsPanel.modelTest.error, undefined);
+    assert.equal(state.settingsPanel.modelTest.prompts.length, 2);
+    assert.match(state.settingsPanel.modelTest.prompts[0].messages[0].content, /transport compatibility test/i);
+    assert.match(state.settingsPanel.modelTest.prompts[0].messages[1].content, /ZIPFLOW_COMPATIBILITY_OK/);
+    assert.match(state.settingsPanel.modelTest.prompts[1].messages[0].content, /bounded decision component of Zipflow/i);
+    assert.match(state.settingsPanel.modelTest.prompts[1].messages[1].content, /ALLOWED ACTIONS: continue/);
     const turns = runtime.requests.filter((item) => item.method === 'turn/start');
     assert.equal(turns.length, 3);
     assert.equal(turns[1].params.outputSchema, undefined);

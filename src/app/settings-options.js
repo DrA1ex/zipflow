@@ -474,11 +474,19 @@ function languageSummary(settings) {
 
 function llmModelTestParameters(state) {
   const running = Boolean(state.settingsPanel?.modelTest?.running || state.settingsPanel?.modelTestWorkspace?.running);
+  const prompts = state.settingsPanel?.modelTest?.prompts ?? [];
   return [
     { id: 'modelTestConnection', type: 'action', action: 'model-test-connection',
       label: running && state.settingsPanel?.modelTest?.running ? 'Testing connection…' : 'Connection and compatibility test',
       value: modelTestValue(state.settingsPanel),
       description: modelTestDescription(state.settingsPanel), blocked: running, loading: running && Boolean(state.settingsPanel?.modelTest?.running) },
+    ...prompts.map((prompt, index) => ({
+      id: `modelTestPrompt:${index}`, type: 'action', action: 'model-test-prompt-view', promptIndex: index,
+      label: prompt.label || `Prompt ${index + 1}`,
+      value: promptSummary(prompt),
+      description: 'Open the exact system and user messages sent by this compatibility test. Prompts stay collapsed until opened.',
+      blocked: running,
+    })),
     { id: 'modelTestReplay', type: 'action', action: 'model-test-replay',
       label: 'Replay a historical update', value: '',
       description: 'Run the current LLM rules against a stored historical patch without changing project files.', blocked: running },
@@ -488,6 +496,12 @@ function llmModelTestParameters(state) {
     { id: 'llmModelTestsBack', type: 'action', action: 'subpage-back', label: 'Back to Local LLM', value: '',
       description: 'Return to the Local LLM settings page.', blocked: running },
   ];
+}
+
+function promptSummary(prompt) {
+  const messages = prompt?.messages ?? [];
+  const characters = messages.reduce((total, message) => total + String(message?.content ?? '').length, 0);
+  return `${messages.length} messages · ${formatCount(characters)} characters`;
 }
 
 function llmModelReplayParameters(state) {

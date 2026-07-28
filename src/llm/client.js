@@ -44,6 +44,7 @@ export async function listLocalModelChoices(provider, {
   codexEndpoint = '',
   connectImpl = undefined,
   sleepImpl = undefined,
+  onPrompt = null,
 } = {}) {
   const definition = requireProvider(provider);
   if (provider === 'codex') return listCodexAppServerModels({
@@ -147,6 +148,7 @@ export async function createLocalCompletion({
   codexEndpoint = '',
   connectImpl = undefined,
   sleepImpl = undefined,
+  onPrompt = null,
 } = {}) {
   const limits = normalizeLlmStreamLimits({
     ...(streamLimits ?? {}),
@@ -156,6 +158,10 @@ export async function createLocalCompletion({
   }, { timeoutMs });
   const tracker = createLlmTokenTracker({
     enabled: settings?.llmTrackTokenUsage === true, provider, model, messages, onEvent,
+  });
+  onPrompt?.({ provider, model,
+    messages: (messages ?? []).map((message) => ({ role: String(message?.role ?? 'user'), content: String(message?.content ?? '') })),
+    structured: Boolean(responseSchema), maxTokens, reasoningEffort,
   });
   const requestOptions = { fetchImpl, limits, onEvent: tracker.onEvent, signal };
   try {

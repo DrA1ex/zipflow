@@ -142,7 +142,7 @@ A request succeeds only after a matching `turn/completed` notification reports `
 
 ## Output parsing and diagnostics
 
-**Test selected model** is deliberately independent from the enabled workflow tasks. Its first request checks a fixed transport marker; its second request validates the autonomous-decision schema. Primary workflow generation still uses a readable section protocol containing only the outputs selected in **LLM tasks**. A commit-only request, for example, asks for and validates only `COMMIT MESSAGE`.
+**Test selected model** is deliberately independent from the enabled workflow tasks. Its first request checks a fixed transport marker; its second request validates the autonomous-decision schema. After the check, both exact system/user prompt pairs appear as collapsed rows and can be opened in a scrollable read-only viewer. Primary workflow generation still uses a readable section protocol containing only the outputs selected in **LLM tasks**. A commit-only request, for example, asks for and validates only `COMMIT MESSAGE`.
 
 When a model ignores the requested format or spends its output budget on reasoning, Zipflow can perform a hidden compact repair request. If only a useful summary can be recovered, the summary is kept and another commit-message source is used.
 
@@ -163,7 +163,7 @@ Press `Esc` during review generation to cancel only that local LLM request. Arch
 - a read-only replay of a historical archive update using current settings;
 - a read-only Guarded-versus-Full autopilot simulation reconstructed from historical run state.
 
-Replay and autopilot simulation show the selected historical update and safety scope before opening the generation workspace. Neither changes project files, Git state, backups, source archives, or run history. Terlio 1.2.1 syntax highlighting is applied consistently to fenced code blocks and standalone JSON in live output, saved raw model responses, Activity, and historical replay. Zipflow infers JSON for partial structured streams so the response remains readable before the closing brace arrives.
+Replay and autopilot simulation show the selected historical update and safety scope before opening the generation workspace. If **Change summary** is disabled, the parsed replay result says so explicitly instead of implying that the model forgot to return a summary. Neither changes project files, Git state, backups, source archives, or run history. Terlio 1.2.1 syntax highlighting is applied consistently to fenced code blocks and standalone JSON in live output, saved raw model responses, Activity, and historical replay. Zipflow infers JSON for partial structured streams so the response remains readable before the closing brace arrives.
 
 During generation, raw model output is streamed in Activity. By default that temporary block disappears when Zipflow produces its parsed result. Enable **Raw model responses → Keep raw responses** to retain the completed raw response as a collapsed Activity block immediately before the parsed explanation or review. The setting uses a two-option radio list. Both values are stored as booleans, so switching between **Hide raw responses** and **Keep raw responses** updates the marker immediately and persists across restarts.
 

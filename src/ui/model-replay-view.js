@@ -195,7 +195,7 @@ function replayLineSource(workspace, theme, width) {
 }
 
 function blockLines(block, workspace, theme, width) {
-  if (block.id === 'parsed-result' && block.result) return parsedResultLines(block.result, theme, width);
+  if (block.id === 'parsed-result' && block.result) return parsedResultLines(block.result, theme, width, workspace);
   if (block.id === 'autopilot-result' && block.result) return autopilotResultLines(block.result, theme, width);
   const token = block.status === 'error' ? 'danger'
     : block.status === 'active' || block.streaming ? 'accent'
@@ -253,14 +253,14 @@ function autopilotResultLines(result, theme, width) {
   return lines;
 }
 
-function parsedResultLines(result, theme, width) {
+function parsedResultLines(result, theme, width, workspace = {}) {
   const lines = [
     color(theme, 'success', '✓ PARSED RESULT'),
     '',
     color(theme, 'accent', 'SUMMARY'),
     ...(result.summary?.length
       ? result.summary.flatMap((line) => wrapBullet(line, width, theme, 'text'))
-      : [`  ${color(theme, 'textMuted', 'No summary returned.')}`]),
+      : [`  ${color(theme, 'textMuted', workspace.requestedTasks?.summary === false ? 'Summary generation is disabled.' : 'No summary returned.')}`]),
     '',
     color(theme, 'accent', 'COMMIT MESSAGE'),
     ...(result.commitMessage

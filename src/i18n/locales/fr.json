@@ -281,7 +281,14 @@
     "Reset statistics": "Réinitialiser les statistiques",
     "Permanently clear all accumulated LLM token statistics.": "Effacer définitivement toutes les statistiques de jetons LLM accumulées.",
     "LLM token statistics reset": "Statistiques de jetons LLM réinitialisées",
-    "Could not reset LLM token statistics": "Impossible de réinitialiser les statistiques de jetons LLM"
+    "Could not reset LLM token statistics": "Impossible de réinitialiser les statistiques de jetons LLM",
+    "Transport compatibility prompt": "Prompt de compatibilité du transport",
+    "Autonomy protocol prompt": "Prompt du protocole d’autonomie",
+    "Open the exact system and user messages sent by this compatibility test. Prompts stay collapsed until opened.": "Ouvrir les messages système et utilisateur exacts envoyés par ce test. Les prompts restent repliés jusqu’à leur ouverture.",
+    "No prompt messages were captured.": "Aucun message de prompt n’a été capturé.",
+    "↑/↓ scroll · PgUp/PgDn · Home/End · Esc close": "↑/↓ défiler · PgUp/PgDn · Home/End · Esc fermer",
+    "Summary generation is disabled.": "La génération du résumé est désactivée.",
+    "Model test prompt": "Prompt du test du modèle"
   },
   "patterns": [
     {

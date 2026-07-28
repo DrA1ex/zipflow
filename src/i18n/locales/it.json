@@ -281,7 +281,14 @@
     "Reset statistics": "Azzera statistiche",
     "Permanently clear all accumulated LLM token statistics.": "Elimina definitivamente tutte le statistiche token LLM accumulate.",
     "LLM token statistics reset": "Statistiche token LLM azzerate",
-    "Could not reset LLM token statistics": "Impossibile azzerare le statistiche token LLM"
+    "Could not reset LLM token statistics": "Impossibile azzerare le statistiche token LLM",
+    "Transport compatibility prompt": "Prompt di compatibilità del trasporto",
+    "Autonomy protocol prompt": "Prompt del protocollo di autonomia",
+    "Open the exact system and user messages sent by this compatibility test. Prompts stay collapsed until opened.": "Apre i messaggi di sistema e utente esatti inviati dal test. I prompt restano compressi finché non vengono aperti.",
+    "No prompt messages were captured.": "Non è stato acquisito alcun messaggio del prompt.",
+    "↑/↓ scroll · PgUp/PgDn · Home/End · Esc close": "↑/↓ scorri · PgUp/PgDn · Home/End · Esc chiudi",
+    "Summary generation is disabled.": "La generazione del riepilogo è disattivata.",
+    "Model test prompt": "Prompt del test del modello"
   },
   "patterns": [
     {

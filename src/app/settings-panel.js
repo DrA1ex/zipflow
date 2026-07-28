@@ -86,6 +86,7 @@ export async function openSettings(controller, { categoryId = null } = {}) {
     tokenStatsError: null,
     modal: null,
     modelConfig: null,
+    modelPromptView: null,
     choiceSearch: null,
     subpage: null,
   };
@@ -151,6 +152,7 @@ export async function submitSettingsEditor(controller) {
 export async function handleSettingsKey(controller, key) {
   const panel = controller.state.settingsPanel;
   if (!panel) return false;
+  if (panel.modelPromptView) return handleModelPromptViewKey(controller, key);
   if (panel.modelTestWorkspace) return handleModelReplayWorkspaceKey(controller, key);
   if (panel.modelTest?.running && key.name === 'escape') {
     controller.state.settingsTestAbortController?.abort();
@@ -440,7 +442,14 @@ async function activateParameter(controller) {
         controller.invalidate();
       }
     } else if (parameter.action === 'model-test-connection') await testSelectedModel(controller);
-    else if (parameter.action === 'model-test-replay') {
+    else if (parameter.action === 'model-test-prompt-view') {
+      const prompt = state.settingsPanel.modelTest?.prompts?.[parameter.promptIndex];
+      if (prompt) {
+        state.settingsPanel.modelPromptView = { prompt, scroll: 0, maxScroll: 0 };
+        state.status = prompt.label || 'Model test prompt';
+        controller.invalidate();
+      }
+    } else if (parameter.action === 'model-test-replay') {
       state.status = 'Loading historical updates';
       await loadModelReplayRuns(controller);
       state.settingsPanel.subpage = 'llmModelReplay';
@@ -636,6 +645,37 @@ function openSettingModal(controller, fieldId, returnParameterId) {
   controller.invalidate();
 }
 
+
+
+function handleModelPromptViewKey(controller, key) {
+  const view = controller.state.settingsPanel?.modelPromptView;
+  if (!view) return false;
+  if (key.name === 'escape' || key.name === 'left') {
+    controller.state.settingsPanel.modelPromptView = null;
+    controller.state.status = 'Model tests';
+    controller.invalidate();
+    return true;
+  }
+  const page = ['page-up', 'pageup'].includes(key.name) ? -8
+    : ['page-down', 'pagedown'].includes(key.name) ? 8
+      : key.name === 'up' ? -1 : key.name === 'down' ? 1 : null;
+  if (page != null) {
+    view.scroll = clamp((view.scroll ?? 0) + page, 0, view.maxScroll ?? 0);
+    controller.invalidate();
+    return true;
+  }
+  if (key.name === 'home') {
+    view.scroll = 0;
+    controller.invalidate();
+    return true;
+  }
+  if (key.name === 'end') {
+    view.scroll = view.maxScroll ?? 0;
+    controller.invalidate();
+    return true;
+  }
+  return true;
+}
 
 
 async function refreshLlmTokenStats(controller, { quiet = false } = {}) {

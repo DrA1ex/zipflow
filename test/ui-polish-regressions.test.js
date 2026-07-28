@@ -109,6 +109,33 @@ test('empty editors render a muted placeholder while keeping the cursor visible'
   assert.match(output, /\x1b\[7mE\x1b\[27m/);
 });
 
+
+test('model compatibility prompts stay collapsed until opened and show the exact sent messages', () => {
+  const state = settingsTestState();
+  state.settingsPanel.modelTest = {
+    running: false,
+    status: 'passed',
+    durationMs: 100,
+    prompts: [{
+      label: 'Transport compatibility prompt', provider: 'codex', model: 'gpt-test', structured: false,
+      maxTokens: 32, messages: [
+        { role: 'system', content: 'Reply with exactly ZIPFLOW_COMPATIBILITY_OK.' },
+        { role: 'user', content: 'ZIPFLOW_COMPATIBILITY_OK' },
+      ],
+    }],
+  };
+  let output = stripAnsi(renderToString(renderZipflow({ state, width: 110, height: 28 }), { width: 110, height: 28 }));
+  assert.match(output, /Transport compatibility prompt: 2 messages/);
+  assert.doesNotMatch(output, /Reply with exactly ZIPFLOW_COMPATIBILITY_OK/);
+
+  state.settingsPanel.modelPromptView = { prompt: state.settingsPanel.modelTest.prompts[0], scroll: 0, maxScroll: 0 };
+  output = stripAnsi(renderToString(renderZipflow({ state, width: 110, height: 28 }), { width: 110, height: 28 }));
+  assert.match(output, /TRANSPORT COMPATIBILITY PROMPT/);
+  assert.match(output, /SYSTEM/);
+  assert.match(output, /Reply with exactly ZIPFLOW_COMPATIBILITY_OK/);
+  assert.match(output, /USER/);
+});
+
 test('active connection test is visibly blocked and muted without a disabled cross', () => {
   const state = settingsTestState();
   const output = renderToString(renderZipflow({ state, width: 100, height: 28, animationFrame: 2 }), { width: 100, height: 28 });
@@ -162,6 +189,25 @@ test('historical replay wraps long streaming output instead of losing the tail',
 
   assert.match(output, /final-token/);
   assert.ok(output.split('\n').filter((line) => /word\d+/.test(line)).length > 1);
+});
+
+
+test('historical replay explains that an empty summary is expected when the summary task is disabled', () => {
+  const state = createInitialState();
+  state.settingsPanel = { modelTestWorkspace: {
+    mode: 'progress', runId: 'run-1', archiveName: 'update.zip', running: false,
+    status: 'Replay completed', elapsedMs: 100, scroll: 0, follow: true,
+    unread: 0, unreadBlockIds: new Set(), requestedTasks: { summary: false, commitMessage: true },
+    result: { summary: [], commitMessage: 'fix: update archive' },
+    blocks: [{ id: 'parsed-result', title: 'Parsed result', lines: [], status: 'done', streaming: false,
+      result: { summary: [], commitMessage: 'fix: update archive' } }],
+  } };
+  const output = stripAnsi(renderToString(renderModelReplayWorkspace({
+    content: Text('BACKGROUND'), state, width: 100, height: 24, theme: themes.ocean,
+  }), { width: 100, height: 24 }));
+
+  assert.match(output, /Summary generation is disabled\./);
+  assert.doesNotMatch(output, /No summary returned\./);
 });
 
 test('context dock keeps menu geometry stable across short and long descriptions', () => {
