@@ -72,11 +72,14 @@ export function renderSettings(state, width, height, theme, animationFrame = 0) 
       { id: 'details', size: rightWidth, min: 26, grow: 1, node: right },
     ],
   });
+  if (state.settingsPanel?.modelPromptView) {
+    const promptBackground = state.settingsPanel?.modelTestWorkspace
+      ? renderModelReplayWorkspace({ content, state, width, height, theme, animationFrame })
+      : content;
+    return renderModelPromptView({ content: promptBackground, state, width, height, theme });
+  }
   if (state.settingsPanel?.modelTestWorkspace) {
     return renderModelReplayWorkspace({ content, state, width, height, theme, animationFrame });
-  }
-  if (state.settingsPanel?.modelPromptView) {
-    return renderModelPromptView({ content, state, width, height, theme });
   }
   if (!view.modal && !view.choiceSearch?.active) return content;
   if (!view.modal && view.choiceSearch?.active) return renderChoiceSearch({ content, state, width, height, theme });
@@ -284,7 +287,9 @@ function renderModelPromptView({ content, state, width, height, theme }) {
   const buildModal = () => Modal({
     title: ` ${t(state, prompt.label || 'MODEL TEST PROMPT').toUpperCase()} `,
     children: [
-      Text(color(theme, 'textMuted', `${prompt.provider || 'LLM'} · ${prompt.model || '(unknown model)'} · ${prompt.structured ? 'structured output' : 'text output'} · max ${prompt.maxTokens ?? '?'} tokens`), { wrap: false }),
+      Text(color(theme, 'textMuted', prompt.requests?.length
+        ? `${prompt.requests.length} requests · exact system and user messages`
+        : `${prompt.provider || 'LLM'} · ${prompt.model || '(unknown model)'} · ${prompt.structured ? 'structured output' : 'text output'} · max ${prompt.maxTokens ?? '?'} tokens`), { wrap: false }),
       Text(''),
       ScrollPane({
         lines,
@@ -312,15 +317,30 @@ function renderModelPromptView({ content, state, width, height, theme }) {
 }
 
 function promptLines(prompt, width, theme) {
+  if (prompt.requests?.length) {
+    const lines = [];
+    for (const [index, request] of prompt.requests.entries()) {
+      lines.push(color(theme, 'accent', `REQUEST ${index + 1} · ${request.label || 'LLM prompt'}`));
+      lines.push(color(theme, 'textMuted', `${request.provider || 'LLM'} · ${request.model || '(unknown model)'} · ${request.structured ? 'structured output' : 'text output'} · max ${request.maxTokens ?? '?'} tokens`));
+      lines.push('');
+      appendPromptMessages(lines, request.messages, width, theme);
+      if (index < prompt.requests.length - 1) lines.push('');
+    }
+    return lines;
+  }
   const lines = [];
-  for (const message of prompt.messages ?? []) {
+  appendPromptMessages(lines, prompt.messages, width, theme);
+  return lines.length ? lines : [color(theme, 'textMuted', 'No prompt messages were captured.')];
+}
+
+function appendPromptMessages(lines, messages, width, theme) {
+  for (const message of messages ?? []) {
     lines.push(color(theme, 'accent', String(message.role || 'user').toUpperCase()));
     for (const sourceLine of String(message.content ?? '').split(/\r?\n/)) {
       lines.push(...wrapText(sourceLine, width).map((line) => `  ${line}`));
     }
     lines.push('');
   }
-  return lines.length ? lines : [color(theme, 'textMuted', 'No prompt messages were captured.')];
 }
 
 function renderSettingsModal({ content, modal, state, width, height, theme }) {

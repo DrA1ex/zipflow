@@ -1497,7 +1497,10 @@
     "No prompt messages were captured.": "No prompt messages were captured.",
     "↑/↓ scroll · PgUp/PgDn · Home/End · Esc close": "↑/↓ scroll · PgUp/PgDn · Home/End · Esc close",
     "Summary generation is disabled.": "Summary generation is disabled.",
-    "Model test prompt": "Model test prompt"
+    "Model test prompt": "Model test prompt",
+    "Token usage": "Token usage",
+    "↑/↓ scroll · PgUp/PgDn · End latest · P prompts · Esc cancel": "↑/↓ scroll · PgUp/PgDn · End latest · P prompts · Esc cancel",
+    "↑/↓ scroll · PgUp/PgDn · P prompts · C copy · D diagnostics · Esc close": "↑/↓ scroll · PgUp/PgDn · P prompts · C copy · D diagnostics · Esc close"
   },
   "patterns": [
     {

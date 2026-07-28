@@ -421,3 +421,34 @@ test('OpenAI-compatible model test uses configured Responses endpoint and reason
     else process.env.ZIPFLOW_HOME = previousHome;
   }
 });
+
+test('Escape cancels a running model test without closing settings or exiting Zipflow', async () => {
+  const state = createInitialState();
+  state.screen = 'settings';
+  state.settingsPanel = {
+    focus: 'parameters', subpage: 'llmModelTests', modelTest: { running: true, status: 'running' },
+    previous: { screen: 'home', menuItems: [], selectedIndex: 0, status: 'Ready' },
+  };
+  const controller = new ZipflowController(state);
+  let exits = 0;
+  controller.attachRuntime({ invalidate() {}, exit() { exits += 1; } });
+  const operation = controller.beginOperation({ kind: 'model-compatibility-test', label: 'Testing selected model' });
+  state.settingsTestAbortController = { abort: () => operation.abort() };
+
+  await controller.handleKey({ name: 'escape' });
+
+  assert.equal(operation.signal.aborted, true);
+  assert.equal(state.settingsPanel.modelTest.cancellationRequested, true);
+  assert.equal(state.screen, 'settings');
+  assert.equal(exits, 0);
+
+  operation.finish();
+  state.settingsPanel.modelTest = { running: false, status: 'cancelled' };
+  state.settingsPanel.modelTestEscapeGuardUntil = Date.now() + 1_200;
+  await controller.handleKey({ name: 'escape' });
+  await controller.handleKey({ name: 'escape' });
+
+  assert.equal(state.screen, 'settings');
+  assert.equal(state.settingsPanel.subpage, 'llmModelTests');
+  assert.equal(exits, 0);
+});

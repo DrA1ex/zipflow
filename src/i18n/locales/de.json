@@ -288,7 +288,10 @@
     "No prompt messages were captured.": "Es wurden keine Prompt-Nachrichten erfasst.",
     "↑/↓ scroll · PgUp/PgDn · Home/End · Esc close": "↑/↓ scrollen · PgUp/PgDn · Home/End · Esc schließen",
     "Summary generation is disabled.": "Die Zusammenfassung ist deaktiviert.",
-    "Model test prompt": "Prompt des Modelltests"
+    "Model test prompt": "Prompt des Modelltests",
+    "Token usage": "Tokenverbrauch",
+    "↑/↓ scroll · PgUp/PgDn · End latest · P prompts · Esc cancel": "↑/↓ scrollen · PgUp/PgDn · End aktuell · P Prompts · Esc abbrechen",
+    "↑/↓ scroll · PgUp/PgDn · P prompts · C copy · D diagnostics · Esc close": "↑/↓ scrollen · PgUp/PgDn · P Prompts · C kopieren · D Diagnose · Esc schließen"
   },
   "patterns": [
     {

@@ -8,6 +8,7 @@ import { beginHistoricalAutopilotSimulation } from './settings-autopilot-replay.
 import { BoundedByteBuffer } from '../utils/byte-buffer.js';
 import { llmTasks } from '../llm/tasks.js';
 import { isPlainEnter } from './editor-enter.js';
+import { emptyLlmUsageCounters, mergeLlmUsageCounters } from '../llm/token-stats.js';
 
 
 export async function handleReplayDispatch(controller, action) {
@@ -55,7 +56,7 @@ export function startHistoricalModelReplay(controller, runId) {
     startedAt: null, elapsedMs: 0, blocks: [], scroll: 0, maxScroll: 0,
     follow: true, unread: 0, unreadBlockIds: new Set(), renderRevision: 0,
     result: null, error: null, errorCode: null, abortController: null,
-    requestedTasks: llmTasks(state.settings),
+    requestedTasks: llmTasks(state.settings), prompts: [], tokenUsage: emptyLlmUsageCounters(),
   };
   controller.invalidate();
   return true;
@@ -77,6 +78,7 @@ export async function beginHistoricalModelReplay(controller) {
     startedAt: Date.now(), elapsedMs: 0, blocks: [], scroll: 0, maxScroll: 0,
     follow: true, unread: 0, unreadBlockIds: new Set(), renderRevision: 0,
     result: null, error: null, errorCode: null, abortController: { abort: () => operation.abort() },
+    prompts: [], tokenUsage: emptyLlmUsageCounters(),
   });
   state.settingsTestAbortController = { abort: () => operation.abort() };
   addBlock(workspace, 'session', 'Session', [
@@ -100,11 +102,13 @@ export async function beginHistoricalModelReplay(controller) {
     }, {
       signal: operation.signal,
       onEvent: (event) => updateReplayWorkspace(controller, event),
+      onPrompt: (prompt) => captureWorkspacePrompt(controller, workspace, prompt, 'Historical replay request'),
     });
     workspace.result = result;
     workspace.status = 'Replay completed';
     markActiveBlocks(workspace, 'done');
     addBlock(workspace, 'parsed-result', 'Parsed result', [], { status: 'done', result });
+    addTokenUsageBlock(workspace);
     noteReplayChange(workspace, 'parsed-result');
     return true;
   } catch (error) {
@@ -116,6 +120,7 @@ export async function beginHistoricalModelReplay(controller) {
     addBlock(workspace, cancelled ? 'cancelled' : 'error', cancelled ? 'Cancelled' : 'Error', cancelled
       ? ['The historical replay was cancelled. No project files were changed.']
       : replayFailureLines(error), { status: cancelled ? 'pending' : 'error' });
+    addTokenUsageBlock(workspace);
     noteReplayChange(workspace, cancelled ? 'cancelled' : 'error');
     return false;
   } finally {
@@ -140,6 +145,10 @@ export async function handleModelReplayWorkspaceKey(controller, key) {
       workspace.abortController?.abort();
     } else controller.state.settingsPanel.modelTestWorkspace = null;
     controller.invalidate();
+    return true;
+  }
+  if (key.printable && key.text?.toLowerCase() === 'p' && workspace.prompts?.length) {
+    openWorkspacePromptView(controller, workspace);
     return true;
   }
   if (['up', 'down', 'page-up', 'page-down', 'pageup', 'pagedown', 'home', 'end'].includes(key.name)) {
@@ -278,6 +287,9 @@ export function updateReplayWorkspace(controller, event) {
   } else if (event.type === 'coverage') {
     changedId = 'delivery';
     for (const line of coverageLines(event)) addLine(workspace, 'delivery', line);
+  } else if (event.type === 'token-usage') {
+    mergeLlmUsageCounters(workspace.tokenUsage, event.usage);
+    touchReplay(workspace);
   }
   if (changedId) {
     touchReplay(workspace);
@@ -339,6 +351,60 @@ function addBlock(workspace, id, title, lines = [], options = {}) {
   workspace.blocks.push(block);
   touchReplay(workspace);
   return block;
+}
+
+export function captureWorkspacePrompt(controller, workspace, prompt, baseLabel) {
+  const index = (workspace.prompts?.length ?? 0) + 1;
+  workspace.prompts ??= [];
+  workspace.prompts.push({
+    id: `replay-prompt-${index}`,
+    label: `${baseLabel} ${index}`,
+    provider: prompt.provider,
+    model: prompt.model,
+    structured: prompt.structured,
+    maxTokens: prompt.maxTokens,
+    reasoningEffort: prompt.reasoningEffort,
+    messages: prompt.messages,
+  });
+  const messageCount = workspace.prompts.reduce((total, item) => total + (item.messages?.length ?? 0), 0);
+  const characters = workspace.prompts.reduce((total, item) => total + (item.messages ?? [])
+    .reduce((sum, message) => sum + String(message?.content ?? '').length, 0), 0);
+  const lines = [
+    `${workspace.prompts.length} request${workspace.prompts.length === 1 ? '' : 's'} · ${messageCount} messages · ${formatCount(characters)} characters`,
+    'Press P to inspect the exact system and user messages sent to the model.',
+  ];
+  const block = findBlock(workspace, 'prompts');
+  if (block) Object.assign(block, { title: 'Prompts', lines, status: 'done' });
+  else addBlock(workspace, 'prompts', 'Prompts', lines, { status: 'done' });
+  touchReplay(workspace);
+  noteReplayChange(workspace, 'prompts');
+  controller.invalidate();
+}
+
+function openWorkspacePromptView(controller, workspace) {
+  controller.state.settingsPanel.modelPromptView = {
+    prompt: {
+      label: workspace.kind === 'autopilot' ? 'Autopilot simulation prompts' : 'Historical replay prompts',
+      requests: workspace.prompts,
+    },
+    scroll: 0,
+    maxScroll: 0,
+    returnStatus: workspace.status,
+  };
+  controller.state.status = workspace.kind === 'autopilot' ? 'Autopilot simulation prompts' : 'Historical replay prompts';
+  controller.invalidate();
+}
+
+export function addTokenUsageBlock(workspace) {
+  const usage = workspace.tokenUsage ?? emptyLlmUsageCounters();
+  if ((usage.requests ?? 0) < 1) return;
+  addBlock(workspace, 'token-usage', 'Token usage', [
+    `Requests: ${formatCount(usage.requests)}`,
+    `Input tokens: ${formatCount(usage.inputTokens)}`,
+    `Output tokens: ${formatCount(usage.outputTokens)}`,
+    `Total tokens: ${formatCount(Number(usage.inputTokens ?? 0) + Number(usage.outputTokens ?? 0))}`,
+    `Measurement: ${formatCount(usage.exactRequests)} exact · ${formatCount(usage.estimatedRequests)} estimated`,
+  ], { status: 'done' });
 }
 
 function addLine(workspace, id, line) {
@@ -462,6 +528,17 @@ function replayDiagnosticsText(workspace) {
       ...(replayStreamText(block, 'reasoning') ? ['Reasoning:', replayStreamText(block, 'reasoning')] : []),
       ...(replayStreamText(block, 'content') ? ['Response:', replayStreamText(block, 'content')] : []),
     ]),
+    ...(workspace.prompts?.length ? [
+      '', '[PROMPTS]',
+      ...workspace.prompts.flatMap((prompt, index) => [
+        '', `Request ${index + 1}: ${prompt.label || 'LLM prompt'}`,
+        `Provider: ${prompt.provider || 'unknown'} · Model: ${prompt.model || 'unknown'}`,
+        ...(prompt.messages ?? []).flatMap((message) => [
+          `${String(message.role || 'user').toUpperCase()}:`,
+          String(message.content ?? ''),
+        ]),
+      ]),
+    ] : []),
   ].join('\n');
 }
 
@@ -472,6 +549,10 @@ function titleCase(value) {
 function formatNumber(value) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number.toLocaleString('en-US') : 'unknown';
+}
+
+function formatCount(value) {
+  return Math.max(0, Number(value) || 0).toLocaleString('en-US');
 }
 
 function clamp(value, min, max) {

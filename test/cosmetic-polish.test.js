@@ -311,3 +311,29 @@ test('archive path editor uses one complete panel without a nested Archive frame
   assert.match(output, /└─+┘/);
   assert.match(output, /Drop a ZIP file into the terminal or enter its path\./);
 });
+
+test('historical replay prompt viewer renders the exact captured system and user messages', async () => {
+  const state = settingsState();
+  state.settingsPanel.modelTest = null;
+  state.settingsPanel.modelTestWorkspace = {
+    mode: 'progress', kind: 'model', runId: 'run-prompts', archiveName: 'update.zip',
+    running: false, status: 'Replay completed', elapsedMs: 100, blocks: [],
+    scroll: 0, maxScroll: 0, follow: true, unread: 0, unreadBlockIds: new Set(),
+    prompts: [{
+      label: 'Historical replay request 1', provider: 'codex', model: 'gpt-test', structured: true, maxTokens: 1024,
+      messages: [
+        { role: 'system', content: 'Exact historical system prompt.' },
+        { role: 'user', content: 'Exact historical user prompt with patch context.' },
+      ],
+    }],
+  };
+  const controller = new ZipflowController(state);
+  controller.invalidate = () => {};
+
+  await handleModelReplayWorkspaceKey(controller, { name: 'p', text: 'p', printable: true });
+  const output = stripAnsi(renderToString(renderZipflow({ state, width: 120, height: 32 }), { width: 120, height: 32 }));
+
+  assert.match(output, /REQUEST 1 · Historical replay request 1/);
+  assert.match(output, /Exact historical system prompt/);
+  assert.match(output, /Exact historical user prompt with patch context/);
+});

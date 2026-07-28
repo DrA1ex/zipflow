@@ -52,6 +52,7 @@ Archive → Review → Apply → Checks → Finish
 - Custom checks and deployment commands using `web/ :: npm test` syntax.
 - Optional local LLM integration through native Ollama, native LM Studio, a configurable OpenAI-compatible `/v1` server, or Codex app-server RPC with a managed default endpoint and an explicit external-server toggle.
 - Optional persistent LLM token statistics with exact provider usage when available, estimated fallback accounting, provider/model breakdowns, and an explicit reset action.
+- Historical replay and autopilot simulation expose the exact model prompts with `P` and show per-run input/output token usage even when persistent statistics are disabled.
 - Manual, Guarded autopilot, and Full autopilot decision modes.
 - Run history, performance analytics, reports, stored patches, and ZIP export.
 - Configurable startup update checks, manual version checks, and one-step global npm updates.

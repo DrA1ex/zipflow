@@ -4,7 +4,9 @@ import { resolveLocalLlmSession } from '../llm/session.js';
 import { requestAutonomyDecision } from '../autonomy/decision-engine.js';
 import { updateSettings } from '../settings/store.js';
 import { canonicalModelId, modelIdentityKey } from '../llm/model-identity.js';
-import { loadLlmTokenStats } from '../llm/token-stats.js';
+import {
+  emptyLlmUsageCounters, loadLlmTokenStats, mergeLlmUsageCounters,
+} from '../llm/token-stats.js';
 
 export async function testSelectedModel(controller, { fetchImpl = fetch, completionOptions = {} } = {}) {
   const { state } = controller;
@@ -18,7 +20,9 @@ export async function testSelectedModel(controller, { fetchImpl = fetch, complet
   }
   const operation = controller.beginOperation({ kind: 'model-compatibility-test', label: 'Testing selected model' });
   const startedAt = Date.now();
-  panel.modelTest = { status: 'running', running: true, startedAt, prompts: [] };
+  const tokenUsage = emptyLlmUsageCounters();
+  panel.modelTestEscapeGuardUntil = 0;
+  panel.modelTest = { status: 'running', running: true, startedAt, prompts: [], tokenUsage };
   const prompts = [];
   const capturePrompt = (label) => (prompt) => {
     prompts.push({
@@ -37,9 +41,17 @@ export async function testSelectedModel(controller, { fetchImpl = fetch, complet
   state.settingsTestAbortController = { abort: () => operation.abort() };
   state.status = `Testing ${settings.llmModel}`;
   controller.invalidate();
+  let streamSupported = false;
+  const onModelEvent = (event) => {
+    if (event.type === 'stream-open' || event.type === 'chunk') streamSupported = true;
+    if (event.type === 'token-usage') {
+      mergeLlmUsageCounters(tokenUsage, event.usage);
+      panel.modelTest.tokenUsage = { ...tokenUsage };
+      controller.invalidate();
+    }
+  };
   try {
     const session = await resolveLocalLlmSession(settings, { ...completionOptions, signal: operation.signal, fetchImpl });
-    let streamSupported = false;
     const compatibilityMarker = 'ZIPFLOW_COMPATIBILITY_OK';
     const completion = await createLocalCompletion({
       provider: settings.llmProvider,
@@ -67,7 +79,7 @@ export async function testSelectedModel(controller, { fetchImpl = fetch, complet
       signal: operation.signal,
       settings,
       fetchImpl,
-      onEvent: (event) => { if (event.type === 'stream-open' || event.type === 'chunk') streamSupported = true; },
+      onEvent: onModelEvent,
       onPrompt: capturePrompt('Transport compatibility prompt'),
     });
     const compatibilityText = String(completion.content || completion.reasoning || '').trim();
@@ -87,7 +99,7 @@ export async function testSelectedModel(controller, { fetchImpl = fetch, complet
       },
       allowedActions: ['continue'],
       signal: operation.signal,
-      onEvent: (event) => { if (event.type === 'stream-open' || event.type === 'chunk') streamSupported = true; },
+      onEvent: onModelEvent,
       fetchImpl,
       completionOptions: {
         ...completionOptions,
@@ -119,7 +131,7 @@ export async function testSelectedModel(controller, { fetchImpl = fetch, complet
       contextLength: session.profile.contextLength,
       maxContextLength: session.profile.maxContextLength,
       contextSource: session.profile.source,
-      transportProtocol: true, autonomousDecisionProtocol: true, prompts,
+      transportProtocol: true, autonomousDecisionProtocol: true, prompts, tokenUsage: { ...tokenUsage },
     };
     state.status = `Model test passed · ${formatDuration(durationMs)}`;
     controller.toast('Model test passed', 'success', 3, `${streamSupported ? 'Streaming supported' : 'Response received'} · ${formatContext(session.profile.contextLength)}`);
@@ -128,7 +140,8 @@ export async function testSelectedModel(controller, { fetchImpl = fetch, complet
     const cancelled = operation.signal.aborted || error?.name === 'AbortError' || ['ABORT_ERR', 'cancelled'].includes(error?.code);
     panel.modelTest = {
       status: cancelled ? 'cancelled' : 'failed', running: false, durationMs: Date.now() - startedAt,
-      error: cancelled ? 'Compatibility test cancelled.' : error.message, code: error.code ?? null, prompts,
+      error: cancelled ? 'Compatibility test cancelled.' : error.message, code: error.code ?? null,
+      prompts, tokenUsage: { ...tokenUsage },
     };
     if (!cancelled) {
       const canonicalModel = canonicalModelId(settings.llmProvider, settings.llmModel);
@@ -149,12 +162,16 @@ export async function testSelectedModel(controller, { fetchImpl = fetch, complet
         },
       }, { baseSettings: state.settings });
     }
+    if (cancelled) panel.modelTestEscapeGuardUntil = Date.now() + 1_200;
     state.status = cancelled ? 'Model test cancelled' : 'Model test failed';
     controller.toast(cancelled ? 'Model test cancelled' : 'Model test failed', cancelled ? 'info' : 'error', 3, panel.modelTest.error);
     return false;
   } finally {
     state.settingsTestAbortController = null;
     operation.finish();
+    if (panel.modelTestEscapeGuardUntil === Number.POSITIVE_INFINITY) {
+      panel.modelTestEscapeGuardUntil = Date.now() + 1_200;
+    }
     if (state.settings.llmTrackTokenUsage === true) {
       try {
         panel.tokenStats = await loadLlmTokenStats();
@@ -171,7 +188,7 @@ export function modelTestValue(panel) {
   const test = panel?.modelTest;
   if (!test) return 'Not tested';
   if (test.running) return 'Testing…';
-  if (test.status === 'passed') return `Passed · ${formatDuration(test.durationMs)}`;
+  if (test.status === 'passed') return `Passed · ${formatDuration(test.durationMs)}${usageInline(test.tokenUsage)}`;
   if (test.status === 'cancelled') return 'Cancelled';
   return 'Failed';
 }
@@ -180,8 +197,20 @@ export function modelTestDescription(panel) {
   const test = panel?.modelTest;
   if (!test) return 'Check server access, authentication, exact model key, streaming, response parsing, and reported context.';
   if (test.running) return 'Sending a small safe compatibility request. Esc cancels the test.';
-  if (test.status === 'failed' || test.status === 'cancelled') return test.error;
-  return `${test.streamSupported ? 'Streaming supported' : 'Text response received'} · Zipflow and autonomous decision protocols passed · reported context ${formatContext(test.contextLength)}${test.contextSource ? ` · ${test.contextSource}` : ''}.`;
+  if (test.status === 'failed' || test.status === 'cancelled') return `${test.error}${usageSentence(test.tokenUsage)}`;
+  return `${test.streamSupported ? 'Streaming supported' : 'Text response received'} · Zipflow and autonomous decision protocols passed · reported context ${formatContext(test.contextLength)}${test.contextSource ? ` · ${test.contextSource}` : ''}.${usageSentence(test.tokenUsage)}`;
+}
+
+function usageInline(usage = {}) {
+  const total = Number(usage.inputTokens ?? 0) + Number(usage.outputTokens ?? 0);
+  return total > 0 ? ` · ${total.toLocaleString('en-US')} tokens` : '';
+}
+
+function usageSentence(usage = {}) {
+  const requests = Number(usage.requests ?? 0);
+  if (requests < 1) return '';
+  const accuracy = Number(usage.estimatedRequests ?? 0) > 0 ? 'estimated where provider usage was unavailable' : 'exact provider usage';
+  return ` Token usage: ${Number(usage.inputTokens ?? 0).toLocaleString('en-US')} input · ${Number(usage.outputTokens ?? 0).toLocaleString('en-US')} output · ${accuracy}.`;
 }
 
 function formatDuration(milliseconds) {

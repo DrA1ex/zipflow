@@ -119,8 +119,8 @@ function renderReplayProgress(state, workspace, width, height, theme, animationF
     },
   });
   const footer = workspace.running
-    ? '↑/↓ scroll · PgUp/PgDn · End latest · Esc cancel'
-    : '↑/↓ scroll · PgUp/PgDn · C copy · D diagnostics · Esc close';
+    ? `↑/↓ scroll · PgUp/PgDn · End latest${workspace.prompts?.length ? ' · P prompts' : ''} · Esc cancel`
+    : `↑/↓ scroll · PgUp/PgDn${workspace.prompts?.length ? ' · P prompts' : ''} · C copy · D diagnostics · Esc close`;
   return replayFrame({
     width,
     height,

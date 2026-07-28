@@ -3,6 +3,7 @@ import { requestAutonomyDecision } from '../autonomy/decision-engine.js';
 import { autonomyForMode } from '../autonomy/policies.js';
 import { listProjectRuns } from '../runs/store.js';
 import { BoundedByteBuffer } from '../utils/byte-buffer.js';
+import { emptyLlmUsageCounters, mergeLlmUsageCounters } from '../llm/token-stats.js';
 
 const MODES = ['guarded', 'full'];
 
@@ -33,12 +34,13 @@ export function startHistoricalAutopilotSimulation(controller, runId) {
     startedAt: null, elapsedMs: 0, blocks: [], scroll: 0, maxScroll: 0,
     follow: true, unread: 0, unreadBlockIds: new Set(),
     result: null, error: null, abortController: null,
+    prompts: [], tokenUsage: emptyLlmUsageCounters(),
   };
   controller.invalidate();
   return true;
 }
 
-export async function beginHistoricalAutopilotSimulation(controller) {
+export async function beginHistoricalAutopilotSimulation(controller, { requestDecision } = {}) {
   const { state } = controller;
   const workspace = state.settingsPanel?.modelTestWorkspace;
   const run = workspace?.run;
@@ -49,6 +51,7 @@ export async function beginHistoricalAutopilotSimulation(controller) {
     startedAt: Date.now(), elapsedMs: 0, blocks: [], scroll: 0, maxScroll: 0,
     follow: true, unread: 0, unreadBlockIds: new Set(), result: null, error: null,
     abortController: { abort: () => operation.abort() },
+    prompts: [], tokenUsage: emptyLlmUsageCounters(),
   });
   state.settingsTestAbortController = { abort: () => operation.abort() };
   pushBlock(workspace, {
@@ -71,7 +74,9 @@ export async function beginHistoricalAutopilotSimulation(controller) {
       run,
       settings: state.settings,
       signal: operation.signal,
+      ...(requestDecision ? { requestDecision } : {}),
       onEvent: (event) => updateSimulationEvent(controller, event),
+      onPrompt: (prompt) => captureSimulationPrompt(controller, workspace, prompt),
       onDecision: ({ mode, scenario, result: decision }) => {
         pushDecisionBlock(workspace, mode, scenario, decision);
         workspace.status = `${mode === 'guarded' ? 'Guarded' : 'Full'} · ${scenario.label}`;
@@ -84,6 +89,7 @@ export async function beginHistoricalAutopilotSimulation(controller) {
       id: 'autopilot-result', title: 'Comparison', status: 'done', result,
       lines: comparisonSummary(result),
     });
+    addSimulationTokenUsageBlock(workspace);
     return true;
   } catch (error) {
     const cancelled = operation.signal.aborted || error?.name === 'AbortError' || ['ABORT_ERR', 'cancelled'].includes(error?.code);
@@ -94,6 +100,7 @@ export async function beginHistoricalAutopilotSimulation(controller) {
       status: cancelled ? 'pending' : 'error',
       lines: [cancelled ? 'The simulation was cancelled. Nothing was changed.' : error.message],
     });
+    addSimulationTokenUsageBlock(workspace);
     return false;
   } finally {
     clearInterval(timer);
@@ -110,6 +117,7 @@ export async function simulateHistoricalAutopilotRun({
   settings,
   signal = null,
   onEvent = () => {},
+  onPrompt = () => {},
   onDecision = () => {},
   requestDecision = requestAutonomyDecision,
 }) {
@@ -143,6 +151,14 @@ export async function simulateHistoricalAutopilotRun({
           allowedActions: scenario.allowedActions,
           signal,
           onEvent: (event) => onEvent({ ...event, simulationMode: mode, simulationGate: scenario.gate }),
+          completionOptions: {
+            onPrompt: (prompt) => onPrompt({
+              ...prompt,
+              simulationMode: mode,
+              simulationGate: scenario.gate,
+              simulationLabel: scenario.label,
+            }),
+          },
         });
         decision = {
           ...proposed,
@@ -362,6 +378,51 @@ function pushBlock(workspace, block) {
   }
 }
 
+function captureSimulationPrompt(controller, workspace, prompt) {
+  const index = (workspace.prompts?.length ?? 0) + 1;
+  workspace.prompts ??= [];
+  workspace.prompts.push({
+    id: `autopilot-prompt-${index}`,
+    label: `${prompt.simulationMode === 'guarded' ? 'Guarded' : 'Full'} · ${prompt.simulationLabel || prompt.simulationGate || `request ${index}`}`,
+    provider: prompt.provider,
+    model: prompt.model,
+    structured: prompt.structured,
+    maxTokens: prompt.maxTokens,
+    reasoningEffort: prompt.reasoningEffort,
+    messages: prompt.messages,
+  });
+  const messageCount = workspace.prompts.reduce((total, item) => total + (item.messages?.length ?? 0), 0);
+  const characters = workspace.prompts.reduce((total, item) => total + (item.messages ?? [])
+    .reduce((sum, message) => sum + String(message?.content ?? '').length, 0), 0);
+  pushBlock(workspace, {
+    id: 'prompts', title: 'Prompts', status: 'done',
+    lines: [
+      `${workspace.prompts.length} request${workspace.prompts.length === 1 ? '' : 's'} · ${messageCount} messages · ${formatCount(characters)} characters`,
+      'Press P to inspect the exact system and user messages sent to the model.',
+    ],
+  });
+  controller.invalidate();
+}
+
+function addSimulationTokenUsageBlock(workspace) {
+  const usage = workspace.tokenUsage ?? emptyLlmUsageCounters();
+  if ((usage.requests ?? 0) < 1) return;
+  pushBlock(workspace, {
+    id: 'token-usage', title: 'Token usage', status: 'done',
+    lines: [
+      `Requests: ${formatCount(usage.requests)}`,
+      `Input tokens: ${formatCount(usage.inputTokens)}`,
+      `Output tokens: ${formatCount(usage.outputTokens)}`,
+      `Total tokens: ${formatCount(Number(usage.inputTokens ?? 0) + Number(usage.outputTokens ?? 0))}`,
+      `Measurement: ${formatCount(usage.exactRequests)} exact · ${formatCount(usage.estimatedRequests)} estimated`,
+    ],
+  });
+}
+
+function formatCount(value) {
+  return Math.max(0, Number(value) || 0).toLocaleString('en-US');
+}
+
 function updateSimulationEvent(controller, event) {
   const workspace = controller.state.settingsPanel?.modelTestWorkspace;
   if (!workspace || workspace.kind !== 'autopilot') return;
@@ -380,6 +441,8 @@ function updateSimulationEvent(controller, event) {
     if (block) Object.assign(block, { status: 'done', streaming: false });
   } else if (event.type === 'request') {
     workspace.status = `${event.simulationMode} · ${event.simulationGate} · contacting model`;
+  } else if (event.type === 'token-usage') {
+    mergeLlmUsageCounters(workspace.tokenUsage, event.usage);
   }
   controller.invalidate();
 }

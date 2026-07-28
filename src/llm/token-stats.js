@@ -23,8 +23,13 @@ export async function loadLlmTokenStats() {
   return normalizeStats(await readJson(statsPath(), null));
 }
 
-export async function recordLlmTokenUsage({ provider, model, messages, completion, requestCount = 1, outputCharacters = null, now = new Date() }) {
-  const usage = normalizeCompletionUsage(completion?.usage, { messages, completion, requestCount, outputCharacters });
+export async function recordLlmTokenUsage({
+  provider, model, messages, completion, requestCount = 1, outputCharacters = null,
+  normalizedUsage = null, now = new Date(),
+}) {
+  const usage = normalizedUsage ?? normalizeCompletionUsage(completion?.usage, {
+    messages, completion, requestCount, outputCharacters,
+  });
   return withStorageLease('llm-token-stats', async () => {
     const current = normalizeStats(await readJson(statsPath(), null));
     const providerId = String(provider || 'unknown');
@@ -71,19 +76,26 @@ export function createLlmTokenTracker({ enabled, provider, model, messages, onEv
   let requestCount = 0;
   let outputCharacters = 0;
   const emit = (event) => {
-    if (enabled && event?.type === 'request') requestCount += 1;
-    if (enabled && event?.type === 'chunk') {
+    if (event?.type === 'request') requestCount += 1;
+    if (event?.type === 'chunk') {
       outputCharacters += String(event.contentDelta ?? '').length + String(event.reasoningDelta ?? '').length;
     }
     onEvent(event);
   };
   const persist = async (completion, { failed = false } = {}) => {
-    if (!enabled || requestCount < 1) return;
+    if (requestCount < 1) return;
     const value = completion ?? { content: '', reasoning: '', usage: null };
+    const usage = normalizeCompletionUsage(value.usage, {
+      messages, completion: value, requestCount,
+      outputCharacters: failed ? outputCharacters : null,
+    });
+    onEvent({ type: 'token-usage', provider, model, usage, failed });
+    if (!enabled) return;
     try {
       await recordLlmTokenUsage({
         provider, model, messages, completion: value, requestCount,
         outputCharacters: failed ? outputCharacters : null,
+        normalizedUsage: usage,
       });
     } catch (error) {
       onEvent({ type: 'token-stats-error', error: error?.message ?? String(error) });
@@ -97,6 +109,16 @@ export function createLlmTokenTracker({ enabled, provider, model, messages, onEv
       usage: error?.usage ?? error?.diagnostics?.usage ?? null,
     }, { failed: true }),
   };
+}
+
+export function emptyLlmUsageCounters() {
+  return emptyCounters();
+}
+
+export function mergeLlmUsageCounters(target, usage = {}) {
+  const result = target ?? emptyCounters();
+  addUsage(result, usage);
+  return result;
 }
 
 function unwrapUsage(rawUsage) {

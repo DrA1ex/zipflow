@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.7.2 — Replay prompt visibility, per-run usage, and safe model-test cancellation
+
+- Capture the exact system and user messages sent by historical model replay and historical autopilot simulation, summarize them in the replay stream, and open the complete request log with `P`.
+- Include captured prompts in copied replay diagnostics so provider-specific requests can be inspected after failures.
+- Show input, output, total, and exact-versus-estimated token usage at the end of both historical replay modes, regardless of whether persistent token statistics are enabled.
+- Show the token cost of the connection and compatibility test directly in its result row and description.
+- Make `Esc` cancel an active model test without closing Settings or exiting Zipflow, and absorb repeated Escape events while cancellation settles.
+- Add regression coverage for replay prompts, autopilot prompts, exact per-run token totals, usage events with persistent tracking disabled, and Escape cancellation routing.
+
 ## 1.7.1 — Model-test prompt visibility and live token totals
 
 - Refresh the Local LLM token-statistics snapshot as soon as a compatibility test finishes, so returning from **Test selected model** immediately shows the new input/output totals.

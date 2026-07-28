@@ -1,9 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  beginHistoricalAutopilotSimulation,
   historicalAutopilotScenarios,
   simulateHistoricalAutopilotRun,
+  startHistoricalAutopilotSimulation,
 } from '../src/app/settings-autopilot-replay.js';
+import { createInitialState } from '../src/app/state.js';
+import { ZipflowController } from '../src/app/controller.js';
+import { DEFAULT_SETTINGS } from '../src/settings/store.js';
 
 test('historical autopilot simulation compares guarded and full modes without mutating the run', async () => {
   const run = fixtureRun();
@@ -51,6 +56,86 @@ test('low-confidence model proposals are shown as ask-user fallbacks', async () 
     assert.ok(result.modes[mode].decisions.every((item) => item.action === 'ask-user'));
     assert.ok(result.modes[mode].decisions.every((item) => item.source === 'confidence-fallback'));
   }
+});
+
+test('historical autopilot simulation exposes exact prompts and per-request token usage events', async () => {
+  const run = fixtureRun({ conflicts: false, failedChecks: false, deploy: false });
+  const prompts = [];
+  const usage = [];
+  await simulateHistoricalAutopilotRun({
+    run,
+    settings: { llmProvider: 'codex', llmModel: 'gpt-test' },
+    onPrompt: (prompt) => prompts.push(prompt),
+    onEvent: (event) => {
+      if (event.type === 'token-usage') usage.push(event);
+    },
+    requestDecision: async ({ mode, gate, completionOptions, onEvent }) => {
+      completionOptions.onPrompt({
+        provider: 'codex', model: 'gpt-test', structured: true, maxTokens: 700,
+        messages: [
+          { role: 'system', content: `Decide ${gate} in ${mode}.` },
+          { role: 'user', content: `Historical context for ${gate}.` },
+        ],
+      });
+      onEvent({
+        type: 'token-usage',
+        usage: { requests: 1, inputTokens: 40, outputTokens: 10, exactRequests: 1, estimatedRequests: 0 },
+      });
+      return {
+        gate, action: gate === 'result-commit' ? 'create-new' : 'apply', targetId: null,
+        confidence: 0.95, effectiveConfidence: 0.95, accepted: true,
+        summary: `${mode} decision`, evidence: [], risks: [], conditions: [],
+      };
+    },
+  });
+
+  assert.equal(prompts.length, 4);
+  assert.equal(usage.length, 4);
+  assert.ok(prompts.every((prompt) => prompt.messages.some((message) => message.role === 'user')));
+  assert.ok(prompts.some((prompt) => prompt.simulationMode === 'guarded' && prompt.simulationGate === 'plan-application'));
+  assert.ok(usage.every((event) => event.usage.inputTokens === 40 && event.usage.outputTokens === 10));
+});
+
+test('autopilot simulation workspace ends with prompt and token-usage summaries', async () => {
+  const run = fixtureRun({ conflicts: false, failedChecks: false, deploy: false });
+  run.autopilotReplayAvailable = true;
+  const state = createInitialState();
+  state.project = { name: 'fixture', root: '/tmp/fixture' };
+  state.settings = { ...DEFAULT_SETTINGS, llmProvider: 'codex', llmModel: 'gpt-test' };
+  state.settingsPanel = { autopilotReplayRuns: [run] };
+  const controller = new ZipflowController(state);
+  controller.invalidate = () => {};
+
+  assert.equal(startHistoricalAutopilotSimulation(controller, run.id), true);
+  const completed = await beginHistoricalAutopilotSimulation(controller, {
+    requestDecision: async ({ mode, gate, completionOptions, onEvent }) => {
+      completionOptions.onPrompt({
+        provider: 'codex', model: 'gpt-test', structured: true, maxTokens: 700,
+        messages: [
+          { role: 'system', content: `Decide ${gate} in ${mode}.` },
+          { role: 'user', content: `Historical context for ${gate}.` },
+        ],
+      });
+      onEvent({
+        type: 'token-usage',
+        usage: { requests: 1, inputTokens: 40, outputTokens: 10, exactRequests: 1, estimatedRequests: 0 },
+      });
+      return {
+        gate, action: gate === 'result-commit' ? 'create-new' : 'apply', targetId: null,
+        confidence: 0.95, effectiveConfidence: 0.95, accepted: true,
+        summary: `${mode} decision`, evidence: [], risks: [], conditions: [],
+      };
+    },
+  });
+
+  const workspace = state.settingsPanel.modelTestWorkspace;
+  assert.equal(completed, true);
+  assert.equal(workspace.prompts.length, 4);
+  assert.deepEqual(workspace.tokenUsage, {
+    requests: 4, inputTokens: 160, outputTokens: 40, exactRequests: 4, estimatedRequests: 0,
+  });
+  assert.ok(workspace.blocks.some((block) => block.id === 'prompts'));
+  assert.ok(workspace.blocks.some((block) => block.id === 'token-usage' && block.lines.includes('Total tokens: 200')));
 });
 
 test('scenario reconstruction includes only gates supported by historical state', () => {

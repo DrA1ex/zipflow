@@ -12,7 +12,9 @@ import { createBackup } from '../src/apply/backup.js';
 import { loadManagedHistory, updateManagedHistory } from '../src/history/managed.js';
 import { settingsChoices, settingsDefinitions, settingsParameters } from '../src/app/settings-options.js';
 import { DEFAULT_SETTINGS, normalizeSettings } from '../src/settings/store.js';
-import { beginHistoricalModelReplay, startHistoricalModelReplay, updateReplayWorkspace } from '../src/app/settings-model-replay.js';
+import {
+  beginHistoricalModelReplay, handleModelReplayWorkspaceKey, startHistoricalModelReplay, updateReplayWorkspace,
+} from '../src/app/settings-model-replay.js';
 import { showRunDetails } from '../src/app/run-rollback.js';
 import { exists, readJson, writeJsonAtomic } from '../src/utils/fs.js';
 import { hashFile } from '../src/utils/hash.js';
@@ -98,6 +100,8 @@ test('historical model replay uses the stored patch and never changes project fi
       if (url.endsWith('/api/chat')) return jsonResponse({
         message: { content: 'SUMMARY:\n- Historical patch reviewed.\nCOMMIT MESSAGE:\nReview historical patch' },
         done: true,
+        prompt_eval_count: 25,
+        eval_count: 8,
       });
       throw new Error(`Unexpected URL: ${url}`);
     };
@@ -132,6 +136,16 @@ test('historical model replay uses the stored patch and never changes project fi
     assert.ok(state.settingsPanel.modelTestWorkspace.blocks.some((block) => block.id === 'model-profile'));
     assert.ok(state.settingsPanel.modelTestWorkspace.blocks.some((block) => block.id === 'delivery'));
     assert.ok(state.settingsPanel.modelTestWorkspace.blocks.some((block) => block.id === 'parsed-result'));
+    assert.ok(state.settingsPanel.modelTestWorkspace.blocks.some((block) => block.id === 'prompts'));
+    assert.ok(state.settingsPanel.modelTestWorkspace.blocks.some((block) => block.id === 'token-usage'));
+    assert.equal(state.settingsPanel.modelTestWorkspace.prompts.length, 1);
+    assert.match(state.settingsPanel.modelTestWorkspace.prompts[0].messages.find((message) => message.role === 'user').content, /diff --git a\/src\/value\.js/);
+    assert.deepEqual(state.settingsPanel.modelTestWorkspace.tokenUsage, {
+      requests: 1, inputTokens: 25, outputTokens: 8, exactRequests: 1, estimatedRequests: 0,
+    });
+    await handleModelReplayWorkspaceKey(controller, { name: 'p', text: 'p', printable: true });
+    assert.equal(state.settingsPanel.modelPromptView.prompt.requests.length, 1);
+    assert.match(state.settingsPanel.modelPromptView.prompt.requests[0].messages[0].content, /source-code patches/);
   } finally {
     globalThis.fetch = originalFetch;
   }

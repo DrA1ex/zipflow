@@ -95,14 +95,22 @@ test('interrupted provider output is retained as estimated token usage', async (
 }));
 
 test('disabled token tracking does not create request totals', async () => withTokenStatsHome(async () => {
+  const events = [];
   const fetchImpl = async () => new Response(JSON.stringify({
     message: { content: 'done' }, done: true, prompt_eval_count: 5, eval_count: 2,
   }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   await createLocalCompletion({
     provider: 'ollama', model: 'qwen-test', messages: [{ role: 'user', content: 'test' }], maxTokens: 32,
-  }, { fetchImpl, settings: { ...DEFAULT_SETTINGS, llmTrackTokenUsage: false } });
+  }, {
+    fetchImpl,
+    settings: { ...DEFAULT_SETTINGS, llmTrackTokenUsage: false },
+    onEvent: (event) => events.push(event),
+  });
   const stats = await loadLlmTokenStats();
   assert.equal(stats.totals.requests, 0);
+  assert.deepEqual(events.find((event) => event.type === 'token-usage')?.usage, {
+    requests: 1, inputTokens: 5, outputTokens: 2, exactRequests: 1, estimatedRequests: 0,
+  });
 }));
 
 test('Local LLM settings show token statistics only when tracking is enabled', () => {

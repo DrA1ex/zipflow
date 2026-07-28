@@ -155,8 +155,15 @@ export async function handleSettingsKey(controller, key) {
   if (panel.modelPromptView) return handleModelPromptViewKey(controller, key);
   if (panel.modelTestWorkspace) return handleModelReplayWorkspaceKey(controller, key);
   if (panel.modelTest?.running && key.name === 'escape') {
-    controller.state.settingsTestAbortController?.abort();
-    controller.setStatus('Cancelling model test…');
+    if (!panel.modelTest.cancellationRequested) {
+      panel.modelTest.cancellationRequested = true;
+      panel.modelTestEscapeGuardUntil = Number.POSITIVE_INFINITY;
+      controller.state.settingsTestAbortController?.abort();
+      controller.setStatus('Cancelling model test…');
+    }
+    return true;
+  }
+  if (key.name === 'escape' && Number(panel.modelTestEscapeGuardUntil ?? 0) > Date.now()) {
     return true;
   }
   if (controller.state.activeOperation && settingsKeyCanMutate(key)) {
@@ -652,7 +659,7 @@ function handleModelPromptViewKey(controller, key) {
   if (!view) return false;
   if (key.name === 'escape' || key.name === 'left') {
     controller.state.settingsPanel.modelPromptView = null;
-    controller.state.status = 'Model tests';
+    controller.state.status = view.returnStatus || (controller.state.settingsPanel?.modelTestWorkspace?.status ?? 'Model tests');
     controller.invalidate();
     return true;
   }

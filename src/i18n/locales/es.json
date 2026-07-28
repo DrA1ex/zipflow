@@ -288,7 +288,10 @@
     "No prompt messages were captured.": "No se capturó ningún mensaje del prompt.",
     "↑/↓ scroll · PgUp/PgDn · Home/End · Esc close": "↑/↓ desplazar · PgUp/PgDn · Home/End · Esc cerrar",
     "Summary generation is disabled.": "La generación del resumen está desactivada.",
-    "Model test prompt": "Prompt de la prueba del modelo"
+    "Model test prompt": "Prompt de la prueba del modelo",
+    "Token usage": "Uso de tokens",
+    "↑/↓ scroll · PgUp/PgDn · End latest · P prompts · Esc cancel": "↑/↓ desplazar · PgUp/PgDn · Fin último · P prompts · Esc cancelar",
+    "↑/↓ scroll · PgUp/PgDn · P prompts · C copy · D diagnostics · Esc close": "↑/↓ desplazar · PgUp/PgDn · P prompts · C copiar · D diagnóstico · Esc cerrar"
   },
   "patterns": [
     {

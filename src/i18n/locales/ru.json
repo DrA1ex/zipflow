@@ -1497,7 +1497,10 @@
     "No prompt messages were captured.": "Сообщения промпта не были сохранены.",
     "↑/↓ scroll · PgUp/PgDn · Home/End · Esc close": "↑/↓ — прокрутка · PgUp/PgDn · Home/End · Esc — закрыть",
     "Summary generation is disabled.": "Создание сводки отключено.",
-    "Model test prompt": "Промпт проверки модели"
+    "Model test prompt": "Промпт проверки модели",
+    "Token usage": "Использование токенов",
+    "↑/↓ scroll · PgUp/PgDn · End latest · P prompts · Esc cancel": "↑/↓ — прокрутка · PgUp/PgDn · End — к последнему · P — промпты · Esc — отмена",
+    "↑/↓ scroll · PgUp/PgDn · P prompts · C copy · D diagnostics · Esc close": "↑/↓ — прокрутка · PgUp/PgDn · P — промпты · C — копировать · D — диагностика · Esc — закрыть"
   },
   "patterns": [
     {
