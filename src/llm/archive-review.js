@@ -31,7 +31,7 @@ export async function reviewArchiveStructure({ settings, project, workflow, extr
   let session = options.session;
   if (!session) {
     session = await resolveLocalLlmSession(settings, {
-      fetchImpl: options.fetchImpl, timeoutMs: options.metadataTimeoutMs ?? 10_000, signal: options.signal,
+      ...options, fetchImpl: options.fetchImpl, timeoutMs: options.metadataTimeoutMs ?? 10_000, signal: options.signal,
     });
     notify({ type: 'model-profile', profile: session.profile });
   }
@@ -96,7 +96,7 @@ export async function reviewArchiveSample({ settings, project, workflow, extract
   let session = options.session;
   if (!session) {
     session = await resolveLocalLlmSession(settings, {
-      fetchImpl: options.fetchImpl, timeoutMs: options.metadataTimeoutMs ?? 10_000, signal: options.signal,
+      ...options, fetchImpl: options.fetchImpl, timeoutMs: options.metadataTimeoutMs ?? 10_000, signal: options.signal,
     });
     notify({ type: 'model-profile', profile: session.profile });
   }
@@ -173,7 +173,7 @@ export async function reviewSnapshotDeletionIntent({ settings, project, workflow
   let session = options.session;
   if (!session) {
     session = await resolveLocalLlmSession(settings, {
-      fetchImpl: options.fetchImpl, timeoutMs: options.metadataTimeoutMs ?? 10_000, signal: options.signal,
+      ...options, fetchImpl: options.fetchImpl, timeoutMs: options.metadataTimeoutMs ?? 10_000, signal: options.signal,
     });
     notify({ type: 'model-profile', profile: session.profile });
   }

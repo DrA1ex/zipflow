@@ -2,6 +2,7 @@ import { classifyServerError, LocalLlmError, normalizeServerError } from './erro
 import { appendChunk, completeResult, emptyCompletion } from './completion-state.js';
 import { ByteChunkCollector } from '../utils/byte-buffer.js';
 import { createCodexAppServerCompletion, listCodexAppServerModels } from './codex-app-server.js';
+import { createLlmTokenTracker } from './token-stats.js';
 import {
   deadlineError, normalizeLlmStreamLimits, responseLimitError, SseEventParser,
 } from './stream-limits.js';
@@ -153,27 +154,37 @@ export async function createLocalCompletion({
     totalDeadlineMs: totalDeadlineMs ?? streamLimits?.totalDeadlineMs,
     idleTimeoutMs: idleTimeoutMs ?? streamLimits?.idleTimeoutMs,
   }, { timeoutMs });
-  const requestOptions = { fetchImpl, limits, onEvent, signal };
-  if (provider === 'codex') {
-    return createCodexAppServerCompletion({ model, messages, responseSchema, reasoningEffort, maxTokens }, {
-      settings, signal, timeoutMs: limits.totalDeadlineMs, idleTimeoutMs: limits.idleTimeoutMs,
-      rpcTimeoutMs: limits.connectionTimeoutMs,
-      maxAnswerBytes: limits.maxAnswerBytes, maxReasoningBytes: limits.maxReasoningBytes,
-      onEvent, spawnImpl, executable, endpoint: codexEndpoint, apiToken,
-      ...(connectImpl ? { connectImpl } : {}), ...(sleepImpl ? { sleepImpl } : {}),
-    });
+  const tracker = createLlmTokenTracker({
+    enabled: settings?.llmTrackTokenUsage === true, provider, model, messages, onEvent,
+  });
+  const requestOptions = { fetchImpl, limits, onEvent: tracker.onEvent, signal };
+  try {
+    let completion;
+    if (provider === 'codex') {
+      completion = await createCodexAppServerCompletion({ model, messages, responseSchema, reasoningEffort, maxTokens }, {
+        settings, signal, timeoutMs: limits.totalDeadlineMs, idleTimeoutMs: limits.idleTimeoutMs,
+        rpcTimeoutMs: limits.connectionTimeoutMs,
+        maxAnswerBytes: limits.maxAnswerBytes, maxReasoningBytes: limits.maxReasoningBytes,
+        onEvent: tracker.onEvent, spawnImpl, executable, endpoint: codexEndpoint, apiToken,
+        ...(connectImpl ? { connectImpl } : {}), ...(sleepImpl ? { sleepImpl } : {}),
+      });
+    } else if (provider === 'lmstudio') {
+      completion = await createLmStudioCompletion({
+        model, messages, maxTokens, apiToken, contextLength, reasoningOffSupported, loadedModel,
+      }, requestOptions);
+    } else if (provider === 'ollama') {
+      completion = await createOllamaCompletion({ model, messages, responseSchema, maxTokens, apiToken }, requestOptions);
+    } else {
+      completion = await createOpenAiCompatibleCompletion({
+        provider, model, messages, responseSchema, maxTokens, apiToken, baseUrl, apiMode, reasoningEffort,
+      }, requestOptions);
+    }
+    await tracker.complete(completion);
+    return completion;
+  } catch (error) {
+    await tracker.fail(error);
+    throw error;
   }
-  if (provider === 'lmstudio') {
-    return createLmStudioCompletion({
-      model, messages, maxTokens, apiToken, contextLength, reasoningOffSupported, loadedModel,
-    }, requestOptions);
-  }
-  if (provider === 'ollama') {
-    return createOllamaCompletion({ model, messages, responseSchema, maxTokens, apiToken }, requestOptions);
-  }
-  return createOpenAiCompatibleCompletion({
-    provider, model, messages, responseSchema, maxTokens, apiToken, baseUrl, apiMode, reasoningEffort,
-  }, requestOptions);
 }
 
 async function createLmStudioCompletion({

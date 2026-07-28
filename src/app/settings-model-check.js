@@ -22,7 +22,7 @@ export async function testSelectedModel(controller, { fetchImpl = fetch, complet
   state.status = `Testing ${settings.llmModel}`;
   controller.invalidate();
   try {
-    const session = await resolveLocalLlmSession(settings, { signal: operation.signal, fetchImpl });
+    const session = await resolveLocalLlmSession(settings, { ...completionOptions, signal: operation.signal, fetchImpl });
     let streamSupported = false;
     const compatibilityMarker = 'ZIPFLOW_COMPATIBILITY_OK';
     const completion = await createLocalCompletion({

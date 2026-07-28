@@ -1466,7 +1466,31 @@
     "Supported endpoints: unix:///absolute/path, ws://127.0.0.1:4500, wss://host/path, and stdio://.": "Supported endpoints: unix:///absolute/path, ws://127.0.0.1:4500, wss://host/path, and stdio://.",
     "Enable Use an external Codex server to edit this endpoint.": "Enable Use an external Codex server to edit this endpoint.",
     "Supported: unix:///absolute/path, ws://127.0.0.1:4500, wss://host/path, and stdio://.": "Supported: unix:///absolute/path, ws://127.0.0.1:4500, wss://host/path, and stdio://.",
-    "When Use an external Codex server is enabled, Zipflow uses this value instead of the managed default endpoint.": "When Use an external Codex server is enabled, Zipflow uses this value instead of the managed default endpoint."
+    "When Use an external Codex server is enabled, Zipflow uses this value instead of the managed default endpoint.": "When Use an external Codex server is enabled, Zipflow uses this value instead of the managed default endpoint.",
+    "LLM token statistics": "LLM token statistics",
+    "Track token usage": "Track token usage",
+    "Accumulate input and output token counts for successful LLM requests. Exact provider usage is preferred; otherwise Zipflow records an estimate.": "Accumulate input and output token counts for successful LLM requests. Exact provider usage is preferred; otherwise Zipflow records an estimate.",
+    "Token statistics": "Token statistics",
+    "View accumulated token usage by provider and model, or reset all collected statistics.": "View accumulated token usage by provider and model, or reset all collected statistics.",
+    "Loading token statistics…": "Loading token statistics…",
+    "Requests": "Requests",
+    "Successful LLM requests recorded since the last reset.": "Successful LLM requests recorded since the last reset.",
+    "Input tokens": "Input tokens",
+    "Tokens sent to all configured LLM providers.": "Tokens sent to all configured LLM providers.",
+    "Output tokens": "Output tokens",
+    "Tokens returned by all configured LLM providers.": "Tokens returned by all configured LLM providers.",
+    "Total tokens": "Total tokens",
+    "Combined input and output token usage.": "Combined input and output token usage.",
+    "Measurement": "Measurement",
+    "Exact usage comes from provider metadata. Estimates are used only when a provider omits usage.": "Exact usage comes from provider metadata. Estimates are used only when a provider omits usage.",
+    "Since reset": "Since reset",
+    "Statistics persist across Zipflow runs until reset.": "Statistics persist across Zipflow runs until reset.",
+    "Provider total.": "Provider total.",
+    "Model total.": "Model total.",
+    "Reset statistics": "Reset statistics",
+    "Permanently clear all accumulated LLM token statistics.": "Permanently clear all accumulated LLM token statistics.",
+    "LLM token statistics reset": "LLM token statistics reset",
+    "Could not reset LLM token statistics": "Could not reset LLM token statistics"
   },
   "patterns": [
     {
@@ -2032,6 +2056,18 @@
     {
       "source": "Run {runId} stopped during {stage}.",
       "target": "Run {runId} stopped during {stage}."
+    },
+    {
+      "source": "{count} exact · {estimated} estimated",
+      "target": "{count} exact · {estimated} estimated"
+    },
+    {
+      "source": "{input} in · {output} out",
+      "target": "{input} in · {output} out"
+    },
+    {
+      "source": "{requests} requests · {input} in · {output} out",
+      "target": "{requests} requests · {input} in · {output} out"
     }
   ]
 }

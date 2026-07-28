@@ -3,6 +3,7 @@ import { handleInputEditorKey } from 'terlio.js';
 import { isModifiedEnter, isPlainEnter } from './editor-enter.js';
 import { loadManagedHistory, resetManagedHistory } from '../history/managed.js';
 import { updateSettings } from '../settings/store.js';
+import { loadLlmTokenStats, resetLlmTokenStats } from '../llm/token-stats.js';
 import { ensureDir } from '../utils/fs.js';
 import { expandHome } from '../utils/paths.js';
 import { setScreen } from './state.js';
@@ -80,6 +81,9 @@ export async function openSettings(controller, { categoryId = null } = {}) {
     detectedBinaries: {},
     loadingBinaries: false,
     binaryError: null,
+    tokenStats: null,
+    tokenStatsLoading: false,
+    tokenStatsError: null,
     modal: null,
     modelConfig: null,
     choiceSearch: null,
@@ -90,6 +94,7 @@ export async function openSettings(controller, { categoryId = null } = {}) {
   await Promise.all([
     refreshSettingsStorage(controller, { quiet: true }),
     refreshSettingsBinaries(controller, { quiet: true }),
+    refreshLlmTokenStats(controller, { quiet: true }),
   ]);
   if (state.settings.llmProvider !== 'disabled') await refreshModels(controller, { quiet: true });
   return true;
@@ -339,6 +344,7 @@ function toggleSettingsPane(controller) {
 function subpageOriginParameterId(subpage) {
   if (subpage === 'llmTasks') return 'llmTasks';
   if (subpage === 'llmLanguages') return 'llmLanguages';
+  if (subpage === 'llmTokenStats') return 'llmTokenStats';
   return 'llmModelTests';
 }
 
@@ -419,6 +425,20 @@ async function activateParameter(controller) {
       const statuses = Object.values(state.settingsPanel?.binaries ?? {});
       const valid = statuses.filter((item) => item.valid).length;
       controller.toast(`${valid}/${statuses.length} executables available`, valid === statuses.length ? 'success' : 'warning');
+    } else if (parameter.action === 'llm-token-stats-reset') {
+      state.settingsPanel.tokenStatsLoading = true;
+      state.settingsPanel.tokenStatsError = null;
+      controller.invalidate();
+      try {
+        state.settingsPanel.tokenStats = await resetLlmTokenStats();
+        controller.toast('LLM token statistics reset', 'success');
+      } catch (error) {
+        state.settingsPanel.tokenStatsError = error?.message ?? String(error);
+        controller.toast('Could not reset LLM token statistics', 'error');
+      } finally {
+        state.settingsPanel.tokenStatsLoading = false;
+        controller.invalidate();
+      }
     } else if (parameter.action === 'model-test-connection') await testSelectedModel(controller);
     else if (parameter.action === 'model-test-replay') {
       state.status = 'Loading historical updates';
@@ -459,6 +479,7 @@ async function activateParameter(controller) {
   }
   if (parameter.type === 'subpage') {
     state.settingsPanel.subpage = parameter.id;
+    if (parameter.id === 'llmTokenStats') await refreshLlmTokenStats(controller);
     state.settingsPanel.focus = 'parameters';
     state.settingsPanel.parameterIndices[currentDefinition(state).id] = 0;
     state.status = parameter.label;
@@ -615,3 +636,20 @@ function openSettingModal(controller, fieldId, returnParameterId) {
   controller.invalidate();
 }
 
+
+
+async function refreshLlmTokenStats(controller, { quiet = false } = {}) {
+  const panel = controller.state.settingsPanel;
+  if (!panel || panel.tokenStatsLoading) return;
+  panel.tokenStatsLoading = true;
+  panel.tokenStatsError = null;
+  if (!quiet) controller.invalidate();
+  try {
+    panel.tokenStats = await loadLlmTokenStats();
+  } catch (error) {
+    panel.tokenStatsError = error?.message ?? String(error);
+  } finally {
+    panel.tokenStatsLoading = false;
+    controller.invalidate();
+  }
+}

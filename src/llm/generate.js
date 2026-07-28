@@ -59,7 +59,7 @@ export async function generateChangeDescription({ settings, project, plan, patch
   if (!session) {
     notify({ type: 'phase', phase: 'model-info', label: 'Reading the selected model context limit' });
     session = await resolveLocalLlmSession(settings, {
-      fetchImpl: options.fetchImpl, timeoutMs: options.metadataTimeoutMs ?? 10_000, signal: options.signal,
+      ...options, fetchImpl: options.fetchImpl, timeoutMs: options.metadataTimeoutMs ?? 10_000, signal: options.signal,
     });
     notify({ type: 'model-profile', profile: session.profile });
   }

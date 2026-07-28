@@ -15,7 +15,7 @@ import {
   deleteLlmApiToken, readLlmApiToken, SecureCredentialStoreError, writeLlmApiToken,
 } from '../security/credential-store.js';
 
-export const SETTINGS_VERSION = 28;
+export const SETTINGS_VERSION = 29;
 export const THEME_NAMES = Object.keys(themes);
 export const LLM_PROVIDERS = ['disabled', 'ollama', 'lmstudio', 'openai', 'codex'];
 export const OPENAI_API_MODES = ['auto', 'responses', 'chat-completions'];
@@ -64,6 +64,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   llmChangeDelivery: 'adaptive',
   llmFailureAnalysis: 'new-context',
   llmVerboseOutput: false,
+  llmTrackTokenUsage: false,
   llmDecisionCompatibility: null,
   llmDecisionCompatibilityByModel: {},
   llmModelLoadConfigs: {},
@@ -366,6 +367,7 @@ export function normalizeSettings(settings) {
   if (!LLM_CHANGE_DELIVERY_MODES.includes(value.llmChangeDelivery)) value.llmChangeDelivery = DEFAULT_SETTINGS.llmChangeDelivery;
   if (!LLM_FAILURE_ANALYSIS_MODES.includes(value.llmFailureAnalysis)) value.llmFailureAnalysis = DEFAULT_SETTINGS.llmFailureAnalysis;
   value.llmVerboseOutput = value.llmVerboseOutput === true;
+  value.llmTrackTokenUsage = value.llmTrackTokenUsage === true;
   value.llmDecisionCompatibilityByModel = normalizeCompatibilityMap(value.llmDecisionCompatibilityByModel);
   const legacyCompatibility = normalizeDecisionCompatibility(value.llmDecisionCompatibility, value);
   if (legacyCompatibility) value.llmDecisionCompatibilityByModel[modelIdentityKey(value.llmProvider, value.llmModel)] = legacyCompatibility;

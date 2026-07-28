@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.7.0 — LLM token statistics and Codex context discovery
+
+- Add optional persistent LLM token accounting for Ollama, LM Studio, OpenAI-compatible servers, and Codex app-server.
+- Prefer exact provider usage metadata while clearly separating estimated requests when a provider, retry, or interrupted stream omits token counts.
+- Count retry attempts, partial failed generations, and the Codex context-profile probe instead of recording only successful final responses.
+- Add a detailed **Token statistics** settings page with global, provider, and per-model input/output totals plus a reset action.
+- Store counters separately from settings in `~/.zipflow/llm-token-stats.json`, using atomic writes and a multi-process storage lease; prompts, answers, and credentials are never stored there.
+- Replace the fixed 16,384-token Codex profile with the actual `modelContextWindow` reported by `thread/tokenUsage/updated`, caching the discovered profile for the selected model during the process lifetime.
+- Add regression coverage for exact and estimated usage, retries, interrupted streams, reset behavior, settings visibility, and a 262,144-token Codex context profile.
+
 ## 1.6.9 — Compact project header
 
 - Moved the active project path into the top Zipflow frame title.

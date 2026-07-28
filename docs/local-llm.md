@@ -26,6 +26,14 @@ The tasks do not depend on each other. For example, Zipflow can request only an 
 
 Ordinary summaries and verdicts are advisory. Local LLM failures do not block manual archive application.
 
+## Token usage statistics
+
+Enable **Track token usage** on the **Local LLM** settings page to accumulate input and output token counts for every provider. When enabled, **Token statistics** appears at the bottom of that page and opens totals for all providers, each provider, and each selected model. **Reset statistics** clears the accumulated counters without changing the provider or model configuration.
+
+Zipflow prefers exact usage metadata reported by Ollama, LM Studio, OpenAI-compatible APIs, and Codex app-server. When a provider omits usage, a schema attempt is rejected before usage is reported, or a stream ends with partial output, Zipflow records a local estimate and labels that request as estimated. Retry attempts are counted separately, so fallback from one protocol or structured-output mode to another is not hidden. The statistics file contains only counters and timestamps; it never stores prompts, model responses, patches, or credentials.
+
+Tracking applies to ordinary reviews, summaries, commit-message generation, failed-check explanations, model compatibility tests, historical replay, and autopilot requests because they all pass through the shared completion client. The small Codex profile probe described below is also counted when tracking is enabled because it is a real model turn.
+
 ### Snapshot deletion intent
 
 The deletion-intent task runs automatically only when it is enabled, the current archive interpretation is a full snapshot, the plan contains removals, and Zipflow's deterministic partial-patch heuristic is suspicious. The same check can be requested manually from the plan or archive-safety menu.
@@ -83,7 +91,7 @@ The workflow commit-message source determines the preferred proposal, not the on
 
 ## Prompt budgets and retries
 
-Before generation, Zipflow discovers model context information where possible and calculates a conservative prompt budget that reserves space for instructions and output.
+Before generation, Zipflow discovers model context information where possible and calculates a conservative prompt budget that reserves space for instructions and output. For Codex app-server, Zipflow no longer assumes a 16,384-token window: when the model catalogue does not advertise a context size, it starts one tiny ephemeral read-only turn and reads the authoritative `modelContextWindow` from `thread/tokenUsage/updated`. The result is cached for that endpoint and model for the lifetime of the Zipflow process. Older servers that never report the event retain the conservative fallback.
 
 Large changes are shortened structurally rather than cut at an arbitrary byte offset. The changed-file manifest is retained and diff hunks are distributed across files.
 

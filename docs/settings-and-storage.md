@@ -11,7 +11,7 @@ Settings include:
 - compact or live running-check output;
 - validated absolute paths for Git, npm, Node.js, the system opener, Python, and gofmt;
 - sanitized or fully inherited environments for project checks and deployment commands;
-- local LLM provider, authentication, OpenAI-compatible base URL/API mode, OpenAI-compatible or Codex reasoning effort, model, load configuration, and languages;
+- local LLM provider, authentication, OpenAI-compatible base URL/API mode, OpenAI-compatible or Codex reasoning effort, model, load configuration, languages, and optional token-usage tracking;
 - independent LLM tasks for archive review, summaries, failed-check explanations, update commit messages, and dirty-tree checkpoint messages;
 - archive-review methods and change-delivery behavior;
 - source ZIP disposition;
@@ -30,6 +30,14 @@ Before replacing a valid settings file, Zipflow writes:
 ```text
 ~/.zipflow/settings.backup.json
 ```
+
+When LLM token tracking is enabled, counters are stored separately in:
+
+```text
+~/.zipflow/llm-token-stats.json
+```
+
+This document contains only aggregate request, input-token, output-token, exact-measurement, and estimated-measurement counters grouped by provider and model, plus reset/update timestamps. It is replaced atomically and coordinated through the `llm-token-stats` storage lease. Disabling tracking stops new writes but preserves the existing totals until **Reset statistics** is selected.
 
 The local LLM bearer token is not written to either settings file. Zipflow stores it through the operating-system credential service:
 
@@ -60,7 +68,7 @@ The sanitized policy preserves normal system paths, project and command-director
 
 ## Multi-process storage coordination
 
-Independent Zipflow processes coordinate Settings writes, managed archive-index mutations, backup cleanup, and run-history cleanup with short static owner-token leases under `~/.zipflow/leases/`. Reads are not leased, and leases do not produce periodic heartbeat writes. Active runs keep static ownership markers so another process does not prune their backup, temporary data, or history.
+Independent Zipflow processes coordinate Settings writes, LLM token-statistics updates, managed archive-index mutations, backup cleanup, and run-history cleanup with short static owner-token leases under `~/.zipflow/leases/`. Reads are not leased, and leases do not produce periodic heartbeat writes. Active runs keep static ownership markers so another process does not prune their backup, temporary data, or history.
 
 Settings carry a storage revision. A stale patch that changes an unrelated field is merged with the latest settings under the lease. A stale same-field update or full replacement stops with a conflict and must be reloaded, preventing silent lost updates.
 

@@ -17,7 +17,7 @@ export async function requestAutonomyDecision({
   completionOptions = {},
 }) {
   if (!allowedActions?.length) throw new Error(`No actions are available for autonomy gate ${gate}.`);
-  const session = await resolveLocalLlmSession(settings, { signal, fetchImpl });
+  const session = await resolveLocalLlmSession(settings, { ...completionOptions, signal, fetchImpl });
   const stateHash = hashText(stableJson(context?.state ?? context));
   const schema = decisionSchema(gate, allowedActions);
   const messages = decisionMessages({ mode, gate, context, allowedActions, stateHash });

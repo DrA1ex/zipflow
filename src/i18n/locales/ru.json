@@ -1466,7 +1466,31 @@
     "Supported endpoints: unix:///absolute/path, ws://127.0.0.1:4500, wss://host/path, and stdio://.": "Поддерживаются адреса: unix://, unix:///absolute/path, ws://localhost:port, wss://host/path и stdio://.",
     "Enable Use an external Codex server to edit this endpoint.": "Включите «Использовать внешний сервер Codex», чтобы изменить этот адрес.",
     "Supported: unix:///absolute/path, ws://127.0.0.1:4500, wss://host/path, and stdio://.": "Поддерживаются: unix://, unix:///absolute/path, ws://localhost:port, wss://host/path и stdio://.",
-    "When Use an external Codex server is enabled, Zipflow uses this value instead of the managed default endpoint.": "Когда включено «Использовать внешний сервер Codex», Zipflow использует это значение вместо управляемого адреса по умолчанию."
+    "When Use an external Codex server is enabled, Zipflow uses this value instead of the managed default endpoint.": "Когда включено «Использовать внешний сервер Codex», Zipflow использует это значение вместо управляемого адреса по умолчанию.",
+    "LLM token statistics": "Статистика токенов LLM",
+    "Track token usage": "Вести статистику токенов",
+    "Accumulate input and output token counts for successful LLM requests. Exact provider usage is preferred; otherwise Zipflow records an estimate.": "Накапливать количество входных и выходных токенов успешных запросов к LLM. Если провайдер сообщает точные данные, используются они; иначе Zipflow записывает оценку.",
+    "Token statistics": "Статистика токенов",
+    "View accumulated token usage by provider and model, or reset all collected statistics.": "Просмотреть накопленную статистику по провайдерам и моделям или сбросить её.",
+    "Loading token statistics…": "Загрузка статистики токенов…",
+    "Requests": "Запросы",
+    "Successful LLM requests recorded since the last reset.": "Успешные запросы к LLM с момента последнего сброса.",
+    "Input tokens": "Входные токены",
+    "Tokens sent to all configured LLM providers.": "Токены, отправленные всем настроенным провайдерам LLM.",
+    "Output tokens": "Выходные токены",
+    "Tokens returned by all configured LLM providers.": "Токены, возвращённые всеми настроенными провайдерами LLM.",
+    "Total tokens": "Всего токенов",
+    "Combined input and output token usage.": "Суммарное количество входных и выходных токенов.",
+    "Measurement": "Точность",
+    "Exact usage comes from provider metadata. Estimates are used only when a provider omits usage.": "Точные данные берутся из метаданных провайдера. Оценка используется только когда провайдер не сообщает статистику.",
+    "Since reset": "С момента сброса",
+    "Statistics persist across Zipflow runs until reset.": "Статистика сохраняется между запусками Zipflow до следующего сброса.",
+    "Provider total.": "Итого по провайдеру.",
+    "Model total.": "Итого по модели.",
+    "Reset statistics": "Сбросить статистику",
+    "Permanently clear all accumulated LLM token statistics.": "Безвозвратно удалить всю накопленную статистику токенов LLM.",
+    "LLM token statistics reset": "Статистика токенов LLM сброшена",
+    "Could not reset LLM token statistics": "Не удалось сбросить статистику токенов LLM"
   },
   "patterns": [
     {
@@ -2032,6 +2056,18 @@
     {
       "source": "Run {runId} stopped during {stage}.",
       "target": "Запуск {runId} был остановлен на этапе «{stage}»."
+    },
+    {
+      "source": "{count} exact · {estimated} estimated",
+      "target": "{count} точно · {estimated} оценочно"
+    },
+    {
+      "source": "{input} in · {output} out",
+      "target": "{input} вход · {output} выход"
+    },
+    {
+      "source": "{requests} requests · {input} in · {output} out",
+      "target": "{requests} запросов · {input} вход · {output} выход"
     }
   ]
 }

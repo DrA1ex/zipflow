@@ -4,6 +4,11 @@ export async function resolveLocalLlmSession(settings, {
   fetchImpl = fetch,
   timeoutMs = 10_000,
   signal = null,
+  spawnImpl = undefined,
+  executable = '',
+  codexEndpoint = '',
+  connectImpl = undefined,
+  sleepImpl = undefined,
 } = {}) {
   const apiToken = String(settings?.llmApiToken ?? '').trim();
   const preferredModel = settings.llmProvider === 'lmstudio' && settings.llmSelectedInstanceId
@@ -14,6 +19,12 @@ export async function resolveLocalLlmSession(settings, {
     timeoutMs,
     apiToken,
     signal,
+    settings,
+    spawnImpl,
+    executable,
+    codexEndpoint,
+    ...(connectImpl ? { connectImpl } : {}),
+    ...(sleepImpl ? { sleepImpl } : {}),
   });
   if (settings.llmProvider === 'lmstudio' && preferredModel !== settings.llmModel && profile.source === 'fallback') {
     profile = await getLocalModelProfile(settings.llmProvider, settings.llmModel, {
@@ -21,6 +32,12 @@ export async function resolveLocalLlmSession(settings, {
       timeoutMs,
       apiToken,
       signal,
+      settings,
+      spawnImpl,
+      executable,
+      codexEndpoint,
+      ...(connectImpl ? { connectImpl } : {}),
+      ...(sleepImpl ? { sleepImpl } : {}),
     });
   }
   applyConfiguredContext(settings, profile);

@@ -7,6 +7,7 @@ import { resolveInternalBinary } from '../security/binaries.js';
 import { ByteChunkCollector } from '../utils/byte-buffer.js';
 import { ZIPFLOW_VERSION } from '../version.js';
 import { classifyServerError, LocalLlmError } from './errors.js';
+import { recordLlmTokenUsage } from './token-stats.js';
 import {
   connectCodexWebSocket, DEFAULT_CODEX_ENDPOINT, normalizeCodexEndpoint, parseCodexEndpoint,
 } from './codex-websocket.js';
@@ -14,6 +15,8 @@ import {
 const STDERR_LIMIT = 256 * 1024;
 const MANAGED_CONNECT_RETRY_MS = 50;
 let managedLaunchPromise = null;
+const modelProfileCache = new Map();
+const MODEL_PROFILE_PROMPT = 'Reply with exactly: OK';
 
 export async function listCodexAppServerModels({
   settings = null,
@@ -46,7 +49,7 @@ export async function listCodexAppServerModels({
         label: entry.displayName || id,
         displayName: entry.displayName || id,
         loaded: null,
-        contextLength: null,
+        contextLength: contextWindowFromModelEntry(entry),
         reasoningOptions: (entry.supportedReasoningEfforts ?? [])
           .map((item) => item.reasoningEffort || item.effort)
           .filter(Boolean),
@@ -57,6 +60,166 @@ export async function listCodexAppServerModels({
     }).filter((item) => item.id)
       .sort((left, right) => Number(right.isDefault) - Number(left.isDefault) || left.label.localeCompare(right.label));
   });
+}
+
+
+
+export async function getCodexAppServerModelProfile({
+  model,
+  settings = null,
+  signal = null,
+  timeoutMs = 30_000,
+  spawnImpl = nodeSpawn,
+  executable = '',
+  endpoint = '',
+  apiToken = '',
+  connectImpl = connectCodexWebSocket,
+  sleepImpl = delay,
+} = {}) {
+  const resolvedEndpoint = resolveCodexEndpoint({ endpoint, settings });
+  const cacheKey = `${resolvedEndpoint}\u0000${String(executable || '')}\u0000${String(model || '')}`;
+  if (modelProfileCache.has(cacheKey)) return modelProfileCache.get(cacheKey);
+  const promise = probeCodexModelProfile({
+    model, settings, signal, timeoutMs, spawnImpl, executable,
+    endpoint: resolvedEndpoint, apiToken, connectImpl, sleepImpl,
+  }).catch((error) => {
+    modelProfileCache.delete(cacheKey);
+    throw error;
+  });
+  modelProfileCache.set(cacheKey, promise);
+  return promise;
+}
+
+async function probeCodexModelProfile(options) {
+  const { model } = options;
+  return withCodexClient(options, async (client) => {
+    const advertised = await findCodexModel(client, model);
+    const advertisedContext = contextWindowFromModelEntry(advertised);
+    if (advertisedContext) return codexProfile(model, advertisedContext, 'model-metadata', advertised);
+    const measured = await measureCodexContextWindow(client, model, options);
+    if (options.settings?.llmTrackTokenUsage === true) {
+      await recordLlmTokenUsage({
+        provider: 'codex', model,
+        messages: [{ role: 'user', content: MODEL_PROFILE_PROMPT }],
+        completion: { content: '', reasoning: '', usage: measured.usage },
+      }).catch(() => {});
+    }
+    return codexProfile(model, measured.contextLength, 'token-usage', advertised);
+  });
+}
+
+async function findCodexModel(client, model) {
+  let cursor = null;
+  do {
+    const result = await client.request('model/list', compactObject({ limit: 100, includeHidden: true, cursor: cursor || undefined }));
+    const entry = (result?.data ?? []).find((item) => (item.model || item.id) === model);
+    if (entry) return entry;
+    cursor = result?.nextCursor ?? null;
+  } while (cursor);
+  return null;
+}
+
+async function measureCodexContextWindow(client, model, { signal, timeoutMs }) {
+  const scratch = await mkdtemp(path.join(os.tmpdir(), 'zipflow-codex-profile-'));
+  let threadId = null;
+  let turnId = null;
+  let timer = null;
+  let settled = false;
+  let resolveUsage;
+  let rejectUsage;
+  const usagePromise = new Promise((resolve, reject) => { resolveUsage = resolve; rejectUsage = reject; });
+  const finish = (callback, value) => {
+    if (settled) return;
+    settled = true;
+    callback(value);
+  };
+  const abort = () => finish(rejectUsage, new LocalLlmError('Codex model profile probe cancelled.', { code: 'cancelled', provider: 'codex' }));
+  try {
+    signal?.addEventListener('abort', abort, { once: true });
+    client.onNotification = (message) => {
+      const params = message.params ?? {};
+      if (message.method === 'thread/tokenUsage/updated') {
+        const usage = params.tokenUsage ?? params.token_usage;
+        const window = positiveInteger(usage?.modelContextWindow ?? usage?.model_context_window);
+        if (window) finish(resolveUsage, { contextLength: window, usage });
+      } else if (message.method === 'turn/completed') {
+        const window = positiveInteger(
+          params.tokenUsage?.modelContextWindow
+          ?? params.token_usage?.model_context_window
+          ?? params.turn?.tokenUsage?.modelContextWindow,
+        );
+        if (window) finish(resolveUsage, {
+          contextLength: window,
+          usage: params.tokenUsage ?? params.token_usage ?? params.turn?.tokenUsage ?? null,
+        });
+        else finish(rejectUsage, new LocalLlmError(
+          'Codex app-server completed the model profile probe without reporting modelContextWindow.',
+          { code: 'context_window_unavailable', provider: 'codex' },
+        ));
+      }
+    };
+    const permissionMode = await resolveCodexPermissionMode(client, scratch);
+    const threadResult = await client.request('thread/start', compactObject({
+      model, cwd: scratch, approvalPolicy: 'never', permissions: permissionMode.permissions,
+      ephemeral: true, serviceName: 'zipflow-profile',
+    }));
+    threadId = threadResult?.thread?.id ?? null;
+    if (!threadId) throw new LocalLlmError('Codex app-server did not return a thread ID for the model profile probe.', { code: 'protocol_error', provider: 'codex' });
+    const turnResult = await client.request('turn/start', compactObject({
+      threadId,
+      input: [{ type: 'text', text: MODEL_PROFILE_PROMPT }],
+      cwd: scratch,
+      approvalPolicy: 'never',
+      sandboxPolicy: permissionMode.sandboxPolicy,
+      model,
+    }));
+    turnId = turnResult?.turn?.id ?? null;
+    if (!turnId) throw new LocalLlmError('Codex app-server did not return a turn ID for the model profile probe.', { code: 'protocol_error', provider: 'codex' });
+    timer = setTimeout(() => finish(rejectUsage, new LocalLlmError(
+      'Codex app-server did not report the model context window in time.',
+      { code: 'context_window_timeout', provider: 'codex' },
+    )), Math.max(1_000, Number(timeoutMs) || 30_000));
+    return await usagePromise;
+  } finally {
+    if (timer) clearTimeout(timer);
+    signal?.removeEventListener('abort', abort);
+    if (threadId && turnId) {
+      try { client.notify('turn/interrupt', { threadId, turnId }); } catch {}
+    }
+    await rm(scratch, { recursive: true, force: true });
+  }
+}
+
+function codexProfile(model, contextLength, source, entry = null) {
+  return {
+    provider: 'codex',
+    modelKey: model,
+    contextLength,
+    maxContextLength: contextLength,
+    source,
+    reasoningOffSupported: (entry?.supportedReasoningEfforts ?? []).some((item) => (item.reasoningEffort || item.effort) === 'none'),
+    requestModel: model,
+    configuredModel: model,
+    loadedModel: true,
+    loadedInstanceId: null,
+    displayName: entry?.displayName || model,
+  };
+}
+
+function contextWindowFromModelEntry(entry) {
+  return positiveInteger(
+    entry?.modelContextWindow
+    ?? entry?.contextWindow
+    ?? entry?.contextLength
+    ?? entry?.model_context_window
+    ?? entry?.context_window
+    ?? entry?.context_length,
+  );
+}
+
+function positiveInteger(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.floor(number) : null;
 }
 
 export async function createCodexAppServerCompletion({

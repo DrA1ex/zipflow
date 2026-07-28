@@ -56,6 +56,7 @@ export function settingsParameters(state, definition) {
     if (state.settingsPanel?.subpage === 'llmModelTests') return llmModelTestParameters(state);
     if (state.settingsPanel?.subpage === 'llmModelReplay') return llmModelReplayParameters(state);
     if (state.settingsPanel?.subpage === 'llmAutopilotReplay') return llmAutopilotReplayParameters(state);
+    if (state.settingsPanel?.subpage === 'llmTokenStats') return llmTokenStatsParameters(state);
     return localLlmParameters(state);
   }
   if (definition.id === 'sourceArchive') return sourceArchiveParameters(state);
@@ -237,6 +238,7 @@ export function settingsPageTitle(state, definition) {
   if (definition.id === 'localLlm' && state.settingsPanel?.subpage === 'llmAutopilotReplay') {
     return state.settingsPanel?.modelTestWorkspace ? 'Model tests' : 'Historical autopilot simulation';
   }
+  if (definition.id === 'localLlm' && state.settingsPanel?.subpage === 'llmTokenStats') return 'LLM token statistics';
   return definition.label;
 }
 
@@ -353,6 +355,8 @@ function localLlmParameters(state) {
       disabled: false,
       disabledReason: '',
     },
+    toggleParameter('llmTrackTokenUsage', 'Track token usage', state.settings.llmTrackTokenUsage === true,
+      'Accumulate input and output token counts for successful LLM requests. Exact provider usage is preferred; otherwise Zipflow records an estimate.'),
     {
       id: 'llmModelTests', type: 'subpage', label: 'Test selected model',
       value: modelTestValue(state.settingsPanel),
@@ -364,7 +368,58 @@ function localLlmParameters(state) {
         ? 'Enable a local LLM provider first.'
         : !state.settings.llmModel ? 'Choose a model first.' : 'The selected model test is already running.',
     },
+    ...(state.settings.llmTrackTokenUsage === true ? [{
+      id: 'llmTokenStats', type: 'subpage', label: 'Token statistics',
+      value: tokenStatsSummary(state, state.settingsPanel?.tokenStats),
+      description: 'View accumulated token usage by provider and model, or reset all collected statistics.',
+    }] : []),
   ];
+}
+
+
+function llmTokenStatsParameters(state) {
+  const stats = state.settingsPanel?.tokenStats;
+  const loading = Boolean(state.settingsPanel?.tokenStatsLoading);
+  const error = state.settingsPanel?.tokenStatsError;
+  if (loading && !stats) return [
+    actionRow('llmTokenStatsLoading', 'Loading token statistics…', '', '', { disabled: true, loading: true }),
+    { id: 'llmTokenStatsBack', type: 'action', action: 'subpage-back', label: 'Back to Local LLM', value: '', description: 'Return to the Local LLM settings page.' },
+  ];
+  const totals = stats?.totals ?? {};
+  const parameters = [
+    actionRow('llmStatsRequests', 'Requests', formatCount(totals.requests), 'Successful LLM requests recorded since the last reset.', { disabled: true }),
+    actionRow('llmStatsInput', 'Input tokens', formatCount(totals.inputTokens), 'Tokens sent to all configured LLM providers.', { disabled: true }),
+    actionRow('llmStatsOutput', 'Output tokens', formatCount(totals.outputTokens), 'Tokens returned by all configured LLM providers.', { disabled: true }),
+    actionRow('llmStatsTotal', 'Total tokens', formatCount((totals.inputTokens ?? 0) + (totals.outputTokens ?? 0)), 'Combined input and output token usage.', { disabled: true }),
+    actionRow('llmStatsAccuracy', 'Measurement', t(state, '{count} exact · {estimated} estimated', { count: formatCount(totals.exactRequests), estimated: formatCount(totals.estimatedRequests) }), 'Exact usage comes from provider metadata. Estimates are used only when a provider omits usage.', { disabled: true }),
+    actionRow('llmStatsSince', 'Since reset', dateLabel(state, stats?.resetAt), error || 'Statistics persist across Zipflow runs until reset.', { disabled: true }),
+  ];
+  for (const [provider, providerStats] of Object.entries(stats?.providers ?? {}).sort(([a], [b]) => a.localeCompare(b))) {
+    parameters.push(actionRow(`llmStatsProvider:${provider}`, providerLabel(provider), tokenStatsCounters(state, providerStats), 'Provider total.', { disabled: true }));
+    for (const [model, modelStats] of Object.entries(providerStats.models ?? {}).sort(([a], [b]) => a.localeCompare(b))) {
+      parameters.push(actionRow(`llmStatsModel:${provider}:${model}`, `  ${model}`, tokenStatsCounters(state, modelStats), 'Model total.', { disabled: true }));
+    }
+  }
+  parameters.push(
+    actionRow('llmTokenStatsReset', 'Reset statistics', '', 'Permanently clear all accumulated LLM token statistics.', { action: 'llm-token-stats-reset', disabled: loading }),
+    { id: 'llmTokenStatsBack', type: 'action', action: 'subpage-back', label: 'Back to Local LLM', value: '', description: 'Return to the Local LLM settings page.' },
+  );
+  return parameters;
+}
+
+function tokenStatsSummary(state, stats) {
+  const totals = stats?.totals ?? {};
+  return t(state, '{input} in · {output} out', { input: formatCount(totals.inputTokens), output: formatCount(totals.outputTokens) });
+}
+
+function tokenStatsCounters(state, value = {}) {
+  return t(state, '{requests} requests · {input} in · {output} out', {
+    requests: formatCount(value.requests), input: formatCount(value.inputTokens), output: formatCount(value.outputTokens),
+  });
+}
+
+function formatCount(value) {
+  return new Intl.NumberFormat('en-US').format(Math.max(0, Number(value) || 0));
 }
 
 function llmTaskParameters(state) {

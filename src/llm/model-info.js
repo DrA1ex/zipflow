@@ -1,5 +1,6 @@
 import { providerDefinition } from './client.js';
 import { requestLlmJson } from './json-request.js';
+import { getCodexAppServerModelProfile } from './codex-app-server.js';
 
 const FALLBACK_CONTEXT = 16_384;
 
@@ -12,6 +13,12 @@ export async function getLocalModelProfile(provider, model, {
   streamLimits = null,
   apiToken = '',
   signal = null,
+  settings = null,
+  spawnImpl = undefined,
+  executable = '',
+  codexEndpoint = '',
+  connectImpl = undefined,
+  sleepImpl = undefined,
 } = {}) {
   if (!model) return fallbackProfile(provider, model);
   try {
@@ -20,6 +27,10 @@ export async function getLocalModelProfile(provider, model, {
     });
     if (provider === 'ollama') return await ollamaProfile(model, {
       fetchImpl, timeoutMs, connectionTimeoutMs, totalDeadlineMs, idleTimeoutMs, streamLimits, apiToken, signal,
+    });
+    if (provider === 'codex') return await getCodexAppServerModelProfile({
+      model, settings, signal, timeoutMs, spawnImpl, executable, endpoint: codexEndpoint, apiToken,
+      ...(connectImpl ? { connectImpl } : {}), ...(sleepImpl ? { sleepImpl } : {}),
     });
   } catch (error) {
     if (error?.code === 'cancelled' || error?.code === 'invalid_api_key' || [401, 403].includes(error?.status) || signal?.aborted) throw error;
@@ -37,6 +48,12 @@ export async function listLmStudioModelRecords({
   streamLimits = null,
   apiToken = '',
   signal = null,
+  settings = null,
+  spawnImpl = undefined,
+  executable = '',
+  codexEndpoint = '',
+  connectImpl = undefined,
+  sleepImpl = undefined,
 } = {}) {
   const definition = providerDefinition('lmstudio');
   const payload = await requestJson(fetchImpl, `${definition.nativeBaseUrl}/models`, {

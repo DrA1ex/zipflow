@@ -6,12 +6,16 @@ import { createInterface } from 'node:readline';
 import { performance } from 'node:perf_hooks';
 import os from 'node:os';
 import path from 'node:path';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { createLocalCompletion, listLocalModelChoices } from '../src/llm/client.js';
 import { createInitialState } from '../src/app/state.js';
 import { ZipflowController } from '../src/app/controller.js';
 import { testSelectedModel } from '../src/app/settings-model-check.js';
 import { DEFAULT_SETTINGS } from '../src/settings/store.js';
+import { getLocalModelProfile } from '../src/llm/model-info.js';
+import { loadLlmTokenStats } from '../src/llm/token-stats.js';
+
+let fakeRuntimeIndex = 0;
 
 function fakeCodexRuntime({
   initializeDelayMs = 0,
@@ -80,6 +84,13 @@ function fakeCodexRuntime({
       if (message.method === 'thread/start') return send({ id: message.id, result: { thread: { id: 'thr-test' } } });
       if (message.method === 'turn/start') {
         send({ id: message.id, result: { turn: { id: 'turn-test', status: 'inProgress', items: [] } } });
+        send({ method: 'thread/tokenUsage/updated', params: {
+          threadId: 'thr-test', turnId: 'turn-test', tokenUsage: {
+            total: { totalTokens: 120, inputTokens: 100, cachedInputTokens: 0, outputTokens: 20, reasoningOutputTokens: 5 },
+            last: { totalTokens: 120, inputTokens: 100, cachedInputTokens: 0, outputTokens: 20, reasoningOutputTokens: 5 },
+            modelContextWindow: 262144,
+          },
+        } });
         if (message.params.model === 'never-complete') {
           send({ method: 'item/agentMessage/delta', params: { delta: 'partial output' } });
           const interval = setInterval(() => {
@@ -118,7 +129,7 @@ function fakeCodexRuntime({
     onSpawn?.(child);
     return child;
   };
-  return { requests, children, spawnImpl, executable: 'fake-codex' };
+  return { requests, children, spawnImpl, executable: `fake-codex-${++fakeRuntimeIndex}` };
 }
 
 function runtimeOptions(runtime, overrides = {}) {
@@ -164,6 +175,36 @@ test('Codex app-server lists models with effort capabilities and completes a tex
   assert.equal(turn.params.outputSchema, undefined);
 });
 
+test('Codex model profile uses the context window and usage reported by thread token events', async () => {
+  const runtime = fakeCodexRuntime();
+  const previousHome = process.env.ZIPFLOW_HOME;
+  const home = await mkdtemp(path.join(os.tmpdir(), 'zipflow-codex-profile-home-'));
+  process.env.ZIPFLOW_HOME = home;
+  try {
+    const profile = await getLocalModelProfile('codex', 'gpt-test', {
+      settings: {
+        ...DEFAULT_SETTINGS, llmProvider: 'codex', llmModel: 'gpt-test', llmTrackTokenUsage: true,
+        llmUseExternalCodexServer: true, llmCodexEndpoint: 'stdio://',
+      },
+      timeoutMs: 250,
+      spawnImpl: runtime.spawnImpl,
+      executable: runtime.executable,
+    });
+
+    assert.equal(profile.contextLength, 262144);
+    assert.equal(profile.maxContextLength, 262144);
+    assert.equal(profile.source, 'token-usage');
+    assert.ok(runtime.requests.some((item) => item.method === 'turn/interrupt'));
+    const stats = await loadLlmTokenStats();
+    assert.equal(stats.providers.codex.models['gpt-test'].inputTokens, 100);
+    assert.equal(stats.providers.codex.models['gpt-test'].outputTokens, 20);
+  } finally {
+    if (previousHome === undefined) delete process.env.ZIPFLOW_HOME;
+    else process.env.ZIPFLOW_HOME = previousHome;
+    await rm(home, { recursive: true, force: true });
+  }
+});
+
 test('Codex app-server context failure is classified and does not become a completed response', async () => {
   const runtime = fakeCodexRuntime();
   await assert.rejects(() => createLocalCompletion({
@@ -205,10 +246,10 @@ test('Codex app-server passes the complete settings model compatibility check wi
     assert.equal(state.settingsPanel.modelTest.autonomousDecisionProtocol, true);
     assert.equal(state.settingsPanel.modelTest.error, undefined);
     const turns = runtime.requests.filter((item) => item.method === 'turn/start');
-    assert.equal(turns.length, 2);
-    assert.equal(turns[0].params.outputSchema, undefined);
-    assert.equal(turns[1].params.outputSchema.type, 'object');
-    assert.equal(turns.every((item) => item.params.effort === 'high'), true);
+    assert.equal(turns.length, 3);
+    assert.equal(turns[1].params.outputSchema, undefined);
+    assert.equal(turns[2].params.outputSchema.type, 'object');
+    assert.equal(turns.slice(1).every((item) => item.params.effort === 'high'), true);
   } finally {
     if (previousHome === undefined) delete process.env.ZIPFLOW_HOME;
     else process.env.ZIPFLOW_HOME = previousHome;
