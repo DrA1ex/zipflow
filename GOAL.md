@@ -1019,3 +1019,29 @@ Keep Codex connection ownership explicit without exposing unrelated OpenAI-compa
 - Codex settings contain no OpenAI-compatible Base URL or API-mode rows;
 - disabling the external-server toggle forces the managed default at runtime even when a custom endpoint remains saved;
 - enabling the toggle makes the saved endpoint editable and prevents managed fallback for custom network or socket endpoints.
+
+
+---
+
+# Phase 6.3 — Responsive prompt inspection and semantic LLM output
+
+## Goal
+
+Keep large captured prompts responsive and make structured model decisions readable at a glance in every bundled interface language.
+
+## Delivered work
+
+- build prompt documents as lazy Terlio line sources rather than pre-highlighting the entire request;
+- render source and diff chunks through Terlio public highlighting APIs only when their rows enter the viewport;
+- route prompt wheel input directly to the document scroll state without the asynchronous Settings action queue;
+- color decision, confidence, evidence, risk, condition, summary, and related labels semantically while leaving values as ordinary text;
+- recognize localized structured labels with Unicode-aware parsing;
+- cover chunk laziness, source reuse, synchronous wheel scrolling, and localized semantic colors with regression tests.
+
+## Exit criteria
+
+- opening a multi-thousand-line prompt does not highlight the full document before the first frame;
+- repeated prompt redraws reuse the same line source and rendered chunks;
+- fast wheel input cannot continue through a queued Settings navigation backlog;
+- risks, conditions, evidence, decisions, and confidence remain visually distinguishable in all bundled languages.
+

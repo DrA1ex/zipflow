@@ -302,7 +302,7 @@ function renderModelPromptView({ content, state, width, height, theme }) {
         onWheel: (event) => {
           const delta = wheelScrollDelta(event);
           if (delta) {
-            if (scrollPromptDocument(view, delta)) state.dispatch?.({ type: 'model-prompt-redraw' });
+            if (scrollPromptDocument(view, delta)) state.invalidate?.();
           }
           event.preventDefault();
           event.stopPropagation?.();

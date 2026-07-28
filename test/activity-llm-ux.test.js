@@ -88,3 +88,46 @@ test('Activity visually separates key labels and mutes the collapsed expansion h
   assert.match(output, /\x1b\[35mDelivery:/);
   assert.match(output, /\x1b\[2m… 3 more lines · click or press E to expand/);
 });
+
+test('structured LLM labels use semantic colors while values remain normal text', () => {
+  const theme = {
+    accent: '\x1b[35m', title: '\x1b[36m', danger: '\x1b[31m', warning: '\x1b[33m',
+    text: '\x1b[37m', textMuted: '\x1b[2m', reset: '\x1b[0m',
+  };
+  const lines = llmActivityLines({
+    presentation: 'decision', provider: 'codex', model: 'gpt-test',
+    label: 'Receiving the model response', elapsedMs: 120, chunks: 2,
+    content: '{"action":"apply","confidence":0.9,"summary":"Safe to continue","evidence":["Checks passed"],"risks":["One deletion"],"conditions":["Keep deploy disabled"]}',
+    reasoning: '',
+  }, 100, theme);
+  const output = lines.join('\n');
+  assert.match(output, /\x1b\[35mDecision:\x1b\[0m Apply/);
+  assert.match(output, /\x1b\[35mConfidence:\x1b\[0m High/);
+  assert.match(output, /\x1b\[36mEvidence:\x1b\[0m/);
+  assert.match(output, /\x1b\[31mRisks:\x1b\[0m/);
+  assert.match(output, /\x1b\[33mConditions:\x1b\[0m/);
+  assert.match(output, /• One deletion/);
+  assert.doesNotMatch(output, /\x1b\[31m[^\n]*One deletion/);
+});
+
+test('Activity recognizes translated structured keys and colors only their labels', () => {
+  const state = createInitialState();
+  appendMessage(state, 'Решение модели', [
+    'Решение: Применить',
+    'Уверенность: Высокая',
+    'Основания: Проверки пройдены',
+    'Риски: Один файл удаляется',
+    'Условия: Не запускать деплой',
+  ], 'info', { collapsible: false });
+  const theme = {
+    accent: '\x1b[35m', title: '\x1b[36m', danger: '\x1b[31m', warning: '\x1b[33m',
+    text: '\x1b[37m', textMuted: '\x1b[2m',
+  };
+  const output = buildTranscript(state, theme, 100).lines.join('\n');
+  assert.match(output, /\x1b\[35mРешение:/);
+  assert.match(output, /\x1b\[35mУверенность:/);
+  assert.match(output, /\x1b\[36mОснования:/);
+  assert.match(output, /\x1b\[31mРиски:/);
+  assert.match(output, /\x1b\[33mУсловия:/);
+  assert.doesNotMatch(output, /\x1b\[31mРиски:[^\n]*\x1b\[31mОдин/);
+});

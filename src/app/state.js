@@ -81,6 +81,7 @@ export function createInitialState() {
     settingsPanel: null,
     overlays: null,
     dispatch: null,
+    invalidate: null,
   };
   Object.defineProperties(state, {
     busy: {

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.8.1 — Semantic LLM results and lazy prompt rendering
+
+- Color structured LLM labels semantically while keeping their values in the normal text color: decisions and confidence use the accent, evidence/reasons use a neutral title color, risks use danger, and conditions use warning.
+- Recognize translated `Key: value` labels through Unicode-aware parsing so Russian, German, French, Italian, and Spanish results receive the same visual hierarchy as English output.
+- Replace eager whole-document prompt highlighting with a lazy Terlio line source that renders syntax and diff chunks only when they enter the visible `ScrollPane` window.
+- Use Terlio's public `highlightSyntaxLines()` and `renderBlockLines()` paths for prompt code and diff rendering instead of maintaining a separate eager highlighter path.
+- Keep prompt wheel updates synchronous and invalidate the workspace directly, avoiding an asynchronous Settings action backlog after fast trackpad scrolling.
+- Add regression coverage for localized semantic labels, plain result values, visible-chunk-only highlighting, cached prompt documents, and wheel input that never enters the action queue.
+
 ## 1.8.0 — Virtual prompt documents and actionable archive mismatch reviews
 
 - Render model-test and historical replay prompts through a cached Terlio virtual line source so large prompts are not rewrapped on every frame.

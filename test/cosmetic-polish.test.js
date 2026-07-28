@@ -349,17 +349,32 @@ test('large historical prompts reuse the same virtual document across redraws', 
       label: 'Large historical request', provider: 'codex', model: 'gpt-test', structured: false, maxTokens: 4096,
       messages: [{
         role: 'user',
-        content: Array.from({ length: 4_000 }, (_, index) => `${index % 2 ? '+' : '-'}line ${index}`).join('\n'),
+        content: ['```diff', 'diff --git a/src/large.js b/src/large.js', '@@ -1,2000 +1,2000 @@', ...Array.from({ length: 4_000 }, (_, index) => `${index % 2 ? '+' : '-'}line ${index}`), '```'].join('\n'),
       }],
     }],
   };
   const controller = new ZipflowController(state);
-  controller.invalidate = () => {};
+  let invalidations = 0;
+  controller.invalidate = () => { invalidations += 1; };
 
   await handleModelReplayWorkspaceKey(controller, { name: 'p', text: 'p', printable: true });
-  renderToString(renderZipflow({ state, width: 120, height: 32 }), { width: 120, height: 32 });
+  const tree = renderZipflow({ state, width: 120, height: 32 });
+  renderToString(tree, { width: 120, height: 32 });
   const source = state.settingsPanel.modelPromptView.documentCache?.source;
   assert.ok(source?.length > 4_000);
+  assert.equal(source.getDiagnostics().renderedChunks, 1);
+
+  state.dispatch = () => { throw new Error('Prompt wheel must not enter the asynchronous action queue'); };
+  const overlayHost = findNode(tree, (node) => node.type === 'overlayHost');
+  const promptModal = overlayHost?.props?.manager?.top?.().render({ width: 112, height: 26 });
+  const wheelRegion = findNode(promptModal, (node) => node.props?.pointerId === 'zipflow:model-test-prompt');
+  assert.ok(wheelRegion?.props?.onWheel);
+  const beforeScroll = state.settingsPanel.modelPromptView.scroll;
+  const beforeInvalidations = invalidations;
+  wheelRegion.props.onWheel({ deltaY: 1, preventDefault() {}, stopPropagation() {} });
+  assert.equal(state.settingsPanel.modelPromptView.scroll, beforeScroll + 1);
+  assert.ok(invalidations > beforeInvalidations);
+
   renderToString(renderZipflow({ state, width: 120, height: 32 }), { width: 120, height: 32 });
   assert.equal(state.settingsPanel.modelPromptView.documentCache?.source, source);
 });

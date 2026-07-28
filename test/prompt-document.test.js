@@ -33,8 +33,8 @@ test('prompt documents use a reusable virtual line source with code and diff hig
   const rendered = Array.from({ length: source.length }, (_, index) => source.getLine(index)).join('\n');
   assert.match(rendered, /REQUEST 1 · Historical request/);
   assert.match(rendered, /\x1b\[35mconst\x1b\[0m/);
-  assert.match(rendered, /\x1b\[31m-oldValue/);
-  assert.match(rendered, /\x1b\[32m\+newValue/);
+  assert.match(rendered, /\x1b\[31m[^\n]*-oldValue/);
+  assert.match(rendered, /\x1b\[32m[^\n]*\+newValue/);
 });
 
 test('prompt scrolling updates synchronously and clamps without queued menu navigation', () => {
@@ -45,4 +45,33 @@ test('prompt scrolling updates synchronously and clamps without queued menu navi
   assert.equal(view.scroll, 200);
   scrollPromptDocument(view, -1_000);
   assert.equal(view.scroll, 0);
+});
+
+
+test('large prompt documents highlight only visible chunks on first open', () => {
+  const source = createPromptDocumentSource({
+    requests: [{
+      label: 'Large request', provider: 'codex', model: 'gpt-test', structured: false, maxTokens: 4096,
+      messages: [{
+        role: 'user',
+        content: ['```javascript', ...Array.from({ length: 4_000 }, (_, index) => `const value_${index} = ${index};`), '```'].join('\n'),
+      }],
+    }],
+  }, { width: 80, theme });
+
+  const before = source.getDiagnostics();
+  assert.equal(before.renderedChunks, 0);
+  assert.ok(before.chunks > 20);
+  assert.ok(source.length > 4_000);
+
+  for (let index = 0; index < 24; index += 1) source.getLine(index);
+  const visible = source.getDiagnostics();
+  assert.equal(visible.renderedChunks, 1);
+  assert.ok(visible.renderedLines <= visible.chunkLines);
+
+  for (let index = 0; index < 24; index += 1) source.getLine(index);
+  assert.equal(source.getDiagnostics().renderedChunks, 1);
+
+  source.getLine(600);
+  assert.equal(source.getDiagnostics().renderedChunks, 2);
 });

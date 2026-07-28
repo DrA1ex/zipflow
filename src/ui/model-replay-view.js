@@ -204,12 +204,35 @@ function blockLines(block, workspace, theme, width) {
   const compactCompletedOutput = Boolean(workspace.result && block.status === 'done' && (block.reasoning || block.content));
   return [
     color(theme, token, `${marker} ${String(block.title ?? '').toUpperCase()}`),
-    ...block.lines.flatMap((line) => wrapColoredLine(line, width, 2, theme, 'textMuted')),
+    ...block.lines.flatMap((line) => wrapReplayDetailLine(line, width, theme)),
     ...(compactCompletedOutput
       ? [`  ${color(theme, 'textMuted', 'Model output parsed successfully · press D for full diagnostics')}`]
       : blockOutputLines(block, theme, width)),
     '',
   ];
+}
+
+
+function wrapReplayDetailLine(value, width, theme) {
+  const text = String(value ?? '');
+  const match = text.match(/^([\p{L}][\p{L}\p{N} /_–—-]{0,42}:)(\s*)(.*)$/u);
+  if (!match) return wrapColoredLine(text, width, 2, theme, 'text');
+  const available = Math.max(8, width - 2);
+  const wrapped = wrapText(`${match[1]}${match[2]}${match[3]}`, available);
+  return wrapped.map((line, index) => {
+    if (index > 0) return `  ${color(theme, 'text', line)}`;
+    const first = line.match(/^([^:]+:)(\s*)(.*)$/u);
+    if (!first) return `  ${color(theme, 'text', line)}`;
+    return `  ${color(theme, replaySemanticKeyToken(first[1]), first[1])}${first[2]}${color(theme, 'text', first[3])}`;
+  });
+}
+
+function replaySemanticKeyToken(label) {
+  const key = String(label ?? '').replace(/:$/, '').trim().toLocaleLowerCase();
+  if (['risk', 'risks', 'риск', 'риски', 'risiko', 'risiken', 'risque', 'risques', 'rischio', 'rischi', 'riesgo', 'riesgos'].includes(key)) return 'danger';
+  if (['condition', 'conditions', 'условие', 'условия', 'bedingung', 'bedingungen', 'condizione', 'condizioni', 'condición', 'condiciones'].includes(key)) return 'warning';
+  if (['evidence', 'reason', 'reasons', 'основание', 'основания', 'доказательство', 'доказательства', 'beleg', 'belege', 'grund', 'gründe', 'preuve', 'preuves', 'raison', 'raisons', 'evidenza', 'evidenze', 'ragione', 'ragioni', 'evidencia', 'evidencias', 'razón', 'razones'].includes(key)) return 'title';
+  return 'accent';
 }
 
 function blockOutputLines(block, theme, width) {

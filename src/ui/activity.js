@@ -121,9 +121,21 @@ function formatActivityBodyLine(message, line, theme, width) {
 
 function formatKeyValue(value, firstLine, theme) {
   if (!firstLine) return value;
-  const match = String(value).match(/^([A-Za-z][A-Za-z0-9 /_-]{0,42}:)(\s*)(.*)$/);
+  const match = String(value).match(/^([\p{L}][\p{L}\p{N} /_–—-]{0,42}:)(\s*)(.*)$/u);
   if (!match) return value;
-  return `${color(theme, 'accent', match[1])}${match[2]}${match[3]}`;
+  return `${color(theme, semanticKeyToken(match[1]), match[1])}${match[2]}${match[3]}`;
+}
+
+function semanticKeyToken(label) {
+  const key = String(label ?? '').replace(/:$/, '').trim().toLocaleLowerCase();
+  if (matchesSemanticKey(key, ['risk', 'risks', 'риск', 'риски', 'risiko', 'risiken', 'risque', 'risques', 'rischio', 'rischi', 'riesgo', 'riesgos'])) return 'danger';
+  if (matchesSemanticKey(key, ['condition', 'conditions', 'условие', 'условия', 'bedingung', 'bedingungen', 'condizione', 'condizioni', 'condición', 'condiciones'])) return 'warning';
+  if (matchesSemanticKey(key, ['evidence', 'reason', 'reasons', 'основание', 'основания', 'доказательство', 'доказательства', 'beleg', 'belege', 'grund', 'gründe', 'preuve', 'preuves', 'raison', 'raisons', 'evidenza', 'evidenze', 'ragione', 'ragioni', 'evidencia', 'evidencias', 'razón', 'razones'])) return 'title';
+  return 'accent';
+}
+
+function matchesSemanticKey(value, candidates) {
+  return candidates.some((candidate) => value === candidate || value.startsWith(`${candidate} `));
 }
 
 function isExpansionHint(value) {

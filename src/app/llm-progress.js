@@ -253,10 +253,10 @@ function decisionActivityLines(runtime, width, theme, state) {
   } else {
     if (decision.action) lines.push(`  ${paint(theme, 'accent', t(state, 'Decision:'))} ${t(state, actionLabel(decision.action))}`);
     if (decision.confidence !== null) lines.push(`  ${paint(theme, 'accent', t(state, 'Confidence:'))} ${t(state, confidenceLabel(decision.confidence))}`);
-    if (decision.summary) lines.push(...wrappedField(t(state, 'Summary:'), decision.summary, width, theme));
-    if (decision.evidence.length) lines.push(`  ${paint(theme, 'accent', t(state, 'Evidence:'))}`, ...decision.evidence.flatMap((value) => wrappedBullet(value, width, theme)));
-    if (decision.risks.length) lines.push(`  ${paint(theme, 'accent', t(state, 'Risks:'))}`, ...decision.risks.filter((value) => !isNoneValue(value)).flatMap((value) => wrappedBullet(value, width, theme, 'warning')));
-    if (decision.conditions.length) lines.push(`  ${paint(theme, 'accent', t(state, 'Conditions:'))}`, ...decision.conditions.filter((value) => !isNoneValue(value)).flatMap((value) => wrappedBullet(value, width, theme)));
+    if (decision.summary) lines.push(...wrappedField(t(state, 'Summary:'), decision.summary, width, theme, 'accent'));
+    if (decision.evidence.length) lines.push(`  ${paint(theme, 'title', t(state, 'Evidence:'))}`, ...decision.evidence.flatMap((value) => wrappedBullet(value, width, theme)));
+    if (decision.risks.length) lines.push(`  ${paint(theme, 'danger', t(state, 'Risks:'))}`, ...decision.risks.filter((value) => !isNoneValue(value)).flatMap((value) => wrappedBullet(value, width, theme)));
+    if (decision.conditions.length) lines.push(`  ${paint(theme, 'warning', t(state, 'Conditions:'))}`, ...decision.conditions.filter((value) => !isNoneValue(value)).flatMap((value) => wrappedBullet(value, width, theme)));
   }
   lines.push('');
   return lines;
@@ -270,12 +270,12 @@ export function llmProgressLabel(state, runtime) {
   return t(state, runtime.label ?? '');
 }
 
-function wrappedField(label, value, width, theme, valueToken = null) {
+function wrappedField(label, value, width, theme, labelToken = 'accent', valueToken = null) {
   const available = Math.max(24, width - 8 - label.length);
   const wrapped = wrapText(String(value ?? ''), available);
   if (!wrapped.length) return [];
   return wrapped.map((line, index) => index === 0
-    ? `  ${paint(theme, 'accent', label)} ${valueToken ? paint(theme, valueToken, line) : line}`
+    ? `  ${paint(theme, labelToken, label)} ${valueToken ? paint(theme, valueToken, line) : line}`
     : `  ${' '.repeat(label.length + 1)}${valueToken ? paint(theme, valueToken, line) : line}`);
 }
 

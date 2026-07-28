@@ -52,7 +52,7 @@ Archive → Review → Apply → Checks → Finish
 - Custom checks and deployment commands using `web/ :: npm test` syntax.
 - Optional local LLM integration through native Ollama, native LM Studio, a configurable OpenAI-compatible `/v1` server, or Codex app-server RPC with a managed default endpoint and an explicit external-server toggle.
 - Optional persistent LLM token statistics with exact provider usage when available, estimated fallback accounting, provider/model breakdowns, and an explicit reset action.
-- Historical replay and autopilot simulation expose the exact model prompts with `P`, use a virtualized syntax/diff-highlighted prompt viewer, and show per-run input/output token usage even when persistent statistics are disabled.
+- Historical replay and autopilot simulation expose the exact model prompts with `P`, use a lazy virtualized prompt viewer with Terlio syntax/diff rendering, and show per-run input/output token usage even when persistent statistics are disabled.
 - Archive suitability review distinguishes partial archives from archives belonging to another project and recommends cancellation instead of snapshot reinterpretation for project mismatches.
 - Manual, Guarded autopilot, and Full autopilot decision modes.
 - Run history, performance analytics, reports, stored patches, and ZIP export.

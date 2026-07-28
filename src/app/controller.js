@@ -87,6 +87,7 @@ export class ZipflowController {
       forceStop: () => terminateActiveProcesses({ graceMs: 0 }),
     });
     state.dispatch = (action) => { void this.dispatch(action).catch((error) => this.handleUnexpected(error)); };
+    state.invalidate = () => this.invalidate();
   }
   attachRuntime(runtime) {
     this.runtime = runtime;
