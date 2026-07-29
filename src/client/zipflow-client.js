@@ -134,6 +134,17 @@ export class ZipflowClient {
     return this.http.requestJson(`/v1/operations/${resourceId(operationId, 'operationId')}`, { signal });
   }
 
+  async cancelOperation(operationId, {
+    idempotencyKey,
+    signal = undefined,
+  } = {}) {
+    return this.#jsonMutation(
+      `/v1/operations/${resourceId(operationId, 'operationId')}/cancel`,
+      {},
+      { idempotencyKey, signal },
+    );
+  }
+
   async getSurface(runId, { signal = undefined } = {}) {
     return this.http.requestJson(`/v1/runs/${resourceId(runId, 'runId')}/surface`, { signal });
   }
@@ -222,6 +233,10 @@ export class ZipflowClient {
 
   events(options = {}) {
     return new ZipflowEventClient({ httpClient: this.http }).subscribe(options);
+  }
+
+  subscribeEvents(options = {}) {
+    return this.events(options);
   }
 
   assertCompatibility(value) {

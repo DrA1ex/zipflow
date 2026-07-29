@@ -51,6 +51,12 @@ npm run verify
 
 `npm run test:package` creates the npm tarball, installs it into two isolated consumer directories, verifies the exact runtime dependency graph from `npm-shrinkwrap.json`, and runs the packaged `zipflow --version` smoke test.
 
+`npm run test:functional-baseline` enforces the user-visible capability baseline
+captured from commit `f44e0cb127437ea6ce3e4c7773ccf553673d74dc` (Zipflow
+1.8.3). The checked-in manifest maps every baseline capability group to its
+regression owners. Direct mode must remain available until the manifest is
+explicitly advanced only after full client-backed parity is demonstrated.
+
 For the complete release gate, including inspection of the files npm would publish, run:
 
 ```bash

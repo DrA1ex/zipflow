@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "source": {
+    "commit": "f44e0cb127437ea6ce3e4c7773ccf553673d74dc",
+    "packageVersion": "1.8.3",
+    "capturedAt": "2026-07-29"
+  },
+  "clientBackedParityComplete": false,
+  "capabilities": [
+    {
+      "id": "project-discovery-and-workspaces",
+      "tests": ["project-detect.test.js", "multi-project-workspace.test.js", "multi-project-setup-ui.test.js"]
+    },
+    {
+      "id": "workflow-setup-and-configuration",
+      "tests": ["setup-flow.test.js", "workflow-migration.test.js", "settings.test.js"]
+    },
+    {
+      "id": "archive-discovery-validation-root-and-safety",
+      "tests": ["archive-discovery.test.js", "archive.test.js", "archive-root-review.test.js", "archive-safety-ux.test.js", "security-hardening.test.js"]
+    },
+    {
+      "id": "plan-conflicts-and-diffs",
+      "tests": ["plan.test.js", "conflict-ux.test.js", "diff-view.test.js", "diff-hunks.test.js"]
+    },
+    {
+      "id": "atomic-apply-backup-and-rollback",
+      "tests": ["apply-rollback.test.js", "release-hardening-phase3.test.js", "release-hardening-phase5-archive.test.js"]
+    },
+    {
+      "id": "checks-manual-actions-and-deployment",
+      "tests": ["manual-actions.test.js", "check-cancellation-flow.test.js", "deploy.test.js"]
+    },
+    {
+      "id": "git-checkpoints-bootstrap-and-result-commits",
+      "tests": ["dirty-tree-checkpoint.test.js", "git-bootstrap.test.js", "git-commit.test.js", "git-ignore.test.js"]
+    },
+    {
+      "id": "history-reports-repeat-and-export",
+      "tests": ["run-history.test.js", "history-analytics.test.js", "repeat-archive.test.js", "export.test.js"]
+    },
+    {
+      "id": "archive-disposition-retention-and-managed-history",
+      "tests": ["archive-disposition.test.js", "managed-history.test.js", "storage-cancellation.test.js"]
+    },
+    {
+      "id": "local-llm-models-review-replay-and-token-stats",
+      "tests": ["llm.test.js", "llm-run.test.js", "llm-model-settings.test.js", "llm-archive-review.test.js", "llm-failure.test.js", "llm-token-stats.test.js", "model-replay-wheel.test.js", "codex-app-server.test.js"]
+    },
+    {
+      "id": "autopilot-modes-recovery-and-simulation",
+      "tests": ["autopilot.test.js", "autopilot-recovery.test.js", "autopilot-simulation.test.js", "autopilot-noop-and-commit.test.js"]
+    },
+    {
+      "id": "settings-themes-localization-and-storage",
+      "tests": ["settings.test.js", "settings-ux-regressions.test.js", "i18n.test.js", "i18n-basic-coverage.test.js", "phase4-storage-coordination.test.js"]
+    },
+    {
+      "id": "updates-restart-and-package-release",
+      "tests": ["update-flow.test.js", "update-restart.test.js", "update-service.test.js", "package-release.test.js", "version.test.js"]
+    },
+    {
+      "id": "terminal-navigation-search-help-pointer-and-editors",
+      "tests": ["editor-shortcut-routing.test.js", "path-suggestions-ux.test.js", "help-overlay-wheel.test.js", "select-rows.test.js", "ui-render.test.js", "cosmetic-polish.test.js"]
+    },
+    {
+      "id": "cancellation-recovery-and-process-cleanup",
+      "tests": ["operation-manager.test.js", "process-cleanup.test.js", "autopilot-recovery.test.js", "storage-cancellation.test.js"]
+    }
+  ]
+}

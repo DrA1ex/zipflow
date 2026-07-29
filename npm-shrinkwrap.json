@@ -1,12 +1,12 @@
 {
   "name": "zipflow",
-  "version": "1.8.3",
+  "version": "1.9.0",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "zipflow",
-      "version": "1.8.3",
+      "version": "1.9.0",
       "license": "MIT",
       "dependencies": {
         "ignore": "7.0.6",
@@ -23,7 +23,8 @@
       },
       "os": [
         "darwin",
-        "linux"
+        "linux",
+        "win32"
       ]
     },
     "node_modules/buffer-crc32": {

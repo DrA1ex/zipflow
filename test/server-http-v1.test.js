@@ -116,11 +116,11 @@ test('workflow GET and PUT expose ETags, normalize drafts, and enforce durable C
   });
   assert.equal(initial.status, 200);
   assert.equal(initial.headers.etag, '"0"');
-  assert.deepEqual(initial.body, {
-    projectId: opened.projectId,
-    revision: 0,
-    workflow: null,
-  });
+  assert.equal(initial.body.projectId, opened.projectId);
+  assert.equal(initial.body.revision, 0);
+  assert.equal(initial.body.workflow, null);
+  assert.equal(initial.body.suggestedWorkflow.version, 9);
+  assert.equal(initial.body.suggestedWorkflow.projectPath, await realpath(projectPath));
 
   const draft = workflowDraft('Normalized workflow');
   const saved = await client.putWorkflow(opened.projectId, draft, {

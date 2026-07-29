@@ -1,6 +1,6 @@
 {
   "name": "zipflow",
-  "version": "1.8.3",
+  "version": "1.9.0",
   "description": "Interactive terminal workflow for safely reviewing and applying source-code ZIP updates",
   "type": "module",
   "bin": {
@@ -15,6 +15,7 @@
     "start": "node ./bin/zipflow.js",
     "check": "node ./scripts/check-source.js && node ./scripts/check-i18n.js",
     "test": "ZIPFLOW_TEST_LOCALE=en node --test",
+    "test:functional-baseline": "ZIPFLOW_TEST_LOCALE=en node --test test/functional-baseline-f44e0cb1.test.js",
     "verify": "npm run check && npm test",
     "release:check": "npm run verify && npm run test:package && npm pack --dry-run",
     "prepublishOnly": "npm run verify && npm run test:package",
@@ -52,7 +53,8 @@
   ],
   "os": [
     "darwin",
-    "linux"
+    "linux",
+    "win32"
   ],
   "publishConfig": {
     "access": "public",

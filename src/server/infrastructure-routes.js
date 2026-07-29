@@ -20,6 +20,8 @@ import {
   workflowEtag,
 } from '../application/workflow-resource-store.js';
 import { createServerProblem } from './problems.js';
+import { createRecommendedWorkflow } from '../workflow/defaults.js';
+import { projectSurface } from '../application/surface-projector.js';
 
 export function registerInfrastructureRoutes(router, services) {
   const {
@@ -119,7 +121,10 @@ export function registerInfrastructureRoutes(router, services) {
   router.get('/v1/projects/:projectId/workflow', async ({ params }) => {
     const project = await requireProject(projects, params.projectId);
     const current = await workflows.get(project);
-    return workflowResponse(project, current);
+    const suggestedWorkflow = current.workflow
+      ? null
+      : recommendedWorkflow(await inspectProject(project.canonicalPath));
+    return workflowResponse(project, current, { suggestedWorkflow });
   });
 
   router.put('/v1/projects/:projectId/workflow', async ({
@@ -333,16 +338,32 @@ async function projectResponse(project, {
       : workflowSummary(project.canonicalPath),
     operations.list({ projectId: project.projectId, activeOnly: true }),
   ]);
-  return {
+  const response = {
     projectId: project.projectId,
     canonicalPath: project.canonicalPath,
     project: project.project,
     workflowConfigured: workflow.workflowConfigured,
     workflowRevision: workflow.workflowRevision,
     activeRunId: activeOperations.find((operation) => operation.runId)?.runId ?? null,
-    surface: {},
     activeOperations,
   };
+  response.surface = projectSurface({
+    project: {
+      id: project.projectId,
+      name: project.project?.name,
+    },
+    workflow: {
+      configured: workflow.workflowConfigured,
+      revision: workflow.workflowRevision,
+    },
+    run: {
+      id: activeOperations.find((operation) => operation.runId)?.runId ?? null,
+      status: activeOperations.length ? 'created' : null,
+    },
+    surfaceKind: workflow.workflowConfigured ? 'project_home' : 'workflow_setup',
+    surfaceRevision: workflow.workflowRevision ?? 0,
+  });
+  return response;
 }
 
 async function requireProject(projects, projectId) {
@@ -351,7 +372,7 @@ async function requireProject(projects, projectId) {
   return project;
 }
 
-function workflowResponse(project, current) {
+function workflowResponse(project, current, { suggestedWorkflow = null } = {}) {
   return {
     status: 200,
     headers: { etag: workflowEtag(current.revision) },
@@ -359,6 +380,7 @@ function workflowResponse(project, current) {
       projectId: project.projectId,
       revision: current.revision,
       workflow: current.workflow,
+      ...(suggestedWorkflow ? { suggestedWorkflow } : {}),
     },
   };
 }
@@ -369,6 +391,21 @@ async function readWorkflowSummary(projectPath) {
     workflowConfigured: Boolean(workflow),
     workflowRevision: workflow?.version ?? null,
   };
+}
+
+function recommendedWorkflow(project) {
+  return createRecommendedWorkflow({
+    ...project,
+    technologies: Array.isArray(project?.technologies) ? project.technologies : [],
+    labels: Array.isArray(project?.labels) ? project.labels : [],
+    workspaceTechnologies: Array.isArray(project?.workspaceTechnologies)
+      ? project.workspaceTechnologies
+      : [],
+    workspaceLabels: Array.isArray(project?.workspaceLabels)
+      ? project.workspaceLabels
+      : [],
+    checks: Array.isArray(project?.checks) ? project.checks : [],
+  });
 }
 
 function projectMetadata(project) {

@@ -117,10 +117,10 @@ test('OpenAPI uses authenticated local transport semantics and the runtime schem
   assert.notEqual(getOpenApiDocument().info.title, 'consumer copy');
 });
 
-test('stable problems are schema-valid and package exports do not bump the feature version', async () => {
+test('stable problems are schema-valid and package exports use the server feature version', async () => {
   for (const code of ERROR_CODES) assertProtocolValue('problem', createProblem(code));
   const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
-  assert.equal(packageJson.version, '1.8.3');
+  assert.equal(packageJson.version, '1.9.0');
   assert.deepEqual(packageJson.exports, {
     '.': './src/index.js',
     './client': './src/client/index.js',

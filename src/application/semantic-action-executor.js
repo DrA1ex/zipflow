@@ -83,6 +83,7 @@ export class SemanticActionExecutor {
       case 'retry-run':
         return this.retry(request, snapshot, privateState);
       case 'finish':
+        return immediate(transition(snapshot, { status: 'completed', attention: null }), privateState);
       case 'dismiss-error':
         return immediate(snapshot, privateState);
       default:

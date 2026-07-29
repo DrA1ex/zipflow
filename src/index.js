@@ -1,14 +1,22 @@
 import { createWorkspaceApp } from 'terlio.js';
 import { createInitialState } from './app/state.js';
 import { ZipflowController } from './app/controller.js';
+import { ClientBackedZipflowController } from './standalone/client-controller.js';
 import { renderZipflow } from './ui/render.js';
 import { createInterruptAwareInput } from './ui/interrupt-input.js';
 import { installWorkspaceInterruptHandler } from './ui/workspace-interrupt.js';
 import { spawn } from 'node:child_process';
 
-export async function startZipflow({ input = process.stdin, output = process.stdout } = {}) {
+export async function startZipflow({
+  input = process.stdin,
+  output = process.stdout,
+  controllerFactory = null,
+  directMode = process.env.ZIPFLOW_DIRECT_MODE === '1',
+} = {}) {
   const state = createInitialState();
-  const controller = new ZipflowController(state);
+  const controller = controllerFactory
+    ? await controllerFactory(state)
+    : createStandaloneController(state, { directMode });
   const interrupt = () => { void controller.handleInterrupt().catch((error) => controller.handleUnexpected(error)); };
   const workspaceInput = createInterruptAwareInput(input, { onInterrupt: interrupt });
   const detachSigint = input === process.stdin ? registerSigintHandler(controller) : () => {};
@@ -43,6 +51,16 @@ export async function startZipflow({ input = process.stdin, output = process.std
   app.start();
   void controller.startStartupUpdateCheck().catch(() => {});
   return app;
+}
+
+export function createStandaloneController(state, {
+  directMode = false,
+  clientOptions = {},
+  directOptions = {},
+} = {}) {
+  return directMode
+    ? new ZipflowController(state, directOptions)
+    : new ClientBackedZipflowController(state, clientOptions);
 }
 
 

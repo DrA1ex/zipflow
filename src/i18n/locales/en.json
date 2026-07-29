@@ -1510,7 +1510,26 @@
     "The archive appears to belong to a different project": "The archive appears to belong to a different project",
     "Apply update despite project mismatch": "Apply update despite project mismatch",
     "Review changes · recommended by LLM": "Review changes · recommended by LLM",
-    "Cancel update · recommended by LLM": "Cancel update · recommended by LLM"
+    "Cancel update · recommended by LLM": "Cancel update · recommended by LLM",
+    "Connecting to local workflow service": "Connecting to local workflow service",
+    "Open active run": "Open active run",
+    "Resume the current server-owned workflow run.": "Resume the current server-owned workflow run.",
+    "Apply update from ZIP": "Apply update from ZIP",
+    "Upload an archive and review its semantic plan.": "Upload an archive and review its semantic plan.",
+    "Run project checks": "Run project checks",
+    "Run only checks selected in the shared workflow.": "Run only checks selected in the shared workflow.",
+    "Read and save the shared project workflow through the local server.": "Read and save the shared project workflow through the local server.",
+    "Review durable server-owned workflow history.": "Review durable server-owned workflow history.",
+    "Review plan files": "Review plan files",
+    "Load the paginated semantic plan.": "Load the paginated semantic plan.",
+    "Load durable project run history.": "Load durable project run history.",
+    "Run report": "Run report",
+    "Load the sanitized run report.": "Load the sanitized run report.",
+    "Persist the complete workflow through the server revision boundary.": "Persist the complete workflow through the server revision boundary.",
+    "ZIP archive": "ZIP archive",
+    "Cancellation requested": "Cancellation requested",
+    "not configured": "not configured",
+    "Open the server-projected semantic diff.": "Open the server-projected semantic diff."
   },
   "patterns": [
     {

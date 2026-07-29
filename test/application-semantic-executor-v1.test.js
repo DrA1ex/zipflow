@@ -51,6 +51,18 @@ test('semantic executor never accepts arbitrary action or deploy command input',
   assert.equal(operations.begun.length, 0);
 });
 
+test('finish releases a failed check run instead of leaving the project busy', async () => {
+  const executor = new SemanticActionExecutor({ operations: fakeOperations() });
+  const request = actionRequest('finish');
+  request.snapshot.run.attention = 'checks_failed';
+  request.snapshot.checks = { status: 'failed' };
+  const outcome = await executor.executeAction(request);
+  assert.equal(outcome.snapshot.run.status, 'completed');
+  assert.equal(outcome.snapshot.run.attention, null);
+  assert.equal(outcome.snapshot.checks.status, 'failed');
+  assert.equal(outcome.result, null);
+});
+
 function actionRequest(actionId, input = {}) {
   return {
     runId: 'run_fixture',

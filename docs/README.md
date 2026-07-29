@@ -6,6 +6,7 @@ This directory contains the detailed documentation kept out of the package READM
 
 - [Getting started](getting-started.md) — installation, first launch, daily archive workflow, and project actions.
 - [Interface and controls](controls.md) — keyboard, mouse, path completion, help, Activity, Settings, and diff navigation.
+- [Local server and client API](server-api.md) — authenticated local transport, protocol resources, client rules, recovery, and Windows readiness.
 
 ## Updating projects
 

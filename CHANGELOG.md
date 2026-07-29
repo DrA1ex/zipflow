@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.9.0 — Authenticated local workflow server
+
+- Add protocol v1, OpenAPI and JSON Schema resources, canonical conformance fixtures, and a side-effect-free public client SDK.
+- Add the authenticated local server, secure runtime discovery, durable projects, blobs, operations, idempotency receipts, event replay, semantic actions, history, and rollback resources.
+- Route the released standalone TUI through the same client/server application boundary while retaining explicit temporary direct mode through `ZIPFLOW_DIRECT_MODE=1`.
+- Add Windows named-pipe normalization and package support while keeping daemon startup fail-closed until owner, DACL, and reparse-point validation is available.
+- Complete waiting repair runs through the advertised finish action and add server, package, client-parity, security, restart, and protocol regression coverage.
+
 ## 1.8.3 — Focused replay output and interrupt regressions
 
 - Expand and collapse each completed model-response block independently instead of using one global replay-output disclosure.

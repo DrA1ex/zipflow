@@ -14,7 +14,7 @@ test('npm release metadata declares a public executable package and a verificati
   assert.equal(packageJson.publishConfig?.registry, 'https://registry.npmjs.org/');
   assert.equal(packageJson.bin?.zipflow, './bin/zipflow.js');
   assert.match(packageJson.engines?.node ?? '', />=20/);
-  assert.deepEqual(packageJson.os, ['darwin', 'linux']);
+  assert.deepEqual(packageJson.os, ['darwin', 'linux', 'win32']);
   assert.ok(packageJson.keywords.includes('terminal'));
   assert.ok(packageJson.keywords.includes('rollback'));
   assert.equal(packageJson.scripts?.prepublishOnly, 'npm run verify && npm run test:package');

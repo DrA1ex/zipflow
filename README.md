@@ -57,6 +57,7 @@ Archive → Review → Apply → Checks → Finish
 - Manual, Guarded autopilot, and Full autopilot decision modes.
 - Run history, performance analytics, reports, stored patches, and ZIP export.
 - Configurable startup update checks, manual version checks, and one-step global npm updates.
+- Authenticated local server and side-effect-free `zipflow/client` SDK; the standalone TUI uses the same boundary by default.
 - System-locale interface selection by default, complete English and Russian catalogs, expanded core German, French, Italian, and Spanish translations, and custom JSON language packs.
 
 ## Useful controls
