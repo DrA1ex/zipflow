@@ -11,6 +11,8 @@ export const CAPABILITIES = freeze([
   'blobs',
   'archive_runs',
   'check_runs',
+  'deploy_runs',
+  'project_setup_actions',
   'semantic_surfaces',
   'actions',
   'plans',

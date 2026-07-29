@@ -7,7 +7,7 @@ import { registerWorkflowRoutes } from '../src/server/workflow-routes.js';
 
 const NO_BODY = Symbol('no-body');
 const APPLICATION_METHODS = [
-  'startArchiveRun', 'startCheckRun', 'getRun', 'getSurface', 'dispatchAction',
+  'startArchiveRun', 'startCheckRun', 'startDeployRun', 'getRun', 'getSurface', 'dispatchAction',
   'getPlan', 'getDiff', 'getOutput', 'getReport', 'getHistory',
 ];
 
@@ -20,6 +20,7 @@ test('workflow adapter registers the complete route and middleware contract', ()
   })), [
     post('/v1/projects/:projectId/runs', true),
     post('/v1/projects/:projectId/check-runs', true),
+    post('/v1/projects/:projectId/deploy-runs', true),
     get('/v1/runs/:runId'),
     get('/v1/runs/:runId/surface'),
     post('/v1/runs/:runId/actions/:actionId', true),
@@ -63,6 +64,15 @@ test('workflow mutations delegate exact bodies, revisions, keys, and envelopes',
   assert.equal(checks.status, 202);
   assert.deepEqual(checks.body, { runId: 'run-checks', status: 'running' });
 
+  const deploy = await request(fixture.router, {
+    method: 'POST',
+    path: '/v1/projects/project%2Fone/deploy-runs',
+    body: { seriesId: 'series-deploy-1' },
+    headers: { 'idempotency-key': 'deploy-key' },
+  });
+  assert.equal(deploy.status, 202);
+  assert.deepEqual(deploy.body, { runId: 'run-deploy', status: 'running' });
+
   const action = await request(fixture.router, {
     method: 'POST',
     path: '/v1/runs/run%2Fone/actions/resolve%2Fconflict',
@@ -83,6 +93,11 @@ test('workflow mutations delegate exact bodies, revisions, keys, and envelopes',
       projectId: 'project/one',
       body: { seriesId: 'series-1', checkIds: ['test'] },
       idempotencyKey: 'checks-key',
+    }),
+    call('startDeployRun', {
+      projectId: 'project/one',
+      body: { seriesId: 'series-deploy-1' },
+      idempotencyKey: 'deploy-key',
     }),
     call('dispatchAction', {
       runId: 'run/one',
@@ -269,6 +284,7 @@ function fakeApplication(calls, overrides) {
   const defaults = {
     startArchiveRun: { status: 202, headers: { 'x-workflow-result': 'archive' }, body: { runId: 'run-archive', status: 'running' } },
     startCheckRun: { status: 202, body: { runId: 'run-checks', status: 'running' } },
+    startDeployRun: { status: 202, body: { runId: 'run-deploy', status: 'running' } },
     getRun: ({ runId }) => ({ runId, kind: 'run' }),
     getSurface: { id: 'surface-1', revision: 11, kind: 'plan_review' },
     dispatchAction: ({ actionId }) => ({ status: 200, headers: { 'x-workflow-result': 'action' }, body: { actionId, replayed: false } }),

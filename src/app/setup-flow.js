@@ -382,10 +382,15 @@ async function activateReview(controller, itemId) {
     return controller.state.setupEditing ? showWorkflowSections(controller, 'review') : showDeployPolicyStep(controller);
   }
   if (itemId === 'save-workflow') {
-    controller.state.workflow = await saveWorkflow(controller.state.draft);
+    controller.state.workflow = typeof controller.persistWorkflowDraft === 'function'
+      ? await controller.persistWorkflowDraft(controller.state.draft)
+      : await saveWorkflow(controller.state.draft);
     controller.state.draft = null;
     controller.state.setupProjectSnapshot = null;
     upsertMessage(controller.state, 'workflow-review-draft', 'Workflow saved', [controller.state.workflow.name], 'success', { collapsible: false, collapsed: false });
+    if (typeof controller.afterWorkflowSaved === 'function') {
+      return controller.afterWorkflowSaved();
+    }
     const { beginArchiveInput } = await import('./run-flow.js');
     beginArchiveInput(controller);
   }

@@ -28,6 +28,7 @@ test('protocol v1 constants expose the implementation specification vocabulary',
   assert.equal(SCHEMA_REVISION, 1);
   assert.deepEqual(CAPABILITIES, [
     'projects', 'workflow_config', 'blobs', 'archive_runs', 'check_runs',
+    'deploy_runs', 'project_setup_actions',
     'semantic_surfaces', 'actions', 'plans', 'diffs', 'history', 'rollback', 'events',
   ]);
   assert.deepEqual(ERROR_CODES, [
@@ -106,6 +107,8 @@ test('OpenAPI uses authenticated local transport semantics and the runtime schem
     ['/v1/blobs', 'post'],
     ['/v1/projects/{projectId}/runs', 'post'],
     ['/v1/projects/{projectId}/check-runs', 'post'],
+    ['/v1/projects/{projectId}/deploy-runs', 'post'],
+    ['/v1/projects/{projectId}/setup-actions/{actionId}', 'post'],
     ['/v1/operations/{operationId}/cancel', 'post'],
     ['/v1/runs/{runId}/actions/{actionId}', 'post'],
   ]) {

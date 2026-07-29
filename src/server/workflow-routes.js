@@ -7,6 +7,7 @@ import { ServerHttpError } from './router.js';
 const APPLICATION_METHODS = Object.freeze([
   'startArchiveRun',
   'startCheckRun',
+  'startDeployRun',
   'getRun',
   'getSurface',
   'dispatchAction',
@@ -59,6 +60,21 @@ export function registerWorkflowRoutes(router, {
     return application.startCheckRun({
       projectId: params.projectId,
       body: requireObject(body, 'Check run request'),
+      idempotencyKey,
+    });
+  }, { body: 'json', idempotency: true });
+
+  router.post('/v1/projects/:projectId/deploy-runs', async ({
+    params,
+    query,
+    body,
+    idempotencyKey,
+  }) => {
+    assertAccepting(acceptingMutations);
+    requireNoQuery(query);
+    return application.startDeployRun({
+      projectId: params.projectId,
+      body: requireObject(body, 'Deploy run request'),
       idempotencyKey,
     });
   }, { body: 'json', idempotency: true });

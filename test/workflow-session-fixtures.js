@@ -146,6 +146,12 @@ export function actionInput(actionId) {
   if (['use-archive', 'keep-local'].includes(actionId)) return { path: 'src/a.js' };
   if (actionId === 'resolve-conflict') return { path: 'src/a.js', decision: 'keep' };
   if (actionId === 'commit') return { message: 'Update project' };
+  if (actionId === 'amend-commit') {
+    return { targetId: 'amend-head', message: 'Update project' };
+  }
+  if (actionId === 'squash-commits') {
+    return { targetId: 'squash-2', message: 'Update project' };
+  }
   return {};
 }
 
@@ -158,4 +164,3 @@ export function deferred() {
   });
   return { promise, resolve, reject };
 }
-

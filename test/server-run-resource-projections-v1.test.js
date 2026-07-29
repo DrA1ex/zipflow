@@ -165,6 +165,35 @@ test('report projection selectively sanitizes legacy report policy fields', () =
       stdout: '/private/project deployment output',
     },
     applied: { backupPath: '/private/project/.zipflow/backups/run' },
+    llm: {
+      provider: 'ollama',
+      model: 'fixture',
+      durationMs: 1250,
+      assessment: 'suitable',
+      summary: ['Updated /private/project safely'],
+      contextText: 'private prompt must not be exposed',
+      diagnosticsPath: '/private/project/.zipflow/private.json',
+    },
+    autonomy: { mode: 'guarded', paused: false, fallbackCount: 1, checkRetries: 2 },
+    decisions: [{
+      id: 'decision-1',
+      gate: 'plan',
+      action: 'approve-plan',
+      proposedAction: 'approve-plan',
+      executionStatus: 'failed',
+      executionError: 'Project changed under /private/project',
+      source: 'llm',
+      model: 'fixture-model',
+      confidence: 0.8,
+      effectiveConfidence: 0.7,
+      allowedActions: ['approve-plan', 'cancel-run'],
+      evidence: ['Reviewed /private/project'],
+      risks: ['Local overlap'],
+      conditions: ['No drift'],
+      accepted: true,
+      stateDrift: true,
+    }],
+    archiveSafety: { warnings: [{ code: 'review', message: 'Review /private/project' }] },
     error: { code: 'FAILED', message: 'Could not read /private/extracted/src/file-0.js' },
   };
   const report = projectReportResource(session, { legacyRun });
@@ -174,6 +203,16 @@ test('report projection selectively sanitizes legacy report policy fields', () =
   assert.deepEqual(report.plan.counts, { created: 1, updated: 0, deleted: 0 });
   assert.equal(report.deploy.commandText, 'deploy [redacted-path]');
   assert.equal(report.error.message, 'Could not read [redacted-path]');
+  assert.equal(report.llm.model, 'fixture');
+  assert.deepEqual(report.llm.summary, ['Updated [redacted-path] safely']);
+  assert.equal(Object.hasOwn(report.llm, 'contextText'), false);
+  assert.equal(report.autonomy.mode, 'guarded');
+  assert.equal(report.decisions[0].model, 'fixture-model');
+  assert.deepEqual(report.decisions[0].allowedActions, ['approve-plan', 'cancel-run']);
+  assert.equal(report.decisions[0].executionError, 'Project changed under [redacted-path]');
+  assert.equal(report.decisions[0].stateDrift, true);
+  assert.equal(report.archiveSafety.warnings[0].message, 'Review [redacted-path]');
+  assert.equal(report.applied.backupAvailable, true);
   assert.equal(Object.hasOwn(report.checks.results[0], 'stdout'), false);
   assert.doesNotMatch(serialized, /projectPath|archivePath|sourcePath|currentPath|backupPath|\/private\//);
 });

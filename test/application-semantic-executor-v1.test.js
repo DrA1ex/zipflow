@@ -37,6 +37,43 @@ test('semantic executor durably begins long operations before returning a launch
   assert.equal(executor.takeOperationHandle('operation_1'), null);
 });
 
+test('semantic executor preserves the original Git checkpoint choice before conflict apply', async () => {
+  const operations = fakeOperations();
+  const executor = new SemanticActionExecutor({
+    operations,
+    createOperationId: () => 'launch_fixture',
+  });
+  const approval = actionRequest('approve-plan');
+  approval.privateState.decisions[0].decision = 'archive';
+  approval.privateState.plan.gitStatus = { staged: [], unstaged: [], conflicted: [] };
+  approval.privateState.conflicts = [{ kind: 'updated', path: 'src/file.js' }];
+  approval.privateState.workflow.git.checkpoint = 'ask';
+  const choice = await executor.executeAction(approval);
+  assert.equal(choice.snapshot.run.attention, 'checkpoint');
+  assert.equal(operations.begun.length, 0);
+
+  const checkpointRequest = {
+    ...approval,
+    actionId: 'create-checkpoint',
+    actionKind: 'create_checkpoint',
+    snapshot: choice.snapshot,
+    privateState: choice.privateState,
+  };
+  const checkpoint = await executor.executeAction(checkpointRequest);
+  assert.equal(operations.begun[0].kind, 'checkpoint_apply');
+
+  const withoutRequest = {
+    ...approval,
+    actionId: 'continue-without-checkpoint',
+    actionKind: 'continue_without_checkpoint',
+    snapshot: choice.snapshot,
+    privateState: choice.privateState,
+  };
+  const without = await executor.executeAction(withoutRequest);
+  assert.equal(operations.begun[1].kind, 'apply');
+  assert.equal(without.privateState.checkpointResolution, 'skipped');
+});
+
 test('semantic executor never accepts arbitrary action or deploy command input', async () => {
   const operations = fakeOperations();
   const executor = new SemanticActionExecutor({ operations });
@@ -61,6 +98,126 @@ test('finish releases a failed check run instead of leaving the project busy', a
   assert.equal(outcome.snapshot.run.attention, null);
   assert.equal(outcome.snapshot.checks.status, 'failed');
   assert.equal(outcome.result, null);
+});
+
+test('keeping changes after failed checks preserves the original commit choice and skips deploy by default', async () => {
+  const executor = new SemanticActionExecutor({ operations: fakeOperations() });
+  const request = actionRequest('keep-changes');
+  request.snapshot.run.attention = 'checks_failed';
+  request.privateState.checks = { ok: false, failed: 1, results: [] };
+  request.privateState.applied = { paths: ['src/file.js'], changedPaths: ['src/file.js'] };
+  request.privateState.workflow.git.resultCommit = 'ask';
+  request.privateState.workflow.deploy = {
+    policy: 'ask',
+    commandText: 'npm run deploy',
+    cwd: '.',
+  };
+  const kept = await executor.executeAction(request);
+  assert.equal(kept.snapshot.run.attention, 'commit');
+  assert.equal(kept.privateState.failedChecksKept, true);
+
+  const skippedCommit = await executor.executeAction({
+    ...request,
+    actionId: 'continue-without-commit',
+    actionKind: 'continue_without_commit',
+    snapshot: kept.snapshot,
+    privateState: kept.privateState,
+  });
+  assert.equal(skippedCommit.snapshot.run.status, 'completed');
+  assert.equal(skippedCommit.snapshot.run.attention, null);
+});
+
+test('failed deployment retry and finish remain distinct semantic actions', async () => {
+  const operations = fakeOperations();
+  const executor = new SemanticActionExecutor({ operations });
+  const request = actionRequest('retry-deploy');
+  request.snapshot.run.attention = 'deploy';
+  request.privateState.workflow.deploy = {
+    policy: 'ask',
+    commandText: 'npm run deploy',
+    cwd: '.',
+  };
+  request.privateState.deploy = { ok: false, code: 1 };
+  const retried = await executor.executeAction(request);
+  assert.equal(retried.result.launch.kind, 'deploy');
+
+  const finished = await executor.executeAction({
+    ...request,
+    actionId: 'finish-with-deploy-error',
+    actionKind: 'finish_with_deploy_error',
+  });
+  assert.equal(finished.snapshot.run.status, 'completed');
+  assert.equal(finished.privateState.deploy.failureAccepted, true);
+});
+
+test('interactive archive review controls stay durable semantic actions', async () => {
+  const operations = fakeOperations();
+  const executor = new SemanticActionExecutor({ operations });
+  const reinterpret = actionRequest('reinterpret-as-snapshot');
+  reinterpret.privateState.binding.blob = {
+    path: '/private/blob.zip',
+    blobId: `sha256:${'a'.repeat(64)}`,
+    sha256: 'a'.repeat(64),
+    size: 10,
+  };
+  reinterpret.privateState.workflow.archive = { mode: 'overlay' };
+  reinterpret.privateState.archiveInterpretation = { mode: 'overlay', source: 'workflow' };
+  const reinterpreted = await executor.executeAction(reinterpret);
+  assert.equal(reinterpreted.result.launch.kind, 'archive_reinterpretation');
+  assert.equal(reinterpreted.result.launch.input.mode, 'snapshot');
+  assert.equal(reinterpreted.privateState.workflow.archive.mode, 'snapshot');
+  assert.equal(reinterpreted.privateState.llmReviewStatus, null);
+
+  const restart = actionRequest('restart-llm-review');
+  restart.privateState.llmReviewStatus = 'failed';
+  const restarted = await executor.executeAction(restart);
+  assert.equal(restarted.result.launch.kind, 'llm_review');
+  assert.equal(restarted.privateState.llmReviewStatus, 'running');
+  assert.equal(restarted.snapshot.operation.kind, 'llm_review');
+
+  const resume = actionRequest('resume-autopilot');
+  resume.privateState.autonomy = { mode: 'guarded', paused: true };
+  resume.snapshot.autonomy = { mode: 'guarded', paused: true };
+  const resumed = await executor.executeAction(resume);
+  assert.equal(resumed.privateState.autonomy.paused, false);
+  assert.equal(resumed.snapshot.autonomy.paused, false);
+  assert.equal(resumed.result.resumeAutonomy, true);
+
+  const cancelled = await executor.executeAction(actionRequest('cancel-run'));
+  assert.equal(cancelled.snapshot.run.status, 'cancelled');
+  assert.equal(cancelled.snapshot.run.attention, null);
+  assert.equal(cancelled.privateState.cancelled, true);
+});
+
+test('eligible commit rewrites are immutable server-owned operations', async () => {
+  const operations = fakeOperations();
+  const executor = new SemanticActionExecutor({ operations });
+  const request = actionRequest('amend-commit', {
+    targetId: 'amend-head',
+    message: 'Update project',
+  });
+  request.privateState.commitRewriteCandidates = [{
+    id: 'amend-head',
+    kind: 'amend',
+    revision: 'abc123',
+    runIds: ['previous-run'],
+  }];
+  const amended = await executor.executeAction(request);
+  assert.equal(amended.result.launch.kind, 'git_rewrite');
+  assert.deepEqual(amended.result.launch.input, {
+    strategy: 'amend',
+    targetId: 'amend-head',
+    message: 'Update project',
+  });
+
+  await assert.rejects(
+    executor.executeAction({
+      ...request,
+      actionId: 'squash-commits',
+      actionKind: 'squash_commits',
+    }),
+    (error) => error?.code === 'ACTION_NOT_AVAILABLE',
+  );
 });
 
 function actionRequest(actionId, input = {}) {

@@ -62,15 +62,19 @@ async function activateInit(controller, itemId) {
     return showChecksStep(controller);
   }
   if (itemId !== 'git-init') return;
-  const result = await initializeRepository(controller.state.project.root);
+  const result = typeof controller.initializeProjectRepository === 'function'
+    ? await controller.initializeProjectRepository()
+    : await initializeRepository(controller.state.project.root);
   if (!result.ok) {
     controller.message('Git initialization failed', [result.reason], 'error');
     return showGitBootstrap(controller);
   }
-  controller.state.project = await configureWorkspaceProjects(
-    await discoverProject(controller.state.project.root),
-    controller.state.draft.projects,
-  );
+  controller.state.project = typeof controller.refreshProjectDetails === 'function'
+    ? await controller.refreshProjectDetails()
+    : await configureWorkspaceProjects(
+      await discoverProject(controller.state.project.root),
+      controller.state.draft.projects,
+    );
   controller.state.draft.projectPath = controller.state.project.root;
   controller.message('Git repository initialized', [controller.state.project.root], 'success');
   return showGitignoreStep(controller);
@@ -117,7 +121,9 @@ async function activateGitignore(controller, itemId) {
     return showGitignoreStep(controller);
   }
   if (itemId === 'gitignore-add') {
-    const result = await addRecommendedGitignore(controller.state.project);
+    const result = typeof controller.createRecommendedGitignore === 'function'
+      ? await controller.createRecommendedGitignore()
+      : await addRecommendedGitignore(controller.state.project);
     controller.message(result.created ? '.gitignore created' : 'Existing .gitignore kept unchanged', [
       result.created
         ? `${result.addedCount} recommended rules were written to the new file.`
@@ -162,7 +168,9 @@ async function activateInitialCommit(controller, itemId) {
 }
 
 async function createFirstCommit(controller, message) {
-  const prepared = await prepareInitialCommit(controller.state.project.root);
+  const prepared = typeof controller.prepareProjectInitialCommit === 'function'
+    ? await controller.prepareProjectInitialCommit()
+    : await prepareInitialCommit(controller.state.project.root);
   if (!prepared.ok) {
     controller.message('First commit was not prepared', [prepared.reason], 'error');
     return showInitialCommitStep(controller);
@@ -219,7 +227,9 @@ async function activateInitialCommitReview(controller, itemId) {
 
 async function commitPreparedInitialFiles(controller, paths) {
   const draft = controller.state.initialCommitDraft;
-  const result = await createInitialCommit(controller.state.project.root, draft.message, { paths, allowHooks: false });
+  const result = typeof controller.createProjectInitialCommit === 'function'
+    ? await controller.createProjectInitialCommit(draft.message, paths)
+    : await createInitialCommit(controller.state.project.root, draft.message, { paths, allowHooks: false });
   if (!result.ok) {
     controller.message('First commit was not created', [result.reason, 'You can retry, change the message, or skip this step.'], 'error');
     return draft.sensitive?.length ? showInitialCommitReview(controller) : showInitialCommitStep(controller);

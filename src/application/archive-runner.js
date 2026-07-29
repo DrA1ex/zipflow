@@ -63,6 +63,10 @@ export async function inspectUploadedArchive({
           archiveRootChoices: archiveRootChoices(rootReview),
           archiveSafety: null,
           plan: null,
+          archiveInterpretation: {
+            mode: workflow.archive?.mode ?? 'overlay',
+            source: 'workflow',
+          },
         },
       };
     }
@@ -165,7 +169,10 @@ async function completeArchivePlan({
     })
     : { warnings: [], previousRunId: null };
   const decisions = createPlanDecisions(plan);
-  if (workflow.policy?.conflictPolicy === 'overwrite') {
+  if (
+    (workflow.autonomy?.mode ?? 'manual') === 'manual'
+    && workflow.policy?.conflictPolicy === 'overwrite'
+  ) {
     for (const conflict of plan.conflicts) decisions.set(conflict.path, 'archive');
   }
   const executable = {
@@ -203,6 +210,10 @@ async function completeArchivePlan({
       archiveSafety: publicSafety(executable.safety),
       plan: publicPlan(executable.plan, decisions),
       archiveMetadata: metadata,
+      archiveInterpretation: {
+        mode: workflow.archive?.mode ?? 'overlay',
+        source: 'workflow',
+      },
     },
   };
 }

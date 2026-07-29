@@ -22,7 +22,7 @@ export function handlesHistoryScreen(screen) {
 
 export async function showRunHistory(controller, selectedIndex = null) {
   normalizeLegacyFilter(controller.state);
-  const runs = await listProjectRuns(controller.state.project.root, { limit: 40 });
+  const runs = await listControllerRuns(controller, 40);
   controller.state.historyRuns = runs;
   const filtered = runs.filter((run) => matchesRunType(run, controller.state.historyTypeFilter)
     && matchesRunStatus(run, controller.state.historyStatusFilter));
@@ -83,7 +83,7 @@ export async function activateHistory(controller, itemId) {
   if (itemId === 'analytics-back') return showRunHistory(controller, controller.state.historyReturnIndex ?? 2);
   if (itemId.startsWith('analytics:')) return;
   if (!itemId.startsWith('history:')) return;
-  const run = await loadRunRecord(itemId.slice(8));
+  const run = await loadControllerRun(controller, itemId.slice(8));
   if (!run) {
     controller.message('Run report is missing', [itemId.slice(8)], 'warning');
     return showRunHistory(controller, controller.state.selectedIndex);
@@ -103,7 +103,7 @@ export function backHistory(controller) {
 }
 
 export async function showRunAnalytics(controller) {
-  const runs = await listProjectRuns(controller.state.project.root, { limit: 100 });
+  const runs = await listControllerRuns(controller, 100);
   const analytics = buildRunAnalytics(runs);
   const items = [];
   if (analytics.checks.total.count) items.push({
@@ -184,6 +184,9 @@ function metricDescription(metric) {
 }
 
 export async function repeatLastArchive(controller) {
+  if (typeof controller.repeatLastArchive === 'function') {
+    return controller.repeatLastArchive();
+  }
   const runId = controller.state.workflow?.lastRunId;
   if (!runId) return controller.message('No previous archive', ['This workflow has no prior run to repeat.'], 'warning');
   const run = await loadRunRecord(runId);
@@ -207,6 +210,18 @@ export async function repeatLastArchive(controller) {
     'The source ZIP was moved or deleted and cannot be found at its recorded locations.',
     `Run: ${run.id}`,
   ], 'warning');
+}
+
+function listControllerRuns(controller, limit) {
+  return typeof controller.listHistoryRuns === 'function'
+    ? controller.listHistoryRuns({ limit })
+    : listProjectRuns(controller.state.project.root, { limit });
+}
+
+function loadControllerRun(controller, runId) {
+  return typeof controller.loadHistoryRun === 'function'
+    ? controller.loadHistoryRun(runId)
+    : loadRunRecord(runId);
 }
 
 function formatWhen(value) {

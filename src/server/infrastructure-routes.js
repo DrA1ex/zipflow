@@ -22,6 +22,12 @@ import {
 import { createServerProblem } from './problems.js';
 import { createRecommendedWorkflow } from '../workflow/defaults.js';
 import { projectSurface } from '../application/surface-projector.js';
+import { addRecommendedGitignore } from '../git/ignore.js';
+import {
+  createInitialCommit,
+  initializeRepository,
+  prepareInitialCommit,
+} from '../git/repository.js';
 
 export function registerInfrastructureRoutes(router, services) {
   const {
@@ -36,6 +42,10 @@ export function registerInfrastructureRoutes(router, services) {
     inspectProject = discoverProject,
     workflowSummary = readWorkflowSummary,
     acceptingMutations = () => true,
+    initializeProjectRepository = initializeRepository,
+    createProjectGitignore = addRecommendedGitignore,
+    prepareProjectInitialCommit = prepareInitialCommit,
+    createProjectInitialCommit = createInitialCommit,
   } = services;
 
   router.get(PROTOCOL_PATHS.hello, async () => ({
@@ -184,6 +194,68 @@ export function registerInfrastructureRoutes(router, services) {
         await idempotency.fail({ key: idempotencyKey, fingerprint, receipt: result });
         return result;
       }
+      await idempotency.markUncertain({ key: idempotencyKey, fingerprint }).catch(() => {});
+      throw error;
+    }
+  }, { body: 'json', idempotency: true });
+
+  router.post('/v1/projects/:projectId/setup-actions/:actionId', async ({
+    params,
+    body,
+    idempotencyKey,
+  }) => {
+    assertAccepting(acceptingMutations);
+    const project = await requireProject(projects, params.projectId);
+    const input = requireObject(body);
+    const actionId = params.actionId;
+    if (![
+      'initialize-git',
+      'create-gitignore',
+      'prepare-initial-commit',
+      'create-initial-commit',
+    ].includes(actionId)) {
+      throw new ServerHttpError(404, 'ACTION_NOT_AVAILABLE', 'Project setup action is not available.');
+    }
+    const fingerprint = fingerprintRequest({
+      method: 'POST',
+      path: `/v1/projects/${project.projectId}/setup-actions/${actionId}`,
+      body: input,
+    });
+    const claim = await idempotency.claim({
+      key: idempotencyKey,
+      fingerprint,
+      metadata: { kind: 'project-setup-action', projectId: project.projectId, actionId },
+    });
+    const replay = replayOrThrow(claim);
+    if (replay) return replay;
+    try {
+      let result;
+      if (actionId === 'initialize-git') {
+        requireExactKeys(input, []);
+        result = await initializeProjectRepository(project.canonicalPath);
+      } else if (actionId === 'create-gitignore') {
+        requireExactKeys(input, []);
+        result = await createProjectGitignore(await inspectProject(project.canonicalPath));
+      } else if (actionId === 'prepare-initial-commit') {
+        requireExactKeys(input, []);
+        result = await prepareProjectInitialCommit(project.canonicalPath);
+      } else {
+        requireExactKeys(input, ['message', 'paths']);
+        if (typeof input.message !== 'string' || !input.message.trim() || input.message.length > 10_000) {
+          throw new ServerHttpError(400, 'ACTION_INPUT_INVALID', 'Initial commit message is invalid.');
+        }
+        if (!Array.isArray(input.paths) || input.paths.some((value) => typeof value !== 'string')) {
+          throw new ServerHttpError(400, 'ACTION_INPUT_INVALID', 'Initial commit paths must be an array of strings.');
+        }
+        result = await createProjectInitialCommit(project.canonicalPath, input.message, {
+          paths: input.paths,
+          allowHooks: false,
+        });
+      }
+      const response = { status: 200, body: result };
+      await idempotency.complete({ key: idempotencyKey, fingerprint, receipt: response });
+      return response;
+    } catch (error) {
       await idempotency.markUncertain({ key: idempotencyKey, fingerprint }).catch(() => {});
       throw error;
     }
@@ -446,6 +518,16 @@ function assertAccepting(callback) {
 function requireObject(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new ServerHttpError(400, 'ACTION_INPUT_INVALID', 'A JSON object is required.');
+  }
+  return value;
+}
+
+function requireExactKeys(value, expected) {
+  const allowed = new Set(expected);
+  const unknown = Object.keys(value).filter((key) => !allowed.has(key));
+  const missing = expected.filter((key) => !Object.hasOwn(value, key));
+  if (unknown.length || missing.length) {
+    throw new ServerHttpError(400, 'ACTION_INPUT_INVALID', 'Project setup action input is invalid.');
   }
   return value;
 }

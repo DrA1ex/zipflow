@@ -34,6 +34,10 @@ function operationIsActive(snapshot) {
   return ['active', 'cancel_requested', 'cancel_deferred'].includes(snapshot.operation?.settlement);
 }
 
+function operationKeepsDecisionSurface(snapshot) {
+  return ['llm_review', 'failure_analysis', 'autonomy_decision'].includes(snapshot.operation?.kind);
+}
+
 function conflictCount(snapshot) {
   if (Number.isSafeInteger(snapshot.plan?.unresolvedConflicts)) return snapshot.plan.unresolvedConflicts;
   return bounded(snapshot.plan?.conflicts).filter(({ decision } = {}) => !decision).length;
@@ -60,7 +64,8 @@ export function inferSurfaceKind(snapshot = {}) {
   if (snapshot.checks?.status === 'failed') return 'checks_failed';
   if (status === 'failed') return 'error';
   if (status === 'inspecting' || snapshot.operation?.kind === 'archive_inspection') return 'archive_inspecting';
-  if (operationIsActive(snapshot)) return 'operation_progress';
+  if (operationIsActive(snapshot) && !operationKeepsDecisionSurface(snapshot)) return 'operation_progress';
+  if (attention === 'archive_safety') return 'archive_safety';
   if (snapshot.plan?.currentConflict) return 'conflict_file';
   if (conflictCount(snapshot) > 0) return 'conflict_summary';
   if (snapshot.plan?.view === 'files') return 'plan_files';
@@ -190,7 +195,22 @@ function sectionContent(kind, snapshot, surfaceKind) {
     case 'file_details': return { files: planFiles(snapshot), truncated: (snapshot.plan?.files?.length ?? 0) > 100 };
     case 'conflict': return { conflicts: conflicts(snapshot), unresolved: conflictCount(snapshot) };
     case 'check_results': return { status: cleanText(snapshot.checks?.status, 'unknown'), results: checkResults(snapshot) };
-    case 'commit': return { suggestedMessage: cleanText(snapshot.commit?.suggestedMessage, ''), messageRequired: true };
+    case 'commit': return {
+      suggestedMessage: cleanText(snapshot.commit?.suggestedMessage, ''),
+      candidates: bounded(snapshot.commit?.candidates, 8).map((candidate, position) => ({
+        id: cleanId(candidate?.id, `candidate-${position + 1}`),
+        label: cleanText(candidate?.label, `Candidate ${position + 1}`),
+        message: cleanText(candidate?.message, ''),
+        detail: cleanText(candidate?.detail, ''),
+      })).filter(({ message }) => message),
+      rewriteCandidates: bounded(snapshot.commit?.rewriteCandidates, 4).map((candidate, position) => ({
+        id: cleanId(candidate?.id, `rewrite-${position + 1}`),
+        kind: ['amend', 'squash'].includes(candidate?.kind) ? candidate.kind : 'amend',
+        label: cleanText(candidate?.label, `Rewrite candidate ${position + 1}`),
+        count: finiteNumber(candidate?.count, 1),
+      })),
+      messageRequired: true,
+    };
     case 'deployment': return { configured: snapshot.workflow?.deployment?.configured === true, label: cleanText(snapshot.workflow?.deployment?.label, 'Configured deployment') };
     case 'history_rows': return { rows: historyRows(snapshot), truncated: (snapshot.history?.runs?.length ?? 0) > 100 };
     case 'warning_list': return { warnings: projectWarnings(snapshot, surfaceKind) };
@@ -214,6 +234,20 @@ function actionEntries(template, snapshot) {
     || snapshot.run?.backupAvailable === true;
 
   return template.actions.map((id) => {
+    if (
+      operationKeepsDecisionSurface(snapshot)
+      && operationIsActive(snapshot)
+      && id !== 'cancel-operation'
+      && id !== 'dismiss-error'
+    ) {
+      return {
+        id,
+        enabled: false,
+        'disabledReason': operationKeepsDecisionSurface(snapshot)
+          ? 'Wait for the active local-model decision to finish or cancel it.'
+          : 'Wait for the active operation to finish.',
+      };
+    }
     if (id === 'save-workflow' && snapshot.workflow?.inputSchema) {
       return { id, inputSchema: snapshot.workflow.inputSchema };
     }
@@ -264,6 +298,30 @@ function surfaceLinks(snapshot, kind) {
   return links;
 }
 
+function archiveReviewActionIds(snapshot, kind) {
+  if (![
+    'archive_safety', 'plan_review', 'plan_files', 'conflict_summary', 'conflict_file',
+  ].includes(kind)
+    || snapshot.run?.status !== 'waiting_action'
+    || ['checkpoint', 'local_work_checkpoint'].includes(snapshot.run?.attention)) {
+    return [];
+  }
+  const mode = snapshot.archiveInterpretation?.mode
+    ?? snapshot.workflow?.archiveMode
+    ?? 'overlay';
+  const llmStopped = snapshot.llm?.cancelled === true
+    || Boolean(snapshot.llm?.error)
+    || ['cancelled', 'failed'].includes(snapshot.llm?.status);
+  const deleted = Number(snapshot.plan?.counts?.deleted ?? 0);
+  return [
+    mode === 'snapshot' ? 'reinterpret-as-overlay' : 'reinterpret-as-snapshot',
+    ...(mode === 'snapshot' && deleted > 0 ? ['review-deletion-intent'] : []),
+    ...(llmStopped ? ['restart-llm-review'] : []),
+    ...(snapshot.autonomy?.paused === true ? ['resume-autopilot'] : []),
+    ...(kind === 'archive_safety' ? [] : ['cancel-run']),
+  ];
+}
+
 export class SurfaceProjector {
   constructor({ actionRegistry = new ActionRegistry() } = {}) {
     this.actionRegistry = actionRegistry;
@@ -275,7 +333,49 @@ export class SurfaceProjector {
     }
 
     const kind = inferSurfaceKind(snapshot);
-    const template = SURFACE_TEMPLATES[kind];
+    const baseTemplate = SURFACE_TEMPLATES[kind];
+    const decisionTemplate = snapshot.deployment?.status === 'failed' && kind === 'deploy_choice'
+      ? {
+          ...baseTemplate,
+          title: 'Deployment failed',
+          summary: 'Retry the configured deployment, finish with the recorded error, or restore the local update.',
+          actions: ['retry-deploy', 'finish-with-deploy-error', 'rollback'],
+        }
+      : ['checkpoint', 'local_work_checkpoint'].includes(snapshot.run?.attention)
+      ? {
+          ...baseTemplate,
+          title: 'Protect local work',
+          summary: 'Choose whether to create a private Git checkpoint before applying archive conflict resolutions.',
+          actions: snapshot.run?.attention === 'local_work_checkpoint'
+            ? ['create-checkpoint']
+            : ['create-checkpoint', 'continue-without-checkpoint'],
+        }
+      : baseTemplate;
+    const archiveReviewActions = archiveReviewActionIds(snapshot, kind);
+    const commitRewriteActions = kind === 'commit_choice'
+      ? [...new Set((snapshot.commit?.rewriteCandidates ?? []).map(({ kind: rewriteKind }) => (
+          rewriteKind === 'squash' ? 'squash-commits' : 'amend-commit'
+        )))]
+      : [];
+    const contextualActions = [...archiveReviewActions, ...commitRewriteActions];
+    const semanticTemplate = contextualActions.length
+      ? {
+          ...decisionTemplate,
+          actions: [...new Set([...decisionTemplate.actions, ...contextualActions])],
+        }
+      : decisionTemplate;
+    const template = operationKeepsDecisionSurface(snapshot)
+      && operationIsActive(snapshot)
+      && [
+        'archive_safety', 'plan_review', 'plan_files', 'conflict_summary',
+        'conflict_file', 'checks_failed',
+      ].includes(kind)
+      ? {
+          ...semanticTemplate,
+          sections: [...semanticTemplate.sections, 'progress'],
+          actions: [...semanticTemplate.actions, 'cancel-operation'],
+        }
+      : semanticTemplate;
     const ownerId = snapshot.run?.id ?? snapshot.project?.id ?? 'global';
     const surface = {
       id: cleanId(snapshot.surfaceId, `${kind}:${ownerId}`),

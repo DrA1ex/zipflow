@@ -78,6 +78,14 @@ const paths = {
     parameters: [pathParameter('projectId')],
     post: mutation('startCheckRun', 'Run configured project checks', { requestBody: jsonBody() }),
   },
+  '/v1/projects/{projectId}/deploy-runs': {
+    parameters: [pathParameter('projectId')],
+    post: mutation('startDeployRun', 'Run the configured project deployment', { requestBody: jsonBody() }),
+  },
+  '/v1/projects/{projectId}/setup-actions/{actionId}': {
+    parameters: [pathParameter('projectId'), pathParameter('actionId')],
+    post: mutation('performProjectSetupAction', 'Perform an advertised project setup mutation', { requestBody: jsonBody() }),
+  },
   '/v1/runs/{runId}': {
     parameters: [pathParameter('runId')],
     get: operation('getRun', 'Read a run'),

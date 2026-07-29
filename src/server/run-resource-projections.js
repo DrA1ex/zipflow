@@ -80,8 +80,13 @@ export function projectPlanResource(value, {
     throw runSessionError('Plan group is invalid.', 'INVALID_PLAN_GROUP', 400);
   }
   const redact = createRedactor(session);
+  const decisions = new Map(
+    (session.executionManifest?.decisions ?? [])
+      .filter(({ path } = {}) => typeof path === 'string')
+      .map(({ path, decision }) => [path, decision]),
+  );
   const items = manifestGroupItems(session.executionManifest, group)
-    .map((item) => projectPlanItem(item, redact));
+    .map((item) => projectPlanItem(item, redact, decisions.get(item.path)));
   const counts = manifestCounts(session.executionManifest);
   const snapshot = requestFingerprint({ items, counts });
   const result = paginateOpaque(items, {
@@ -164,6 +169,14 @@ export function projectReportResource(value, { legacyRun = null } = {}) {
     deploy: projectDeploy(legacy.deploy ?? summary.deploy, redact),
     rollback: isObject(legacy.rollback) ? { status: safeText(legacy.rollback.status, redact) || null } : null,
     decisions: projectDecisions(legacy.decisions, redact),
+    llm: projectLlm(legacy.llm, redact),
+    llmFailure: projectLlmFailure(legacy.llmFailure, redact),
+    autonomy: projectAutonomy(legacy.autonomy),
+    archiveSafety: projectArchiveSafety(legacy.archiveSafety, redact),
+    applied: isObject(legacy.applied) ? {
+      backupAvailable: legacy.applied.backupAvailable !== false
+        && legacy.rollback?.status !== 'completed',
+    } : null,
     error: projectError(legacy.error ?? summary.error, redact),
     createdAt: session.run.createdAt,
     updatedAt: session.run.updatedAt,
@@ -247,11 +260,16 @@ function projectPublicSummary(value, redact) {
   if (commit) result.commit = commit;
   const error = projectError(summary.error, redact);
   if (error) result.error = error;
+  const llm = projectLlm(summary.llm, redact);
+  if (llm) result.llm = llm;
   return result;
 }
 
-function projectPlanItem(item, redact) {
+function projectPlanItem(item, redact, decision = undefined) {
   const result = { path: item.path, kind: safeText(item.kind ?? 'updated', redact) };
+  if (decision === 'archive' || decision === 'keep' || decision === null) {
+    result.decision = decision;
+  }
   for (const key of ['beforeHash', 'afterHash', 'hash']) {
     if (item[key] == null) result[key] = null;
     else if (/^[a-f0-9]{64}$/.test(item[key])) result[key] = item[key];
@@ -315,11 +333,116 @@ function projectDecisions(values, redact) {
   if (!Array.isArray(values)) return [];
   return values.slice(0, 500).map((value) => {
     const result = {};
-    for (const key of ['gate', 'action', 'label', 'screen', 'source', 'executionStatus', 'summary']) {
+    for (const key of [
+      'id', 'gate', 'action', 'proposedAction', 'label', 'screen', 'source',
+      'executionStatus', 'executionError', 'summary', 'model', 'at',
+    ]) {
       if (typeof value?.[key] === 'string') result[key] = safeText(value[key], redact);
     }
+    for (const key of ['confidence', 'effectiveConfidence']) {
+      if (Number.isFinite(value?.[key])) result[key] = Math.max(0, Math.min(1, value[key]));
+    }
+    for (const key of ['allowedActions', 'evidence', 'risks', 'conditions']) {
+      if (Array.isArray(value?.[key])) {
+        result[key] = value[key].slice(0, 8).map((item) => safeText(item, redact));
+      }
+    }
+    result.accepted = value?.accepted === true;
+    result.stateDrift = value?.stateDrift === true;
     return result;
   });
+}
+
+function projectLlm(value, redact) {
+  if (!isObject(value)) return null;
+  const result = {
+    status: ['running', 'completed', 'failed', 'cancelled'].includes(value.status)
+      ? value.status
+      : null,
+    durationMs: safeInteger(value.durationMs),
+    provider: safeText(value.provider ?? '', redact) || null,
+    model: safeText(value.model ?? '', redact) || null,
+    language: safeText(value.language ?? '', redact) || null,
+    assessment: safeText(value.assessment ?? '', redact) || null,
+    confidence: safeText(value.confidence ?? '', redact) || null,
+    warning: safeText(value.warning ?? '', redact) || null,
+    commitMessage: safeText(value.commitMessage ?? '', redact) || null,
+    error: safeText(value.error ?? '', redact) || null,
+    cancelled: Boolean(value.cancelled),
+  };
+  if (Array.isArray(value.summary)) {
+    result.summary = value.summary.slice(0, 100).map((line) => safeText(line, redact));
+  }
+  if (Array.isArray(value.reasons)) {
+    result.reasons = value.reasons.slice(0, 100).map((line) => safeText(line, redact));
+  }
+  return result;
+}
+
+function projectLlmFailure(value, redact) {
+  if (!isObject(value)) return null;
+  return {
+    status: ['completed', 'failed', 'cancelled'].includes(value.status)
+      ? value.status
+      : value.cancelled ? 'cancelled' : value.error ? 'failed' : 'completed',
+    text: safeText(value.text ?? '', redact) || null,
+    mode: safeText(value.mode ?? '', redact) || null,
+    provider: safeText(value.provider ?? '', redact) || null,
+    model: safeText(value.model ?? '', redact) || null,
+    durationMs: safeInteger(value.durationMs),
+    cancelled: Boolean(value.cancelled),
+    error: safeText(value.error ?? '', redact) || null,
+  };
+}
+
+function projectAutonomy(value) {
+  if (!isObject(value)) return null;
+  return {
+    mode: ['manual', 'guarded', 'full'].includes(value.mode) ? value.mode : 'manual',
+    paused: Boolean(value.paused),
+    fallbackCount: safeInteger(value.fallbackCount) ?? 0,
+    checkRetries: safeInteger(value.checkRetries) ?? 0,
+    deployRetries: safeInteger(value.deployRetries) ?? 0,
+  };
+}
+
+function projectArchiveSafety(value, redact) {
+  if (!isObject(value)) return null;
+  const warnings = Array.isArray(value.warnings) ? value.warnings : [];
+  return {
+    warnings: warnings.slice(0, 500).map((warning) => {
+      if (typeof warning === 'string') return { message: safeText(warning, redact) };
+      return {
+        code: safeText(warning?.code ?? warning?.id ?? '', redact) || null,
+        message: safeText(
+          warning?.message
+            ?? ([warning?.title, warning?.detail].filter(Boolean).join(': ') || warning?.reason)
+            ?? warning?.reason
+            ?? '',
+          redact,
+        ),
+        severity: safeText(warning?.severity ?? '', redact) || null,
+      };
+    }),
+    acknowledged: value.acknowledged === true,
+    llm: projectSafetyAssessment(value.llm, redact),
+    deletionIntent: projectSafetyAssessment(value.deletionIntent, redact),
+  };
+}
+
+function projectSafetyAssessment(value, redact) {
+  if (!isObject(value)) return null;
+  return {
+    mode: safeText(value.mode ?? '', redact) || null,
+    assessment: safeText(value.assessment ?? '', redact) || null,
+    confidence: safeText(value.confidence ?? '', redact) || null,
+    recommendation: safeText(value.recommendation ?? '', redact) || null,
+    projectRelation: safeText(value.projectRelation ?? '', redact) || null,
+    archiveShape: safeText(value.archiveShape ?? '', redact) || null,
+    reasons: Array.isArray(value.reasons)
+      ? value.reasons.slice(0, 5).map((reason) => safeText(reason, redact))
+      : [],
+  };
 }
 
 function projectError(value, redact) {

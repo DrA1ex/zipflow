@@ -15,7 +15,7 @@
     "start": "node ./bin/zipflow.js",
     "check": "node ./scripts/check-source.js && node ./scripts/check-i18n.js",
     "test": "ZIPFLOW_TEST_LOCALE=en node --test",
-    "test:functional-baseline": "ZIPFLOW_TEST_LOCALE=en node --test test/functional-baseline-f44e0cb1.test.js",
+    "test:functional-baseline": "node ./scripts/verify-functional-baseline.js",
     "verify": "npm run check && npm test",
     "release:check": "npm run verify && npm run test:package && npm pack --dry-run",
     "prepublishOnly": "npm run verify && npm run test:package",

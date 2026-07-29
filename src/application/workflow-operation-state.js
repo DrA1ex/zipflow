@@ -1,5 +1,9 @@
 import path from 'node:path';
 import { deploymentAvailable, nextPostCheckAttention } from './post-apply-runner.js';
+import {
+  serverCommitMessage,
+  serverCommitMessageCandidates,
+} from './workflow-commit-message.js';
 
 const MAX_OUTPUT_CHARS = 64 * 1024;
 const ANSI_PATTERN = /[\u001b\u009b][[\]()#;?]*(?:(?:[a-zA-Z\d]*(?:;[-a-zA-Z\d\/#&.:=?%@~_]+)*)?\u0007|(?:(?:\d{1,4}(?:[;:]\d{0,4})*)?[\dA-PR-TZcf-nq-uy=><~]))/g;
@@ -8,7 +12,10 @@ const CONTROL_PATTERN = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g
 export function archiveOutcome(context, result) {
   const status = result.outcome === 'completed' ? 'completed' : 'waiting_action';
   const attention = result.attention ?? null;
-  const executable = clone(result.executable);
+  const executable = {
+    ...clone(context.privateState),
+    ...clone(result.executable),
+  };
   return operationOutcome({
     status, attention,
     snapshot: transitionSnapshot(context, executable, archivePublic(result.public)),
@@ -28,8 +35,32 @@ export function postCheckOutcome(context, privateState, snapshot, legacy, checks
   });
   const semanticAttention = attention === 'checks' ? 'checks_failed' : attention;
   const status = semanticAttention ? 'waiting_action' : 'completed';
+  const projectedSnapshot = semanticAttention === 'commit'
+    ? {
+        ...snapshot,
+        commit: {
+          ...(snapshot.commit ?? {}),
+          suggestedMessage: serverCommitMessage(
+            privateState,
+            context.session.run.runId,
+          ),
+          candidates: serverCommitMessageCandidates(
+            privateState,
+            context.session.run.runId,
+          ),
+          rewriteCandidates: (privateState.commitRewriteCandidates ?? [])
+            .slice(0, 4)
+            .map(({ id, kind, label, count }) => ({
+              id,
+              kind,
+              label,
+              count: finiteCount(count),
+            })),
+        },
+      }
+    : snapshot;
   return operationOutcome({
-    status, attention: semanticAttention, snapshot, privateState,
+    status, attention: semanticAttention, snapshot: projectedSnapshot, privateState,
     legacy: {
       ...legacy,
       status: checks?.ok ? (status === 'completed' ? 'completed' : 'checks_passed') : 'checks_failed',
@@ -72,7 +103,8 @@ export function snapshotBase(context) {
   const workflow = context.privateState?.workflow ?? {};
   const keep = {};
   for (const key of [
-    'archiveRootChoices', 'archiveSafety', 'plan', 'checks', 'commit', 'deployment', 'rollback',
+    'archiveRootChoices', 'archiveSafety', 'plan', 'llm', 'llmFailure',
+    'archiveInterpretation', 'autonomy', 'checks', 'commit', 'deployment', 'rollback',
   ]) {
     if (source[key] !== undefined) keep[key] = clone(source[key]);
   }
@@ -105,6 +137,7 @@ function archivePublic(value = {}) {
     archiveRootChoices: clone(value.archiveRootChoices ?? []),
     archiveSafety: clone(value.archiveSafety ?? null),
     plan: clone(value.plan ?? null),
+    archiveInterpretation: clone(value.archiveInterpretation ?? null),
   };
 }
 
@@ -183,8 +216,15 @@ export function publicError(error, kind) {
   const code = /^[A-Z][A-Z0-9_]{1,127}$/.test(String(error?.code ?? ''))
     ? error.code : 'WORKFLOW_OPERATION_FAILED';
   const labels = {
-    archive_inspection: 'archive inspection', archive_root: 'archive root selection',
+    archive_inspection: 'archive inspection',
+    archive_reinterpretation: 'archive reinterpretation',
+    archive_root: 'archive root selection',
+    llm_review: 'local LLM review',
+    failure_analysis: 'local LLM check-failure analysis',
+    checkpoint_only: 'Git checkpoint',
+    checkpoint_apply: 'Git checkpoint and project update',
     apply: 'project update', checks: 'project checks', commit: 'Git commit',
+    git_rewrite: 'Git commit rewrite',
     deploy: 'deployment', rollback: 'rollback',
   };
   return {

@@ -25,6 +25,7 @@ import { SseHub } from './sse.js';
 import { RunSessionStore } from './run-session-store.js';
 import { WorkflowApplicationService } from '../application/workflow-application-service.js';
 import { WorkflowResourceStore } from '../application/workflow-resource-store.js';
+import { loadSettings } from '../settings/store.js';
 
 export class ZipflowServer {
   constructor({
@@ -37,6 +38,8 @@ export class ZipflowServer {
     heartbeatMs = undefined,
     token = undefined,
     inspectProject = undefined,
+    loadRuntimeSettings = loadSettings,
+    requestAutonomyDecision = null,
     workflowSummary = undefined,
     onError = () => {},
     createHttpServer = (handler) => http.createServer(handler),
@@ -59,6 +62,8 @@ export class ZipflowServer {
     this.heartbeatMs = heartbeatMs;
     this.requestedToken = token;
     this.inspectProject = inspectProject;
+    this.loadRuntimeSettings = loadRuntimeSettings;
+    this.requestAutonomyDecision = requestAutonomyDecision;
     this.workflowSummary = workflowSummary;
     this.onError = onError;
     this.createHttpServer = createHttpServer;
@@ -133,6 +138,8 @@ export class ZipflowServer {
       idempotency: this.idempotency,
       journal: this.journal,
       inspectProject: this.inspectProject,
+      loadRuntimeSettings: this.loadRuntimeSettings,
+      requestAutonomyDecision: this.requestAutonomyDecision,
       onError: this.onError,
     });
   }

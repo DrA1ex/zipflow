@@ -126,6 +126,22 @@ export class ZipflowClient {
     );
   }
 
+  async startDeployRun(projectId, draft = {}, options = {}) {
+    return this.#jsonMutation(
+      `/v1/projects/${resourceId(projectId, 'projectId')}/deploy-runs`,
+      requiredObject(draft, 'deploy run request'),
+      options,
+    );
+  }
+
+  async performProjectSetupAction(projectId, actionId, input = {}, options = {}) {
+    return this.#jsonMutation(
+      `/v1/projects/${resourceId(projectId, 'projectId')}/setup-actions/${resourceId(actionId, 'actionId')}`,
+      requiredObject(input, 'project setup action input'),
+      options,
+    );
+  }
+
   async getRun(runId, { signal = undefined } = {}) {
     return this.http.requestJson(`/v1/runs/${resourceId(runId, 'runId')}`, { signal });
   }

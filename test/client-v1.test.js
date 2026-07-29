@@ -217,6 +217,9 @@ test('workflow resource methods encode opaque IDs, cursors, paths, and quoted re
   await client.startCheckRun(projectId, { seriesId: 'series/one' }, {
     idempotencyKey: 'check-run-1',
   });
+  await client.startDeployRun(projectId, { seriesId: 'series/deploy' }, {
+    idempotencyKey: 'deploy-run-1',
+  });
   await client.getRun(runId);
   await client.getOperation(operationId);
   await client.getSurface(runId);
@@ -231,6 +234,9 @@ test('workflow resource methods encode opaque IDs, cursors, paths, and quoted re
   await client.getOutput(runId, { source: 'checks', cursor: 'next/+?=' });
   await client.getReport(runId);
   await client.getHistory(projectId, { cursor: 'history/+?=', limit: 10, status: 'waiting action' });
+  await client.performProjectSetupAction(projectId, 'initialize-git', {}, {
+    idempotencyKey: 'project-setup-1',
+  });
 
   assert.deepEqual(calls.map(({ path: requestPath, options }) => ({
     path: requestPath,
@@ -242,6 +248,7 @@ test('workflow resource methods encode opaque IDs, cursors, paths, and quoted re
     { path: '/v1/projects/project%2Fid%20%3F/workflow', method: 'PUT' },
     { path: '/v1/projects/project%2Fid%20%3F/runs', method: 'POST' },
     { path: '/v1/projects/project%2Fid%20%3F/check-runs', method: 'POST' },
+    { path: '/v1/projects/project%2Fid%20%3F/deploy-runs', method: 'POST' },
     { path: '/v1/runs/run%2Fid%231', method: 'GET' },
     { path: '/v1/operations/operation%2Fid', method: 'GET' },
     { path: '/v1/runs/run%2Fid%231/surface', method: 'GET' },
@@ -263,6 +270,10 @@ test('workflow resource methods encode opaque IDs, cursors, paths, and quoted re
       path: '/v1/projects/project%2Fid%20%3F/history?cursor=history%2F%2B%3F%3D&limit=10&status=waiting%20action',
       method: 'GET',
     },
+    {
+      path: '/v1/projects/project%2Fid%20%3F/setup-actions/initialize-git',
+      method: 'POST',
+    },
   ]);
   assert.equal(calls[0].options.signal, controller.signal);
   assert.deepEqual(calls[0].options.body, {
@@ -275,12 +286,15 @@ test('workflow resource methods encode opaque IDs, cursors, paths, and quoted re
     'if-match': '"7"',
   });
   assert.deepEqual(calls[3].options.body, workflow);
-  assert.deepEqual(calls[9].options.headers, {
+  assert.deepEqual(calls[10].options.headers, {
     'idempotency-key': 'action-1',
     'if-match': '"12"',
   });
-  assert.deepEqual(calls[9].options.body, {
+  assert.deepEqual(calls[10].options.body, {
     input: { path: 'src/a.js', decision: 'keep' },
+  });
+  assert.deepEqual(calls.at(-1).options.headers, {
+    'idempotency-key': 'project-setup-1',
   });
 });
 

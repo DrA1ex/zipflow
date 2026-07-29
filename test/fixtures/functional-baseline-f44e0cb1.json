@@ -9,63 +9,78 @@
   "capabilities": [
     {
       "id": "project-discovery-and-workspaces",
-      "tests": ["project-detect.test.js", "multi-project-workspace.test.js", "multi-project-setup-ui.test.js"]
+      "tests": ["project-detect.test.js", "multi-project-workspace.test.js", "multi-project-setup-ui.test.js"],
+      "clientBackedTests": ["standalone-client-parity-v1.test.js", "standalone-client-git-plan-parity-v1.test.js", "server-http-v1.test.js"]
     },
     {
       "id": "workflow-setup-and-configuration",
-      "tests": ["setup-flow.test.js", "workflow-migration.test.js", "settings.test.js"]
+      "tests": ["setup-flow.test.js", "workflow-migration.test.js", "settings.test.js"],
+      "clientBackedTests": ["standalone-client-parity-v1.test.js", "standalone-client-git-plan-parity-v1.test.js", "workflow-resource-store-v1.test.js"]
     },
     {
       "id": "archive-discovery-validation-root-and-safety",
-      "tests": ["archive-discovery.test.js", "archive.test.js", "archive-root-review.test.js", "archive-safety-ux.test.js", "security-hardening.test.js"]
+      "tests": ["archive-discovery.test.js", "archive.test.js", "archive-root-review.test.js", "archive-safety-ux.test.js", "security-hardening.test.js"],
+      "clientBackedTests": ["standalone-client-parity-v1.test.js", "standalone-client-git-plan-parity-v1.test.js", "application-archive-runner-v1.test.js", "application-workflow-llm-review-v1.test.js", "server-workflow-http-e2e-v1.test.js"]
     },
     {
       "id": "plan-conflicts-and-diffs",
-      "tests": ["plan.test.js", "conflict-ux.test.js", "diff-view.test.js", "diff-hunks.test.js"]
+      "tests": ["plan.test.js", "conflict-ux.test.js", "diff-view.test.js", "diff-hunks.test.js"],
+      "clientBackedTests": ["standalone-client-parity-v1.test.js", "standalone-client-git-plan-parity-v1.test.js", "application-surface-v1.test.js", "server-run-resource-projections-v1.test.js"]
     },
     {
       "id": "atomic-apply-backup-and-rollback",
-      "tests": ["apply-rollback.test.js", "release-hardening-phase3.test.js", "release-hardening-phase5-archive.test.js"]
+      "tests": ["apply-rollback.test.js", "release-hardening-phase3.test.js", "release-hardening-phase5-archive.test.js"],
+      "clientBackedTests": ["standalone-client-git-plan-parity-v1.test.js", "application-mutation-runner-v1.test.js", "application-workflow-checkpoint-v1.test.js", "server-workflow-http-e2e-v1.test.js"]
     },
     {
       "id": "checks-manual-actions-and-deployment",
-      "tests": ["manual-actions.test.js", "check-cancellation-flow.test.js", "deploy.test.js"]
+      "tests": ["manual-actions.test.js", "check-cancellation-flow.test.js", "deploy.test.js"],
+      "clientBackedTests": ["standalone-client-parity-v1.test.js", "standalone-client-git-plan-parity-v1.test.js", "application-workflow-failure-analysis-v1.test.js", "application-workflow-operation-runner-v1.test.js", "server-workflow-http-e2e-v1.test.js"]
     },
     {
       "id": "git-checkpoints-bootstrap-and-result-commits",
-      "tests": ["dirty-tree-checkpoint.test.js", "git-bootstrap.test.js", "git-commit.test.js", "git-ignore.test.js"]
+      "tests": ["dirty-tree-checkpoint.test.js", "git-bootstrap.test.js", "git-commit.test.js", "git-ignore.test.js"],
+      "clientBackedTests": ["standalone-client-parity-v1.test.js", "standalone-client-git-plan-parity-v1.test.js", "application-workflow-checkpoint-v1.test.js", "application-workflow-commit-message-v1.test.js", "application-workflow-operation-runner-v1.test.js", "server-workflow-http-e2e-v1.test.js"]
     },
     {
       "id": "history-reports-repeat-and-export",
-      "tests": ["run-history.test.js", "history-analytics.test.js", "repeat-archive.test.js", "export.test.js"]
+      "tests": ["run-history.test.js", "history-analytics.test.js", "repeat-archive.test.js", "export.test.js"],
+      "clientBackedTests": ["standalone-client-parity-v1.test.js", "standalone-client-git-plan-parity-v1.test.js", "server-run-resource-projections-v1.test.js"]
     },
     {
       "id": "archive-disposition-retention-and-managed-history",
-      "tests": ["archive-disposition.test.js", "managed-history.test.js", "storage-cancellation.test.js"]
+      "tests": ["archive-disposition.test.js", "managed-history.test.js", "storage-cancellation.test.js"],
+      "clientBackedTests": ["standalone-client-parity-v1.test.js", "application-archive-runner-v1.test.js", "server-workflow-http-e2e-v1.test.js"]
     },
     {
       "id": "local-llm-models-review-replay-and-token-stats",
-      "tests": ["llm.test.js", "llm-run.test.js", "llm-model-settings.test.js", "llm-archive-review.test.js", "llm-failure.test.js", "llm-token-stats.test.js", "model-replay-wheel.test.js", "codex-app-server.test.js"]
+      "tests": ["llm.test.js", "llm-run.test.js", "llm-model-settings.test.js", "llm-archive-review.test.js", "llm-failure.test.js", "llm-token-stats.test.js", "model-replay-wheel.test.js", "codex-app-server.test.js"],
+      "clientBackedTests": ["standalone-client-parity-v1.test.js", "standalone-client-git-plan-parity-v1.test.js", "application-workflow-commit-message-v1.test.js", "application-workflow-failure-analysis-v1.test.js", "application-workflow-llm-review-v1.test.js", "server-run-resource-projections-v1.test.js", "settings-llm-tasks-help.test.js"]
     },
     {
       "id": "autopilot-modes-recovery-and-simulation",
-      "tests": ["autopilot.test.js", "autopilot-recovery.test.js", "autopilot-simulation.test.js", "autopilot-noop-and-commit.test.js"]
+      "tests": ["autopilot.test.js", "autopilot-recovery.test.js", "autopilot-simulation.test.js", "autopilot-noop-and-commit.test.js"],
+      "clientBackedTests": ["standalone-client-parity-v1.test.js", "standalone-client-git-plan-parity-v1.test.js", "application-workflow-autonomy-v1.test.js", "server-run-resource-projections-v1.test.js", "settings-llm-tasks-help.test.js"]
     },
     {
       "id": "settings-themes-localization-and-storage",
-      "tests": ["settings.test.js", "settings-ux-regressions.test.js", "i18n.test.js", "i18n-basic-coverage.test.js", "phase4-storage-coordination.test.js"]
+      "tests": ["settings.test.js", "settings-ux-regressions.test.js", "i18n.test.js", "i18n-basic-coverage.test.js", "phase4-storage-coordination.test.js"],
+      "clientBackedTests": ["standalone-client-parity-v1.test.js", "settings-ux-regressions.test.js"]
     },
     {
       "id": "updates-restart-and-package-release",
-      "tests": ["update-flow.test.js", "update-restart.test.js", "update-service.test.js", "package-release.test.js", "version.test.js"]
+      "tests": ["update-flow.test.js", "update-restart.test.js", "update-service.test.js", "package-release.test.js", "version.test.js"],
+      "clientBackedTests": ["standalone-client-parity-v1.test.js", "update-flow.test.js", "update-restart.test.js"]
     },
     {
       "id": "terminal-navigation-search-help-pointer-and-editors",
-      "tests": ["editor-shortcut-routing.test.js", "path-suggestions-ux.test.js", "help-overlay-wheel.test.js", "select-rows.test.js", "ui-render.test.js", "cosmetic-polish.test.js"]
+      "tests": ["editor-shortcut-routing.test.js", "path-suggestions-ux.test.js", "help-overlay-wheel.test.js", "select-rows.test.js", "ui-render.test.js", "cosmetic-polish.test.js"],
+      "clientBackedTests": ["standalone-client-parity-v1.test.js", "editor-shortcut-routing.test.js", "path-suggestions-ux.test.js"]
     },
     {
       "id": "cancellation-recovery-and-process-cleanup",
-      "tests": ["operation-manager.test.js", "process-cleanup.test.js", "autopilot-recovery.test.js", "storage-cancellation.test.js"]
+      "tests": ["operation-manager.test.js", "process-cleanup.test.js", "autopilot-recovery.test.js", "storage-cancellation.test.js"],
+      "clientBackedTests": ["standalone-client-parity-v1.test.js", "server-events-v1.test.js", "workflow-session-restart-v1.test.js"]
     }
   ]
 }

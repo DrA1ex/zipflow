@@ -39,6 +39,54 @@ test('archive inspection durably publishes attention before events', async () =>
   ]);
 });
 
+test('archive reinterpretation rebuilds the immutable server plan for this run only', async () => {
+  const fixture = runnerFixture({
+    operationKind: 'archive_reinterpretation',
+    workflow: workflow({ archive: { mode: 'snapshot' } }),
+    privateChanges: {
+      archiveInterpretation: { mode: 'snapshot', source: 'workflow' },
+      llm: { status: 'completed', summary: ['Old advisory'] },
+      llmReviewStatus: 'completed',
+    },
+  });
+  fixture.dependencies.inspectArchive = async ({ workflow: configured, blob }) => {
+    assert.equal(configured.archive.mode, 'overlay');
+    assert.equal(blob.filename, 'update.zip');
+    return {
+      outcome: 'waiting_action',
+      attention: 'plan',
+      executable: {
+        ...fixture.session.executionManifest,
+        workflow: configured,
+        plan: { counts: { created: 0, updated: 1, deleted: 0 } },
+        decisions: [],
+      },
+      public: {
+        archiveSafety: null,
+        plan: { counts: { created: 0, updated: 1, deleted: 0 } },
+      },
+    };
+  };
+
+  const final = await fixture.run('archive_reinterpretation', { mode: 'overlay' });
+
+  assert.deepEqual(
+    final.executionManifest.archiveInterpretation,
+    { mode: 'overlay', source: 'manual' },
+  );
+  assert.equal(final.executionManifest.llm, null);
+  assert.equal(final.executionManifest.llmReviewStatus, null);
+  assert.deepEqual(
+    final.publicSummary.archiveInterpretation,
+    { mode: 'overlay', source: 'manual' },
+  );
+  assert.deepEqual(
+    fixture.savedLegacy.archiveInterpretation,
+    { mode: 'overlay', source: 'manual' },
+  );
+  assert.equal(fixture.savedLegacy.llm, null);
+});
+
 test('apply is critical, runs selected checks, and bounds durable output', async () => {
   const fixture = runnerFixture({
     operationKind: 'apply',
@@ -96,6 +144,50 @@ test('apply is critical, runs selected checks, and bounds durable output', async
   ]);
 });
 
+test('checkpoint and apply are one durable server operation', async () => {
+  const fixture = runnerFixture({
+    operationKind: 'checkpoint_apply',
+    privateChanges: {
+      plan: { gitStatus: { staged: [], unstaged: [], conflicted: [] } },
+      conflicts: [{ path: 'src/file.js' }],
+      decisions: [{ path: 'src/file.js', decision: 'archive' }],
+    },
+  });
+  fixture.dependencies.checkpointRun = async () => {
+    fixture.order.push('runner:checkpoint');
+    return {
+      revision: 'checkpoint123',
+      ref: 'refs/zipflow/checkpoints/run-1',
+      paths: ['src/file.js'],
+      backupOnlyPaths: [],
+      preservesIndex: true,
+      message: 'Checkpoint local work',
+      messageSource: 'generated',
+    };
+  };
+  fixture.dependencies.applyPlan = async () => {
+    fixture.order.push('runner:apply');
+    return {
+      applied: {
+        paths: ['src/file.js'], changedPaths: ['src/file.js'],
+        counts: { created: 0, updated: 1, deleted: 0 },
+        excludedPaths: [], backupPath: '/private/backups/run-1',
+        backupAvailable: true, skippedConflicts: [], preservedPaths: [],
+      },
+      managedHistory: { before: [], after: ['src/file.js'] },
+      transaction: { applied: [] },
+    };
+  };
+  const final = await fixture.run('checkpoint_apply');
+  assert.deepEqual(
+    fixture.order.filter((item) => item.startsWith('runner:')),
+    ['runner:checkpoint', 'runner:apply'],
+  );
+  assert.equal(final.executionManifest.checkpointResolution, 'created');
+  assert.equal(fixture.savedLegacy.checkpoint.revision, 'checkpoint123');
+  assert.equal(final.run.status, 'completed');
+});
+
 test('commit, deployment, and rollback map to semantic durable states', async (t) => {
   await t.test('commit waits for configured deployment', async () => {
     const fixture = runnerFixture({
@@ -111,6 +203,41 @@ test('commit, deployment, and rollback map to semantic durable states', async (t
     assert.equal(final.run.status, 'waiting_action');
     assert.equal(final.publicSummary.run.attention, 'deploy');
     assert.equal(fixture.savedLegacy.commit.revision, 'abc123');
+  });
+
+  await t.test('eligible unpublished commit rewrite stays inside the durable server operation', async () => {
+    const candidate = {
+      id: 'amend-head',
+      kind: 'amend',
+      revision: 'abc123',
+      runIds: ['previous-run'],
+    };
+    const fixture = runnerFixture({
+      operationKind: 'git_rewrite',
+      privateChanges: {
+        applied: { paths: ['file.txt'], changedPaths: ['file.txt'] },
+        commitRewriteCandidates: [candidate],
+      },
+    });
+    fixture.dependencies.amendCommit = async (projectPath, request) => {
+      assert.equal(projectPath, '/private/project');
+      assert.deepEqual(request.candidate, candidate);
+      assert.equal(request.message, 'Apply update');
+      return {
+        ok: true,
+        revision: 'def456',
+        backupRef: 'refs/zipflow/checkpoints/run-1-rewrite',
+        rewrittenRunIds: ['previous-run'],
+      };
+    };
+    const final = await fixture.run('git_rewrite', {
+      strategy: 'amend',
+      targetId: 'amend-head',
+      message: 'Apply update',
+    });
+    assert.equal(final.run.status, 'completed');
+    assert.equal(final.executionManifest.commit.strategy, 'amend');
+    assert.equal(fixture.savedLegacy.commit.backupRef, 'refs/zipflow/checkpoints/run-1-rewrite');
   });
 
   await t.test('failed deployment remains an explicit deploy choice', async () => {
@@ -257,6 +384,7 @@ function runnerFixture({
   };
   const handle = {
     operationId: 'operation-1', signal: controller.signal,
+    update: async () => {},
     enterCritical: async () => order.push('critical:enter'),
     leaveCritical: async () => order.push('critical:leave'),
     settle: async (settlement) => order.push(`settle:${settlement}`),

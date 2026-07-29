@@ -321,6 +321,52 @@ test('client-only navigation remains links and is never advertised as an action'
   assert.equal(SEMANTIC_ACTION_IDS.some((id) => /^view-|^configure-/.test(id)), false);
 });
 
+test('Git checkpoint choice is projected as semantic actions on the existing plan surface', () => {
+  const surface = projectSurface({
+    revision: 9,
+    project: { id: 'project-1', name: 'Fixture' },
+    run: {
+      id: 'run-1',
+      status: 'waiting_action',
+      attention: 'checkpoint',
+      backupAvailable: false,
+    },
+    plan: {
+      counts: { created: 0, updated: 1, deleted: 0 },
+      files: [{ path: 'src/a.js', kind: 'updated', decision: 'archive' }],
+      conflicts: [],
+      unresolvedConflicts: 0,
+    },
+  });
+  assert.equal(surface.kind, 'plan_review');
+  assert.equal(surface.title, 'Protect local work');
+  assert.deepEqual(
+    surface.actions.map(({ id }) => id),
+    ['create-checkpoint', 'continue-without-checkpoint'],
+  );
+});
+
+test('failed deployment keeps retry, finish-with-error, and rollback as explicit semantic choices', () => {
+  const surface = projectSurface({
+    revision: 12,
+    project: { id: 'project-1', name: 'Fixture' },
+    workflow: { deployment: { configured: true, label: 'Production' } },
+    run: {
+      id: 'run-1',
+      status: 'waiting_action',
+      attention: 'deploy',
+      backupAvailable: true,
+    },
+    deployment: { configured: true, label: 'Production', status: 'failed' },
+  });
+  assert.equal(surface.kind, 'deploy_choice');
+  assert.equal(surface.title, 'Deployment failed');
+  assert.deepEqual(
+    surface.actions.map(({ id }) => id),
+    ['retry-deploy', 'finish-with-deploy-error', 'rollback'],
+  );
+});
+
 test('application projection modules do not depend on TUI or controller owners', async () => {
   const sources = await Promise.all([
     '../src/application/action-definitions.js',

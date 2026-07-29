@@ -23,6 +23,25 @@ test('headless HTTP completes archive, checks, history, report, and rollback', {
     path: fixture.projectRoot,
     idempotencyKey: 'open-project-e2e',
   });
+  const initialized = await client.performProjectSetupAction(opened.projectId, 'initialize-git', {}, {
+    idempotencyKey: 'initialize-git-e2e',
+  });
+  assert.equal(initialized.ok, true);
+  const gitignore = await client.performProjectSetupAction(opened.projectId, 'create-gitignore', {}, {
+    idempotencyKey: 'create-gitignore-e2e',
+  });
+  assert.equal(gitignore.created, true);
+  const prepared = await client.performProjectSetupAction(opened.projectId, 'prepare-initial-commit', {}, {
+    idempotencyKey: 'prepare-initial-commit-e2e',
+  });
+  assert.equal(prepared.ok, true);
+  const initialCommit = await client.performProjectSetupAction(opened.projectId, 'create-initial-commit', {
+    message: 'Initial commit',
+    paths: prepared.approvedPaths,
+  }, {
+    idempotencyKey: 'create-initial-commit-e2e',
+  });
+  assert.equal(initialCommit.ok, true);
   const workflow = await client.putWorkflow(opened.projectId, workflowDraft(fixture.projectRoot), {
     ifMatch: 0,
     idempotencyKey: 'put-workflow-e2e',
@@ -123,13 +142,125 @@ test('headless HTTP completes archive, checks, history, report, and rollback', {
   }, { idempotencyKey: 'start-checks-e2e' });
   const checkRun = await waitForRun(client, checkStarted.runId, ['completed']);
   assert.equal(checkRun.kind, 'checks');
+  const deployWorkflow = workflowDraft(fixture.projectRoot);
+  deployWorkflow.deploy = {
+    policy: 'ask',
+    commandText: `${process.execPath} -e "process.stdout.write('deploy-ok\\\\n')"`,
+    cwd: '.',
+  };
+  await client.putWorkflow(opened.projectId, deployWorkflow, {
+    ifMatch: 1,
+    idempotencyKey: 'enable-deploy-e2e',
+  });
+  const deployStarted = await client.startDeployRun(opened.projectId, {}, {
+    idempotencyKey: 'start-deploy-e2e',
+  });
+  const deployRun = await waitForRun(client, deployStarted.runId, ['completed']);
+  assert.equal(deployRun.kind, 'deploy');
+  const deployOutput = await client.getOutput(deployStarted.runId, { source: 'deploy' });
+  assert.match(deployOutput.items.map(({ text }) => text).join(''), /deploy-ok/);
   const finalHistory = await client.getHistory(opened.projectId, { limit: 10 });
   assert.deepEqual(
     new Set(finalHistory.items.map(({ status }) => status)),
     new Set(['completed', 'rolled_back']),
   );
-  assert.equal(finalHistory.items.length, 2);
+  assert.equal(finalHistory.items.length, 3);
   assert.equal(completed.runId, started.runId);
+});
+
+test('headless HTTP preserves guarded autopilot while every project mutation stays a semantic action', {
+  skip: process.platform === 'win32' ? 'Windows runtime security remains fail-closed.' : false,
+}, async (t) => {
+  const decisions = [];
+  const fixture = await workflowServerFixture(t, {
+    loadRuntimeSettings: async () => ({
+      llmProvider: 'lmstudio',
+      llmModel: 'fixture-model',
+      llmArchiveReview: 'disabled',
+      llmUseArchiveReview: false,
+      llmUseDeletionIntentReview: false,
+      llmUseSummary: false,
+      llmUseCommitMessage: false,
+      managedHistoryPolicy: 'enabled',
+    }),
+    requestAutonomyDecision: async (request) => {
+      decisions.push(request);
+      assert.equal(request.gate, 'plan-application');
+      assert.equal(request.allowedActions.includes('apply'), true);
+      return {
+        schemaVersion: 1,
+        gate: request.gate,
+        action: 'apply',
+        targetId: null,
+        confidence: 0.95,
+        effectiveConfidence: 0.87,
+        summary: 'The deterministic plan is routine and reversible.',
+        evidence: ['One new file is present in the plan.'],
+        risks: [],
+        conditions: [],
+        accepted: true,
+        stateHash: 'fixture-state',
+        repaired: false,
+        provider: 'lmstudio',
+        model: 'fixture-model',
+      };
+    },
+  });
+  const client = fixture.client;
+  const opened = await client.openProject({
+    path: fixture.projectRoot,
+    idempotencyKey: 'autopilot-open-project-e2e',
+  });
+  const draft = workflowDraft(fixture.projectRoot);
+  draft.checks = [];
+  draft.autonomy = {
+    mode: 'guarded',
+    profileVersion: 1,
+    maxDecisionRetries: 1,
+    maxCheckRetries: 1,
+    maxDeployRetries: 1,
+    fullWarningAcknowledgedVersion: 0,
+    capabilities: {
+      decidePlanApplication: true,
+      decideConflicts: false,
+      decideFailedChecks: true,
+      decideResultCommit: true,
+      decideCommitRewrite: false,
+      decideDeployment: true,
+      allowCommitAfterFailedChecks: false,
+      allowDeployAfterFailedChecks: false,
+      allowRewriteUnpublishedCommits: false,
+    },
+  };
+  await client.putWorkflow(opened.projectId, draft, {
+    ifMatch: 0,
+    idempotencyKey: 'autopilot-workflow-e2e',
+  });
+  const archivePath = await createZip(path.join(fixture.root, 'autopilot.zip'), {
+    'autopilot.txt': 'applied by guarded autopilot\n',
+  });
+  const archive = await readFile(archivePath);
+  const blob = await client.uploadZip(archive, {
+    filename: 'autopilot.zip',
+    contentLength: archive.length,
+    idempotencyKey: 'autopilot-upload-e2e',
+  });
+  const started = await client.startArchiveRun(opened.projectId, {
+    kind: 'archive',
+    blobId: blob.blobId,
+  }, { idempotencyKey: 'autopilot-start-e2e' });
+
+  await waitForRun(client, started.runId, ['completed']);
+  assert.equal(
+    await readFile(path.join(fixture.projectRoot, 'autopilot.txt'), 'utf8'),
+    'applied by guarded autopilot\n',
+  );
+  const report = await client.getReport(started.runId);
+  assert.equal(report.decisions.length, 1);
+  assert.equal(report.decisions[0].gate, 'plan-application');
+  assert.equal(report.decisions[0].action, 'apply');
+  assert.equal(report.autonomy.mode, 'guarded');
+  assert.equal(decisions.length, 1);
 });
 
 async function driveArchiveToPlan(client, runId) {
@@ -186,7 +317,10 @@ async function waitForRun(client, runId, statuses) {
   assert.fail(`Run ${runId} stayed ${current?.status ?? 'unknown'} before timeout.`);
 }
 
-async function workflowServerFixture(t) {
+async function workflowServerFixture(t, {
+  loadRuntimeSettings = undefined,
+  requestAutonomyDecision = undefined,
+} = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'zipflow-workflow-http-e2e-'));
   const home = path.join(root, 'home');
   const projectRoot = path.join(root, 'project');
@@ -209,6 +343,8 @@ async function workflowServerFixture(t) {
     paths: resolveServerPaths({ zipflowHome: home, socketPath }),
     token: 'phase-3-e2e-token',
     inspectProject,
+    ...(loadRuntimeSettings ? { loadRuntimeSettings } : {}),
+    ...(requestAutonomyDecision ? { requestAutonomyDecision } : {}),
     onError: (error) => errors.push(error),
   });
   t.after(async () => {

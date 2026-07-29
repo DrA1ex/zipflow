@@ -21,17 +21,30 @@ const ACTION_SURFACES = Object.freeze({
   'save-workflow': 'workflow_setup',
   'select-archive-root': 'archive_root_choice',
   'acknowledge-archive-safety': 'archive_safety',
+  'reinterpret-as-overlay': 'plan_review',
+  'reinterpret-as-snapshot': 'plan_review',
+  'restart-llm-review': 'plan_review',
+  'review-deletion-intent': 'plan_review',
+  'resume-autopilot': 'plan_review',
+  'cancel-run': 'plan_review',
   'approve-plan': 'plan_review',
   'use-archive': 'plan_files',
   'keep-local': 'plan_files',
   'resolve-conflict': 'conflict_file',
-  'retry-run': 'archive_safety',
+  'create-checkpoint': 'plan_review',
+  'continue-without-checkpoint': 'plan_review',
+  'retry-run': 'error',
   'cancel-operation': 'archive_inspecting',
   'retry-checks': 'checks_failed',
+  'keep-changes': 'checks_failed',
   'prepare-commit': 'commit_choice',
   commit: 'commit_message',
+  'amend-commit': 'commit_choice',
+  'squash-commits': 'commit_choice',
   'continue-without-commit': 'commit_choice',
   deploy: 'deploy_choice',
+  'retry-deploy': 'deploy_choice',
+  'finish-with-deploy-error': 'deploy_choice',
   'skip-deploy': 'deploy_choice',
   finish: 'completed',
   rollback: 'rollback_confirm',
@@ -66,9 +79,40 @@ test('every stable action persists intent before execution and receipt plus tran
   assert.deepEqual(new Set(Object.keys(ACTION_SURFACES)), new Set(SEMANTIC_ACTION_IDS));
 
   for (const actionId of SEMANTIC_ACTION_IDS) {
-    const repository = new MemoryWorkflowSessionRepository(
-      recordForSurface(ACTION_SURFACES[actionId], { revision: 20 }),
-    );
+    const record = recordForSurface(ACTION_SURFACES[actionId], { revision: 20 });
+    if (['create-checkpoint', 'continue-without-checkpoint'].includes(actionId)) {
+      record.snapshot.run.attention = 'checkpoint';
+    }
+    if (['retry-deploy', 'finish-with-deploy-error'].includes(actionId)) {
+      record.snapshot.deployment = { status: 'failed' };
+    }
+    if (actionId === 'reinterpret-as-overlay') {
+      record.snapshot.archiveInterpretation = { mode: 'snapshot' };
+    }
+    if (actionId === 'reinterpret-as-snapshot') {
+      record.snapshot.archiveInterpretation = { mode: 'overlay' };
+    }
+    if (actionId === 'restart-llm-review') {
+      record.snapshot.llm = { status: 'failed', error: 'fixture' };
+    }
+    if (actionId === 'review-deletion-intent') {
+      record.snapshot.archiveInterpretation = { mode: 'snapshot' };
+      record.snapshot.plan.counts = { deleted: 1 };
+    }
+    if (actionId === 'resume-autopilot') {
+      record.snapshot.autonomy = { paused: true };
+    }
+    if (['amend-commit', 'squash-commits'].includes(actionId)) {
+      record.snapshot.commit = {
+        rewriteCandidates: [{
+          id: actionId === 'amend-commit' ? 'amend-head' : 'squash-2',
+          kind: actionId === 'amend-commit' ? 'amend' : 'squash',
+          label: 'Fixture rewrite',
+          count: actionId === 'amend-commit' ? 1 : 2,
+        }],
+      };
+    }
+    const repository = new MemoryWorkflowSessionRepository(record);
     let executorCalls = 0;
     const session = createWorkflowSession(repository, {
       executeAction: async (request) => {
@@ -217,4 +261,3 @@ test('fingerprints are canonical and application session has no terminal or serv
   assert.doesNotMatch(source, /terlio|\.\.\/server\/|\.\.\/app\/|child_process|selectedIndex|searchQuery/i);
   assert.equal(SEMANTIC_ACTION_IDS.some((id) => id.includes('command')), false);
 });
-

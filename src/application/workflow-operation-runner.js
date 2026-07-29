@@ -1,5 +1,15 @@
 import { discoverProject as discoverProjectDefault } from '../project/detect.js';
-import { loadRunRecord, saveRunRecord } from '../runs/store.js';
+import {
+  listProjectRuns,
+  loadRunRecord,
+  saveRunRecord,
+} from '../runs/store.js';
+import {
+  amendZipflowCommit,
+  getCommitRewriteCandidates,
+  squashZipflowCommits,
+} from '../git/repository.js';
+import { gitHooksAllowed } from '../git/hooks.js';
 import {
   inspectUploadedArchive,
   selectArchiveRootAndPlan,
@@ -14,6 +24,15 @@ import {
   runConfiguredChecks,
   runConfiguredDeployment,
 } from './post-apply-runner.js';
+import {
+  publicWorkflowLlmReview,
+  runWorkflowLlmReview,
+} from './workflow-llm-review-runner.js';
+import { createWorkflowCheckpoint } from './workflow-checkpoint-runner.js';
+import {
+  publicWorkflowFailureAnalysis,
+  runWorkflowFailureAnalysis,
+} from './workflow-failure-analysis-runner.js';
 import {
   archiveOutcome,
   assertPublicSnapshot,
@@ -38,7 +57,9 @@ import {
 } from './workflow-operation-state.js';
 
 const KINDS = new Set([
-  'archive_inspection', 'archive_root', 'apply', 'checks', 'commit', 'deploy', 'rollback',
+  'archive_inspection', 'archive_reinterpretation', 'archive_root', 'llm_review', 'failure_analysis',
+  'checkpoint_only', 'checkpoint_apply',
+  'apply', 'checks', 'commit', 'git_rewrite', 'deploy', 'rollback',
 ]);
 
 export class WorkflowOperationRunner {
@@ -48,6 +69,7 @@ export class WorkflowOperationRunner {
     discoverProject = discoverProjectDefault,
     loadLegacyRun = loadRunRecord,
     saveLegacyRun = saveRunRecord,
+    listLegacyRuns = listProjectRuns,
     inspectArchive = inspectUploadedArchive,
     selectArchiveRoot = selectArchiveRootAndPlan,
     applyPlan = applyExecutablePlan,
@@ -55,6 +77,12 @@ export class WorkflowOperationRunner {
     commitRun = commitAppliedRun,
     deployRun = runConfiguredDeployment,
     rollbackRun = rollbackExecutableRun,
+    reviewRun = runWorkflowLlmReview,
+    checkpointRun = createWorkflowCheckpoint,
+    failureAnalysisRun = runWorkflowFailureAnalysis,
+    findRewriteCandidates = getCommitRewriteCandidates,
+    amendCommit = amendZipflowCommit,
+    squashCommits = squashZipflowCommits,
   } = {}) {
     if (!sessions?.get || !sessions?.update || !sessions?.appendOutput) {
       throw new TypeError('Workflow operation runner requires a run session store.');
@@ -63,8 +91,14 @@ export class WorkflowOperationRunner {
       throw new TypeError('Workflow operation runner journal is invalid.');
     }
     Object.assign(this, {
-      sessions, journal, discoverProject, loadLegacyRun, saveLegacyRun,
+      sessions, journal, discoverProject, loadLegacyRun, saveLegacyRun, listLegacyRuns,
       inspectArchive, selectArchiveRoot, applyPlan, runChecks, commitRun, deployRun, rollbackRun,
+      reviewRun,
+      checkpointRun,
+      failureAnalysisRun,
+      findRewriteCandidates,
+      amendCommit,
+      squashCommits,
     });
   }
 
@@ -112,10 +146,16 @@ export class WorkflowOperationRunner {
   execute(context) {
     switch (context.launch.kind) {
       case 'archive_inspection': return this.inspect(context);
+      case 'archive_reinterpretation': return this.reinterpret(context);
       case 'archive_root': return this.chooseRoot(context);
+      case 'llm_review': return this.review(context);
+      case 'failure_analysis': return this.failureAnalysis(context);
+      case 'checkpoint_only': return this.checkpointOnly(context);
+      case 'checkpoint_apply': return this.checkpointApply(context);
       case 'apply': return this.apply(context);
       case 'checks': return this.check(context);
       case 'commit': return this.commit(context);
+      case 'git_rewrite': return this.rewriteCommit(context);
       case 'deploy': return this.deploy(context);
       case 'rollback': return this.rollback(context);
       default: throw new TypeError('Unsupported workflow operation.');
@@ -135,6 +175,54 @@ export class WorkflowOperationRunner {
     return archiveOutcome(context, result);
   }
 
+  async reinterpret(context) {
+    const mode = context.launch.input?.mode;
+    if (!['overlay', 'snapshot'].includes(mode)) {
+      throw runnerError('Archive interpretation is invalid.', 'ACTION_INPUT_INVALID', 400);
+    }
+    const workflow = {
+      ...requireWorkflow(context.privateState),
+      archive: {
+        ...requireWorkflow(context.privateState).archive,
+        mode,
+      },
+    };
+    const result = await this.inspectArchive({
+      runId: context.session.run.runId,
+      project: {
+        ...context.project,
+        projectId: context.session.binding.projectId,
+      },
+      workflow,
+      workflowRevision: context.session.binding.workflowRevision,
+      blob: context.privateState.binding.blob,
+      signal: context.handle.signal,
+      onProgress: (event) => {
+        void context.handle.update({
+          phase: normalizeOperationPhase(event.phase || 'archive_reinterpretation'),
+          progress: { message: `Rechecking archive as ${mode}` },
+        }).catch(() => {});
+      },
+    });
+    const outcome = archiveOutcome(context, result);
+    outcome.snapshot = {
+      ...outcome.snapshot,
+      archiveInterpretation: { mode, source: 'manual' },
+    };
+    outcome.privateState = {
+      ...outcome.privateState,
+      archiveInterpretation: { mode, source: 'manual' },
+      llm: null,
+      llmReviewStatus: null,
+    };
+    outcome.legacy = {
+      ...outcome.legacy,
+      archiveInterpretation: { mode, source: 'manual' },
+      llm: null,
+    };
+    return outcome;
+  }
+
   async chooseRoot(context) {
     const { session, privateState, project, handle, launch } = context;
     const result = await this.selectArchiveRoot({
@@ -146,6 +234,160 @@ export class WorkflowOperationRunner {
       signal: handle.signal,
     });
     return archiveOutcome(context, result);
+  }
+
+  async review(context) {
+    const { session, privateState, project, handle } = context;
+    const reviewed = await this.reviewRun({
+      runId: session.run.runId,
+      project: { ...project, projectId: session.binding.projectId },
+      privateState,
+      signal: handle.signal,
+      onProgress: (event) => {
+        void handle.update({
+          phase: normalizeOperationPhase(event.phase || event.type || 'llm_review'),
+          progress: { message: event.label || '' },
+        }).catch(() => {});
+      },
+    });
+    const safety = {
+      ...(privateState.safety ?? {}),
+      ...(reviewed.assessment !== undefined ? { llm: clone(reviewed.assessment) } : {}),
+      ...(reviewed.deletionIntent !== undefined
+        ? { deletionIntent: clone(reviewed.deletionIntent) }
+        : {}),
+    };
+    if (
+      ['suspicious', 'unsuitable'].includes(reviewed.assessment?.assessment)
+      || ['ambiguous', 'likely-partial'].includes(reviewed.deletionIntent?.assessment)
+    ) {
+      safety.acknowledged = false;
+    }
+    const nextPrivate = {
+      ...privateState,
+      llm: clone(reviewed.record),
+      llmReviewStatus: reviewed.record?.cancelled
+        ? 'cancelled'
+        : reviewed.record?.error ? 'failed' : 'completed',
+      safety,
+    };
+    const publicReview = publicWorkflowLlmReview(
+      reviewed.record,
+      reviewed.assessment,
+      reviewed.deletionIntent,
+    );
+    const publicSafety = {
+      ...(context.session.publicSummary?.archiveSafety ?? {}),
+      ...(reviewed.assessment !== undefined ? { llm: publicReview?.assessment ?? null } : {}),
+      ...(reviewed.deletionIntent !== undefined
+        ? { deletionIntent: publicReview?.deletionIntent ?? null }
+        : {}),
+      acknowledged: safety.acknowledged === true,
+    };
+    return operationOutcome({
+      status: session.run.status,
+      attention: context.session.publicSummary?.run?.attention ?? null,
+      snapshot: transitionSnapshot(context, nextPrivate, {
+        archiveSafety: publicSafety,
+        llm: publicReview,
+      }),
+      privateState: nextPrivate,
+      legacy: {
+        llm: clone(reviewed.record),
+        archiveSafety: clone(safety),
+        status: context.legacy?.status ?? 'planned',
+      },
+    });
+  }
+
+  async failureAnalysis(context) {
+    const analysis = await this.failureAnalysisRun({
+      project: context.project,
+      privateState: context.privateState,
+      signal: context.handle.signal,
+      onProgress: (event) => {
+        void context.handle.update({
+          phase: normalizeOperationPhase(event?.phase || 'failure_analysis'),
+          progress: { message: String(event?.label ?? '').slice(0, 512) },
+        }).catch(() => {});
+      },
+    });
+    const nextPrivate = {
+      ...context.privateState,
+      llmFailure: clone(analysis),
+      llmFailureStatus: analysis?.status ?? 'skipped',
+    };
+    return operationOutcome({
+      status: context.session.run.status,
+      attention: context.session.publicSummary?.run?.attention ?? 'checks_failed',
+      snapshot: transitionSnapshot(context, nextPrivate, {
+        llmFailure: publicWorkflowFailureAnalysis(analysis),
+      }),
+      privateState: nextPrivate,
+      legacy: {
+        llmFailure: clone(analysis),
+        status: context.legacy?.status ?? 'checks_failed',
+      },
+    });
+  }
+
+  async checkpointApply(context) {
+    const checkpoint = await this.executeCheckpoint(context);
+    context.privateState = {
+      ...context.privateState,
+      checkpoint: clone(checkpoint),
+      checkpointResolution: 'created',
+    };
+    context.partialLegacy = { checkpoint: clone(checkpoint) };
+    const outcome = await this.apply(context);
+    return {
+      ...outcome,
+      privateState: {
+        ...outcome.privateState,
+        checkpoint: clone(checkpoint),
+        checkpointResolution: 'created',
+      },
+      legacy: {
+        checkpoint: clone(checkpoint),
+        ...outcome.legacy,
+      },
+    };
+  }
+
+  async checkpointOnly(context) {
+    const checkpoint = await this.executeCheckpoint(context);
+    const nextPrivate = {
+      ...context.privateState,
+      checkpoint: clone(checkpoint),
+      checkpointResolution: 'created',
+      autonomyCheckpointPending: false,
+      localWorkResolution: 'checkpoint',
+    };
+    return operationOutcome({
+      status: 'waiting_action',
+      attention: 'plan',
+      snapshot: transitionSnapshot(context, nextPrivate),
+      privateState: nextPrivate,
+      legacy: {
+        checkpoint: clone(checkpoint),
+        status: context.legacy?.status ?? 'planned',
+      },
+    });
+  }
+
+  executeCheckpoint(context) {
+    return this.checkpointRun({
+      runId: context.session.run.runId,
+      project: context.project,
+      privateState: context.privateState,
+      signal: context.handle.signal,
+      onProgress: (event) => {
+        void context.handle.update({
+          phase: normalizeOperationPhase(event?.phase || 'checkpoint'),
+          progress: { message: String(event?.label ?? '').slice(0, 512) },
+        }).catch(() => {});
+      },
+    });
   }
 
   async apply(context) {
@@ -197,7 +439,14 @@ export class WorkflowOperationRunner {
 
   async check(context) {
     const checked = await this.executeChecks(context, context.privateState, context.launch.input.checkIds);
-    const nextPrivate = { ...context.privateState, checks: clone(checked.checks) };
+    const rewriteCandidates = context.session.run.kind === 'archive'
+      ? await this.loadRewriteCandidates(context)
+      : [];
+    const nextPrivate = {
+      ...context.privateState,
+      checks: clone(checked.checks),
+      commitRewriteCandidates: clone(rewriteCandidates),
+    };
     const snapshot = transitionSnapshot(context, nextPrivate, { checks: publicChecks(checked.checks) });
     const outputs = checked.output ? [{ source: 'checks', text: checked.output }] : [];
     if (context.session.run.kind === 'checks') {
@@ -246,6 +495,69 @@ export class WorkflowOperationRunner {
       privateState: nextPrivate,
       legacy: { commit: clone(committed), status: attention ? 'committed' : 'completed' },
     });
+  }
+
+  async rewriteCommit(context) {
+    const { privateState, handle, launch, session } = context;
+    const candidate = privateState.commitRewriteCandidates
+      ?.find(({ id }) => id === launch.input.targetId);
+    if (!candidate || candidate.kind !== launch.input.strategy) {
+      throw runnerError('The Git rewrite candidate changed.', 'ACTION_NOT_AVAILABLE', 409);
+    }
+    const request = {
+      runId: session.run.runId,
+      paths: privateState.applied?.paths ?? [],
+      message: launch.input.message,
+      candidate,
+      signal: handle.signal,
+      allowHooks: gitHooksAllowed(privateState.workflow),
+    };
+    const committed = launch.input.strategy === 'amend'
+      ? await this.amendCommit(session.binding.projectPath, request)
+      : await this.squashCommits(session.binding.projectPath, request);
+    if (!committed?.ok) {
+      throw runnerError(
+        committed?.reason || 'The Git rewrite was not created.',
+        'OPERATION_FAILED',
+        409,
+      );
+    }
+    const commit = {
+      ...clone(committed),
+      message: launch.input.message,
+      strategy: launch.input.strategy,
+    };
+    const nextPrivate = { ...privateState, commit };
+    const attention = nextPostCommitAttention(privateState.workflow);
+    return operationOutcome({
+      status: attention ? 'waiting_action' : 'completed',
+      attention,
+      snapshot: transitionSnapshot(context, nextPrivate, { commit: publicCommit(commit) }),
+      privateState: nextPrivate,
+      legacy: {
+        commit: clone(commit),
+        status: attention ? 'committed' : 'completed',
+      },
+    });
+  }
+
+  async loadRewriteCandidates(context) {
+    if (
+      !context.privateState.applied?.paths?.length
+      || context.privateState.workflow?.git?.resultCommit === 'never'
+    ) {
+      return [];
+    }
+    try {
+      const runs = await this.listLegacyRuns(context.session.binding.projectPath, { limit: 20 });
+      return this.findRewriteCandidates(
+        context.session.binding.projectPath,
+        runs.filter(({ id }) => id !== context.session.run.runId),
+        { currentPaths: context.privateState.applied.paths },
+      );
+    } catch {
+      return [];
+    }
   }
 
   async deploy(context) {
@@ -401,4 +713,14 @@ function isCancelled(error, handle) {
 
 function cancelledError() {
   return Object.assign(new Error('Operation cancelled.'), { code: 'cancelled' });
+}
+
+function normalizeOperationPhase(value) {
+  const normalized = String(value ?? 'llm_review')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_.-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 128);
+  return /^[a-z]/.test(normalized) ? normalized : 'llm_review';
 }

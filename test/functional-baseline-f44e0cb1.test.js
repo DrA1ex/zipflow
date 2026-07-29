@@ -23,14 +23,19 @@ test('f44e0cb1 functional baseline remains explicit, complete, and executable', 
   for (const capability of baseline.capabilities) {
     assert.match(capability.id, /^[a-z0-9]+(?:-[a-z0-9]+)*$/);
     assert.ok(capability.tests.length > 0, `${capability.id} has no regression owner`);
-    for (const filename of capability.tests) {
+    assert.ok(
+      capability.clientBackedTests?.includes('standalone-client-parity-v1.test.js')
+        || capability.clientBackedTests?.includes('server-workflow-http-e2e-v1.test.js'),
+      `${capability.id} has no executable client/server parity owner`,
+    );
+    for (const filename of [...capability.tests, ...capability.clientBackedTests]) {
       await access(path.join(root, 'test', filename));
     }
   }
   assert.equal(packageJson.scripts.test, 'ZIPFLOW_TEST_LOCALE=en node --test');
   assert.equal(
     packageJson.scripts['test:functional-baseline'],
-    'ZIPFLOW_TEST_LOCALE=en node --test test/functional-baseline-f44e0cb1.test.js',
+    'node ./scripts/verify-functional-baseline.js',
   );
 });
 

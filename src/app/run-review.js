@@ -328,7 +328,7 @@ export function archiveConflictPaths(state) {
   return state.plan.conflicts.filter((item) => state.decisions.get(item.path) === 'archive').map((item) => item.path);
 }
 
-function showPlanCategories(controller) {
+export function showPlanCategories(controller) {
   const { plan } = controller.state;
   const items = PLAN_GROUPS.flatMap(([id, label, description]) => {
     const entries = plan[id] ?? [];
@@ -347,7 +347,7 @@ function showPlanCategories(controller) {
   controller.showMenu('plan-details', items, 'Review changed files', null, [compactPlanLine(plan), 'Choose a group. Enter on a changed file opens its diff.']);
 }
 
-function showPlanFiles(controller, category, selectedIndex = null) {
+export function showPlanFiles(controller, category, selectedIndex = null) {
   const { plan } = controller.state;
   const group = PLAN_GROUPS.find(([id]) => id === category);
   if (!group) return showPlanCategories(controller);
@@ -502,6 +502,12 @@ function finishConflictReview(controller) {
 }
 
 async function activateCheckpoint(controller, itemId, actions) {
+  if (itemId === 'checkpoint-replace' && actions.createCheckpointAndApply) {
+    return actions.createCheckpointAndApply(controller);
+  }
+  if (itemId === 'replace-without-checkpoint' && actions.continueWithoutCheckpoint) {
+    return actions.continueWithoutCheckpoint(controller);
+  }
   if (itemId === 'checkpoint-replace') {
     await actions.createCheckpoint(controller);
     return actions.startApply(controller, { checkpointCreated: true });
@@ -513,7 +519,9 @@ async function activateCheckpoint(controller, itemId, actions) {
 async function openDiff(controller, item) {
   const files = diffFilesForCurrentScreen(controller.state, item);
   const fileIndex = Math.max(0, files.findIndex((candidate) => candidate.path === item.path));
-  const diff = await loadPlanItemDiff(files[fileIndex] ?? item);
+  const diff = controller.loadPlanItemDiff
+    ? await controller.loadPlanItemDiff(files[fileIndex] ?? item)
+    : await loadPlanItemDiff(files[fileIndex] ?? item);
   controller.state.diffView = {
     diff,
     source: 'plan',
@@ -557,7 +565,9 @@ async function moveDiffFile(controller, delta) {
   const file = view.files[nextIndex];
   const diff = view.source === 'stored'
     ? await loadStoredFileDiff(view.run, file.path ?? file)
-    : await loadPlanItemDiff(file);
+    : controller.loadPlanItemDiff
+      ? await controller.loadPlanItemDiff(file)
+      : await loadPlanItemDiff(file);
   if (controller.state.diffView !== view || !isScreenGenerationCurrent(controller.state, token)) return false;
   view.fileIndex = nextIndex;
   view.diff = diff;
