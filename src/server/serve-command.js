@@ -67,9 +67,31 @@ export async function runZipflowServe({
 } = {}) {
   const parsed = parseServeArguments(argv);
   const options = createServeServerOptions(parsed, { zipflowHome, platform, uid });
-  const server = await startServer(options);
+  // Discovery is published as part of startServer(). A client can observe it
+  // and send SIGTERM before this await resumes, especially while the host is
+  // busy. Buffer that signal so Node's default handler cannot terminate the
+  // process before graceful cleanup is installed.
+  let pendingSignal = '';
+  const captureStartupSignal = (signal) => { pendingSignal ||= signal; };
+  processObject.on('SIGINT', captureStartupSignal);
+  processObject.on('SIGTERM', captureStartupSignal);
+  let server;
+  try {
+    server = await startServer(options);
+  } finally {
+    if (!server || server.reused) {
+      processObject.off('SIGINT', captureStartupSignal);
+      processObject.off('SIGTERM', captureStartupSignal);
+    }
+  }
   if (!server.reused) {
-    installServeSignalHandlers(server, { processObject, onShutdownError });
+    installServeSignalHandlers(server, {
+      processObject,
+      onShutdownError,
+      initialSignal: pendingSignal,
+    });
+    processObject.off('SIGINT', captureStartupSignal);
+    processObject.off('SIGTERM', captureStartupSignal);
   }
   return server;
 }
@@ -77,6 +99,7 @@ export async function runZipflowServe({
 export function installServeSignalHandlers(server, {
   processObject = process,
   onShutdownError = defaultShutdownError,
+  initialSignal = '',
 } = {}) {
   if (!server || typeof server.close !== 'function') {
     throw new TypeError('A closeable Zipflow server is required.');
@@ -98,6 +121,7 @@ export function installServeSignalHandlers(server, {
   };
   processObject.on('SIGINT', handleSignal);
   processObject.on('SIGTERM', handleSignal);
+  if (initialSignal) queueMicrotask(() => handleSignal(initialSignal));
   return detach;
 }
 

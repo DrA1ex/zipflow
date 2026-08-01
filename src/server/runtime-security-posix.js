@@ -42,7 +42,33 @@ async function ensurePrivateDirectory(target, { uid }) {
   } catch (error) {
     if (error?.code !== 'EEXIST') throw error;
   }
-  if (created) await chmod(target, 0o700);
+  if (created) {
+    await chmod(target, 0o700);
+  } else {
+    // ZIPFLOW_HOME is commonly created by a shell or temporary-directory
+    // helper before the server starts. Narrow an existing directory owned by
+    // this user instead of rejecting the otherwise safe first startup. Open
+    // with O_NOFOLLOW and chmod the handle so a path substitution cannot turn
+    // this repair into a symlink-following write.
+    const before = await assertOwnedNode(target, {
+      uid,
+      kind: 'directory',
+      mode: null,
+    });
+    let handle = null;
+    try {
+      handle = await open(target, constants.O_RDONLY | NOFOLLOW);
+      const opened = await handle.stat();
+      assertOwnedStats(opened, { uid, kind: 'directory', mode: null, target });
+      if (!sameIdentity(before, opened)) throw changedPath(target);
+      await handle.chmod(0o700);
+      const secured = await handle.stat();
+      assertOwnedStats(secured, { uid, kind: 'directory', mode: 0o700, target });
+      if (!sameIdentity(opened, secured)) throw changedPath(target);
+    } finally {
+      await handle?.close().catch(() => {});
+    }
+  }
   return assertOwnedNode(target, { uid, kind: 'directory', mode: 0o700 });
 }
 

@@ -25,7 +25,7 @@ const templates = [
   template('archive_safety', 'Archive safety review', 'Review archive findings before planning project changes.', 'plan', 2,
     ['warning_list'], ['acknowledge-archive-safety', 'cancel-run']),
   template('plan_review', 'Review plan', 'Review the semantic change plan before applying it.', 'plan', 2,
-    ['plan_summary'], ['use-archive', 'keep-local', 'approve-plan']),
+    ['plan_summary', 'file_details'], ['use-archive', 'keep-local', 'approve-plan']),
   template('plan_files', 'Plan files', 'Review file groups and per-file decisions.', 'plan', 2,
     ['file_groups', 'file_details'], ['use-archive', 'keep-local', 'approve-plan']),
   template('conflict_summary', 'Resolve conflicts', 'Resolve all plan conflicts before applying changes.', 'plan', 2,

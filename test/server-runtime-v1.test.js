@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import os from 'node:os';
 import {
+  chmod,
   lstat,
   mkdir,
   mkdtemp,
@@ -115,6 +116,20 @@ test('runtime paths are private and reject symbolic-link substitution', async (t
     ensureRuntimeDirectories(linkedPaths, createRuntimeSecurity(linkedPaths)),
     (error) => error?.code === 'RUNTIME_SYMLINK_REJECTED',
   );
+});
+
+test('runtime startup narrows a pre-created user-owned ZIPFLOW_HOME to private permissions', async (t) => {
+  const home = await temporaryDirectory(t, 'zf-home-');
+  await chmod(home, 0o755);
+  const paths = resolveServerPaths({
+    zipflowHome: home,
+    socketDirectory: path.join(home, 'socket'),
+  });
+
+  await ensureRuntimeDirectories(paths, createRuntimeSecurity(paths));
+
+  assert.equal((await lstat(home)).mode & 0o777, 0o700);
+  assert.equal((await lstat(paths.runtimeRoot)).mode & 0o777, 0o700);
 });
 
 test('lifecycle serializes startup and never reclaims a live owner', async (t) => {

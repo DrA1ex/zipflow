@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { ZipflowClient } from '../src/client/index.js';
 import {
   createServeServerOptions,
+  runZipflowServe,
   parseServeArguments,
 } from '../src/server/serve-command.js';
 import { resolveServerPaths } from '../src/server/runtime-paths.js';
@@ -37,6 +39,33 @@ test('serve arguments validate endpoint and idle-timeout values without platform
   });
   assert.equal(windows.paths.endpoint.kind, 'named-pipe');
   assert.equal(windows.paths.endpoint.listenPath, pipePath);
+});
+
+test('serve buffers a shutdown signal received as startup publishes discovery', async () => {
+  const processObject = new EventEmitter();
+  const calls = [];
+  let releaseStartup;
+  const startupGate = new Promise((resolve) => { releaseStartup = resolve; });
+  const server = {
+    reused: false,
+    async close() { calls.push('close'); },
+  };
+  const starting = runZipflowServe({
+    argv: [],
+    processObject,
+    startServer: async () => {
+      await startupGate;
+      return server;
+    },
+  });
+
+  processObject.emit('SIGTERM', 'SIGTERM');
+  releaseStartup();
+  assert.equal(await starting, server);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls, ['close']);
+  assert.equal(processObject.listenerCount('SIGINT'), 0);
+  assert.equal(processObject.listenerCount('SIGTERM'), 0);
 });
 
 test('zipflow serve publishes discovery, answers hello, and cleans exact runtime state on SIGTERM', {

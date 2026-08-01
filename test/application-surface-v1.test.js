@@ -307,6 +307,28 @@ test('projection strips terminal escapes, bounds large data, and ignores client 
   assert.equal(surface.links.plan, undefined);
 });
 
+test('plan review exposes file paths for advertised keep-local and use-archive actions', () => {
+  const surface = projectSurface({
+    revision: 3,
+    project: { id: 'project-1', name: 'Fixture' },
+    run: { id: 'run-1', status: 'waiting_action', attention: 'plan' },
+    plan: {
+      counts: { created: 0, updated: 1, deleted: 0 },
+      files: [{ path: 'README.md', kind: 'updated', decision: 'archive' }],
+      conflicts: [{ path: 'README.md', reason: 'Both versions changed.', decision: 'archive' }],
+      unresolvedConflicts: 0,
+    },
+  });
+
+  assert.equal(surface.kind, 'plan_review');
+  assert.deepEqual(
+    surface.sections.find(({ kind }) => kind === 'file_details')?.files,
+    [{ id: 'file-1', path: 'README.md', change: 'updated', decision: 'archive' }],
+  );
+  assert.equal(surface.actions.some(({ id }) => id === 'keep-local'), true);
+  assert.equal(surface.actions.some(({ id }) => id === 'use-archive'), true);
+});
+
 test('client-only navigation remains links and is never advertised as an action', () => {
   const surface = projectSurface({
     surfaceKind: 'project_home',
