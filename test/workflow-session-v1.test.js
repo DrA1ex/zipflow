@@ -75,6 +75,28 @@ test('authoritative workflow states map to every schema-valid semantic surface k
   assert.deepEqual(new Set(projected), new Set(SURFACE_KINDS));
 });
 
+test('failed check-only run advertises finish without changing archive failure choices', async () => {
+  const checkRecord = recordForSurface('checks_failed');
+  checkRecord.kind = 'checks';
+  const checkSession = createWorkflowSession(
+    new MemoryWorkflowSessionRepository(checkRecord),
+    { executeAction: () => assert.fail('surface reads must not execute actions') },
+    'failed-check-run',
+  );
+  const checkSurface = await checkSession.getSurface('run-1');
+  assert.equal(checkSurface.actions.some(({ id, enabled }) => id === 'finish' && enabled), true);
+
+  const archiveRecord = recordForSurface('checks_failed');
+  archiveRecord.kind = 'archive';
+  const archiveSession = createWorkflowSession(
+    new MemoryWorkflowSessionRepository(archiveRecord),
+    { executeAction: () => assert.fail('surface reads must not execute actions') },
+    'failed-archive-run',
+  );
+  const archiveSurface = await archiveSession.getSurface('run-1');
+  assert.equal(archiveSurface.actions.some(({ id }) => id === 'finish'), false);
+});
+
 test('every stable action persists intent before execution and receipt plus transition after it', async () => {
   assert.deepEqual(new Set(Object.keys(ACTION_SURFACES)), new Set(SEMANTIC_ACTION_IDS));
 

@@ -9,6 +9,7 @@ import {
   lstat,
   mkdtemp,
   mkdir,
+  readFile,
   realpath,
   rm,
 } from 'node:fs/promises';
@@ -22,7 +23,10 @@ import {
 } from '../src/application/workflow-resource-store.js';
 import { fingerprintRequest } from '../src/server/idempotency-store.js';
 import { createServerProblem } from '../src/server/problems.js';
-import { resolveServerPaths } from '../src/server/runtime-paths.js';
+import {
+  createRuntimeSecurity,
+  resolveServerPaths,
+} from '../src/server/runtime-paths.js';
 import { startZipflowServer } from '../src/server/server.js';
 
 test('authenticated server serves hello, schemas, and compatible discovery reuse', async (t) => {
@@ -337,6 +341,42 @@ test('failed listen cleanup never unlinks a same-user endpoint it did not bind',
     (error) => error?.code === 'EADDRINUSE',
   );
   assert.equal((await lstat(socketPath)).isSocket(), true);
+});
+
+test('server publishes discovery only after the Unix socket is secured', {
+  skip: process.platform === 'win32' ? 'Windows runtime security remains fail-closed.' : false,
+}, async (t) => {
+  const home = await mkdtemp(path.join(os.tmpdir(), 'zipflow-secure-readiness-'));
+  const socketPath = path.join(home, 'endpoint', 'custom.sock');
+  const paths = resolveServerPaths({ zipflowHome: home, socketPath });
+  const baseSecurity = createRuntimeSecurity(paths);
+  let releaseSecureSocket;
+  let secureSocketEntered;
+  const secureSocketGate = new Promise((resolve) => { releaseSecureSocket = resolve; });
+  const secureSocketStarted = new Promise((resolve) => { secureSocketEntered = resolve; });
+  const security = {
+    ...baseSecurity,
+    async secureSocket(target) {
+      secureSocketEntered();
+      await secureSocketGate;
+      return await baseSecurity.secureSocket(target);
+    },
+  };
+  let server = null;
+  const starting = startZipflowServer({ paths, security, token: 'secure-readiness-token' });
+  t.after(async () => {
+    releaseSecureSocket();
+    server ??= await starting.catch(() => null);
+    await server?.close().catch(() => {});
+    await rm(home, { recursive: true, force: true });
+  });
+
+  await secureSocketStarted;
+  await assert.rejects(readFile(paths.discoveryPath, 'utf8'), { code: 'ENOENT' });
+  releaseSecureSocket();
+  server = await starting;
+  assert.equal((await lstat(socketPath)).mode & 0o777, 0o600);
+  assert.equal(JSON.parse(await readFile(paths.discoveryPath, 'utf8')).socketPath, socketPath);
 });
 
 async function serverFixture(t, options = {}, { bindProcessHome = false } = {}) {

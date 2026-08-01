@@ -5,6 +5,10 @@
 - Add protocol v1, OpenAPI and JSON Schema resources, canonical conformance fixtures, and a side-effect-free public client SDK.
 - Add the authenticated local server, secure runtime discovery, durable projects, blobs, operations, idempotency receipts, event replay, semantic actions, history, and rollback resources.
 - Route the released standalone TUI through the same client/server application boundary while retaining explicit temporary direct mode through `ZIPFLOW_DIRECT_MODE=1`.
+- Preserve the 1.8.3 standalone interaction baseline in the server-backed TUI, including path completion, deliberate double-Enter archive discovery, archive review, per-file conflict decisions, Git bootstrap, commit editing, history details, and rollback-oriented navigation.
+- Add server-owned checkpoint, LLM review, failure-analysis, autonomy, archive reinterpretation, amend, squash, cancellation, and deployment operations exposed through revisioned semantic actions.
+- Persist client-owned source-archive keep, move, delete, missing, and failure disposition metadata across TUI restarts without copying server-owned workflow state.
+- Add an executable functional-baseline gate mapped to commit `f44e0cb127437ea6ce3e4c7773ccf553673d74dc`.
 - Add Windows named-pipe normalization and package support while keeping daemon startup fail-closed until owner, DACL, and reparse-point validation is available.
 - Complete waiting repair runs through the advertised finish action and add server, package, client-parity, security, restart, and protocol regression coverage.
 

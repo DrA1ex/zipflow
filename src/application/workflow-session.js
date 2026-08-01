@@ -101,6 +101,7 @@ export class WorkflowSession {
     const run = {
       ...(current.snapshot.run ?? {}),
       id: current.snapshot.run?.id ?? current.snapshot.run?.runId ?? current.runId,
+      kind: current.kind,
     };
     const projection = {
       ...cloneJson(current.snapshot),

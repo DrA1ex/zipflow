@@ -3,7 +3,8 @@
 Zipflow 1.9 runs standalone workflows through the same authenticated local
 server boundary used by external clients. Running `zipflow` starts or reuses the
 local service and drives the existing TUI through `zipflow/client`. The
-temporary direct path is available only with `ZIPFLOW_DIRECT_MODE=1`.
+direct path is retained only as a temporary diagnostic fallback through
+`ZIPFLOW_DIRECT_MODE=1`; it is not the released default.
 
 Start a headless daemon explicitly with:
 
@@ -30,6 +31,26 @@ Clients must:
 - resume SSE from a durably stored cursor;
 - perform a full read resynchronization after an epoch change or `stream.gap`;
 - never retry an unsafe mutation merely because its response was lost.
+
+## Standalone interaction parity
+
+The server-backed standalone TUI is the normal product mode. Its user-visible
+interaction must remain equivalent to the Zipflow 1.8.3 baseline at commit
+`f44e0cb127437ea6ce3e4c7773ccf553673d74dc`, including:
+
+- path completion and deliberate double-Enter discovery of the newest archive;
+- archive warnings, interpretation, changed-file groups, files, and diffs;
+- per-file conflict decisions and dangerous-action confirmation;
+- checks, failure analysis, manual and autopilot decisions;
+- commit candidates, editing, skipping, amend and squash operations;
+- run history, historical prompts and decisions, rollback, export, and
+  source-archive keep, move, or delete disposition.
+
+The server owns durable workflow state and filesystem mutations. The client may
+own only ephemeral terminal state and client-local source-archive disposition
+metadata. The checked-in baseline records complete client-backed parity;
+future capability changes must keep that executable gate green rather than
+hide regressions behind a separate UI mode.
 
 The npm client is side-effect free:
 

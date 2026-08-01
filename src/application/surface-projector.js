@@ -357,7 +357,14 @@ export class SurfaceProjector {
           rewriteKind === 'squash' ? 'squash-commits' : 'amend-commit'
         )))]
       : [];
-    const contextualActions = [...archiveReviewActions, ...commitRewriteActions];
+    const checkRunActions = kind === 'checks_failed' && snapshot.run?.kind === 'checks'
+      ? ['finish']
+      : [];
+    const contextualActions = [
+      ...archiveReviewActions,
+      ...commitRewriteActions,
+      ...checkRunActions,
+    ];
     const semanticTemplate = contextualActions.length
       ? {
           ...decisionTemplate,

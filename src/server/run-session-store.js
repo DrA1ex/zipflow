@@ -370,6 +370,7 @@ function requireAction(record, actionIntentId) {
 function workflowRecord(record) {
   return {
     runId: record.run.runId,
+    kind: record.run.kind,
     revision: record.revision,
     snapshot: cloneJson(record.publicSummary),
     privateState: cloneJson(record.executionManifest),

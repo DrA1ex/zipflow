@@ -6,7 +6,10 @@ It inspects an archive before touching the project, shows the planned file chang
 
 ## Install
 
-Zipflow requires Node.js 20 or newer on macOS or Linux.
+Zipflow requires Node.js 20 or newer. The package and client protocol support
+macOS, Linux, and Windows endpoint forms. Windows daemon startup currently
+fails closed until local named-pipe ownership, DACL, and reparse-point
+validation is complete.
 
 ```bash
 npm install --global zipflow
@@ -58,6 +61,10 @@ Archive → Review → Apply → Checks → Finish
 - Run history, performance analytics, reports, stored patches, and ZIP export.
 - Configurable startup update checks, manual version checks, and one-step global npm updates.
 - Authenticated local server and side-effect-free `zipflow/client` SDK; the standalone TUI uses the same boundary by default.
+- Server-backed standalone interaction preserves the 1.8.3 terminal workflow,
+  including path completion, deliberate double-Enter archive discovery,
+  archive review, per-file conflict choices, commit editing, history, and
+  source-archive disposition.
 - System-locale interface selection by default, complete English and Russian catalogs, expanded core German, French, Italian, and Spanish translations, and custom JSON language packs.
 
 ## Useful controls
@@ -103,6 +110,7 @@ Start with the [documentation index](docs/README.md).
 ```bash
 npm install
 npm run verify
+npm run test:functional-baseline
 npm run release:check
 ```
 

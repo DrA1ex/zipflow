@@ -201,7 +201,6 @@ export class ServerLifecycle {
 
   async markListening() {
     this.assertOwned();
-    if (!this.published) throw lifecycleError('Runtime metadata must be published before listening.', 'SERVER_RUNTIME_ORDER');
     this.endpointBound = true;
     if (this.paths.endpoint.kind === 'unix') await this.security.secureSocket(this.paths.socketPath);
     this.listening = true;

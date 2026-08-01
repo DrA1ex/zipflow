@@ -10,7 +10,7 @@ import {
   registerInfrastructureRoutes,
 } from './infrastructure-routes.js';
 import { registerWorkflowRoutes } from './workflow-routes.js';
-import { ServerLifecycle } from './lifecycle.js';
+import { createServerToken, ServerLifecycle } from './lifecycle.js';
 import { OperationRegistry } from './operation-registry.js';
 import { createServerProblem } from './problems.js';
 import { ProjectRegistry } from './project-registry.js';
@@ -93,15 +93,13 @@ export class ZipflowServer {
       await ensureServerStorageDirectories(this.paths, this.security);
       this.createServices();
       await this.initializeServices();
-      const published = await this.lifecycle.publish(
-        this.requestedToken ? { token: this.requestedToken } : {},
-      );
-      this.discovery = published.discovery;
-      this.token = published.token;
+      this.token = this.requestedToken ?? createServerToken();
       this.createRouter();
       this.httpServer = this.createHttpServer((request, response) => this.handleRequest(request, response));
       await listen(this.httpServer, this.paths.endpoint.listenPath);
       await this.lifecycle.markListening();
+      const published = await this.lifecycle.publish({ token: this.token });
+      this.discovery = published.discovery;
       this.state = 'running';
       this.scheduleIdleShutdown();
       return this;

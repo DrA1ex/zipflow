@@ -38,6 +38,15 @@ test('run session sidecar is durable, private, and coexists with legacy history 
   assert.equal(JSON.parse(await readFile(fixture.legacyPath, 'utf8')).archivePath, '/legacy/archive.zip');
 });
 
+test('workflow repository preserves immutable run kind for contextual surfaces', async (t) => {
+  const fixture = await setupRun(t, 'run-kind');
+  const store = await new RunSessionStore({ runsRoot: fixture.runsRoot }).initialize();
+  await store.create({ ...sessionOptions(fixture), kind: 'checks' });
+
+  const workflowRecord = await store.workflowRepository().load(fixture.runId);
+  assert.equal(workflowRecord.kind, 'checks');
+});
+
 test('per-run CAS serializes concurrent writes and preserves immutable binding', async (t) => {
   const fixture = await setupRun(t, 'run-cas');
   const store = await new RunSessionStore({ runsRoot: fixture.runsRoot, now: tickingClock() }).initialize();

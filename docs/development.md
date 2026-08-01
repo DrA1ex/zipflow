@@ -54,8 +54,12 @@ npm run verify
 `npm run test:functional-baseline` enforces the user-visible capability baseline
 captured from commit `f44e0cb127437ea6ce3e4c7773ccf553673d74dc` (Zipflow
 1.8.3). The checked-in manifest maps every baseline capability group to its
-regression owners. Direct mode must remain available until the manifest is
-explicitly advanced only after full client-backed parity is demonstrated.
+regression owners and the verifier executes their union, rather than checking
+only that test names exist. The manifest records client-backed parity as
+complete after the full baseline, cross-process socket tests,
+packaged-consumer smoke tests, and browser-driven integration were demonstrated
+together. `ZIPFLOW_DIRECT_MODE=1` remains a temporary diagnostic compatibility
+path, not the normal product mode.
 
 For the complete release gate, including inspection of the files npm would publish, run:
 
